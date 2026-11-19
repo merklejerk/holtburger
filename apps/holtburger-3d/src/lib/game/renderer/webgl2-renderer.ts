@@ -1,1296 +1,99 @@
 import { setWebGL2FailureFrame } from "./webgl2-failure-diagnostics";
 import { reportWebGL2Failure } from "../webgl/diagnostics";
-import { WebGL2SummonChainPass } from "./webgl2-summon-chain-pass";
-import type { SummonLeashInput } from "../runtime/summon-presentation";
-import { WebGL2CombatEffects } from "./webgl2-combat-effects";
-import type { RendererCombatEffectsCapability } from "../systems/combat-effects-system";
-import { OCEAN_BACKDROP_BOUNDS } from "../terrain/ocean-backdrop";
-import { frustumIntersectsAABB } from "../math/frustum";
-import { SHARED_FRAME_SETTINGS } from "../../frontend-frame-settings";
-import {
-	createLandblockOffset,
-	createLandblockWorldOrigin,
-	getLandblockCoordinates,
-	landblockChebyshevDistance,
-	normalizeLandblockOwner,
-} from "../landblocks";
-import { farTerrainCutoffLandblocks } from "../environment/terrain-fog";
-import {
-	createPerspectiveMat4,
-	createViewMat4,
-	createRotationMat4,
-	mat4ToFloat32Array,
-	multiplyMat4,
-	transformPoint3,
-} from "../math/matrices";
-import { createFrustumFromClipMatrix, type Frustum } from "../math/frustum";
-import { Mat4, Quat, Vec3 } from "../math/types";
-import {
-	type SceneNodeId,
-	type SceneScope,
-	type SceneTopologyView,
-	type SceneVisibilityIslandId,
-} from "../scene";
-import { scopeFor, scopeKey } from "../scene/scope";
-import { createCameraNearClipVolume } from "./portal-near-plane";
-import type { TerrainSurfaceDrawUnit } from "../terrain/types";
-import type {
-	ObjectMaterialBinding,
-	StaticObjectDrawUnit,
-} from "../commit/artifacts";
-import type { ObjectMaterialOrdering } from "../resolution/object-material-planner";
-import type { RetailGeometryVisibility } from "../resolution/presentation";
-import { retainsRetailGeometry } from "./retail-geometry-visibility";
-import { TextureWrapMode } from "../textures/types";
-import {
-	DEFAULT_COLOR_GRADE_PARAMETERS,
-	type ColorGradeSettings,
-} from "./color-grade-policy";
+import { createLandblockWorldOrigin } from "../landblocks";
+import { SHARED_FRONTEND_TUNING } from "../../frontend-tuning";
+import type { SceneScope } from "../scene";
+import { scopeFor } from "../scene/scope";
 import {
 	createEntityShadowSettings,
-	isEntityShadowCasterClass,
-	isOutdoorPssmReceiverFootprint,
 	type EntityShadowSettings,
 } from "./entity-shadow-policy";
 import {
 	type FrameInput,
-	type FrameSelectionMetrics,
 	type FrameSettings,
-	type EntitySelectionTarget,
-	type RendererFrameDiagnostics,
-	type RendererFrameFeedback,
 	type FrameViewInput,
-	type PortalTransitionFrame,
 	type PortalTransitionOnlyFrameInput,
 	type PortalTransitionVisual,
 	type Renderer,
+	type RendererFrameDiagnostics,
+	type RendererFrameFeedback,
 	type ResolvedResourceInvalidation,
-	type WorldIndicatorInput,
-	type WorldMarkerInput,
 } from "./renderer";
-import { portalTunnelRollRadians } from "../../client/portal-transition-visual";
-import {
-	type PortalTransitionPresentationReceipt,
-	validatePortalTransitionPresentationPlan,
-} from "../../client/portal-transition-presentation";
-import { renderCullingGroupFilter } from "./render-layer-visibility";
-import {
-	landblockVec3,
-	sceneVec3,
-	type LandblockVec3,
-	type SceneVec3,
-} from "../../assets/ac-frame";
-import {
-	RenderWorld,
-	type ObjectPresentationFootprint,
-	type RenderContribution,
-} from "./render-world";
-import { retainsProjectedObjectFootprint } from "./object-footprint";
-import type { GeometryResourceKey } from "./resource-manager";
-import {
-	OBJECT_INSTANCE_RECORD_BYTES,
-	type ObjectInstanceData,
-} from "../systems/static-resources";
-import type {
-	VisibleDynamicPresentation,
-	ActiveDynamicPart,
-} from "../systems/components";
-import type { ObjectVisualTemplate } from "../systems/object-visual-template-repository";
-import { WebGL2WorldMarkerPass } from "./webgl2-world-marker-pass";
-import { WebGL2WorldTrajectoryPass } from "./webgl2-world-trajectory-pass";
-import {
-	WebGL2EntitySelectionPass,
-	type WebGL2EntitySelectionMask,
-	type PreparedEntitySelection,
-} from "./webgl2-entity-selection-pass";
-import {
-	type EntityOverlayDrawInstance,
-	type EntityOverlayScopedDrawInstance,
-	WebGL2EntityOverlayPass,
-} from "./webgl2-entity-overlay-pass";
-import {
-	Canvas2DNameplateRasterizer,
-	type NameplateTextureBinding,
-	WebGL2NameplateTextureCache,
-} from "./webgl2-nameplate-texture-cache";
-import {
-	browserNameplateIconServices,
-	NameplateIconRepository,
-} from "./nameplate-icon-repository";
-import { NAMEPLATE_ICON_CATALOG } from "./nameplate-icon-source";
-import type { NameplateIconId } from "../systems/dynamic-presentation-source";
-import { resolveEntityOverlayAnchor } from "./entity-overlay-anchor";
-import {
-	composeEntityOverlays,
-	maximumLegibleOverlayDepth,
-	retainLegibleOverlays,
-	retainOverlayBudget,
-	type ComposedEntityOverlay,
-} from "./entity-overlay-selection";
-import type {
-	EntityOverlayLookup,
-	EntityOverlayPriority,
-	EntityOverlaySettings,
-	HealthBarSettings,
-} from "./entity-overlay-policy";
-import {
-	resolveNameplateCategory,
-	type NameplateAppearance,
-	type NameplateVisual,
-} from "./nameplate-policy";
-import {
-	assertSharedTerrainRegion,
-	type TerrainProgramInput,
-} from "./terrain-program-input";
-import { LandblockLayerKind } from "../runtime/scene-interest";
-import {
-	WebGL2ResourceManager,
-	type WebGL2GeometryBinding,
-	type WebGL2Texture2DBinding,
-	type WebGL2TextureArrayBinding,
-} from "./webgl2-resource-manager";
-import {
-	createWebGL2NearTerrainProgram,
-	type WebGL2NearTerrainProgram,
-} from "./webgl2-terrain-program";
-import {
-	createWebGL2FarTerrainProgram,
-	type WebGL2FarTerrainProgram,
-} from "./webgl2-far-terrain-program";
-import { FrameInstanceStreamArena } from "./frame-instance-stream-arena";
-import {
-	WebGL2OutdoorPssmPass,
-	type ActiveOutdoorPssmFrame,
-} from "./webgl2-outdoor-pssm-pass";
-import {
-	hasOutdoorShadowLight,
-	resolveOutdoorShadowProjection,
-	terrainLandblockIntersectsShadowDistance,
-	type ResolvedOutdoorShadowProjection,
-} from "./outdoor-pssm";
-import {
-	bindWebGL2OutdoorPssmUniforms,
-	createWebGL2OutdoorPssmUniformScratch,
-	OUTDOOR_PSSM_TEXTURE_UNIT,
-} from "./webgl2-pssm-receiver";
-import { WebGL2OutdoorPssmReceiverPrograms } from "./webgl2-pssm-receiver-programs";
-import { WebGL2EntityGroundingPrograms } from "./webgl2-entity-grounding-programs";
-import {
-	applyWebGL2EntityGroundingUniforms,
-	entityGroundingUniformAttemptCount,
-} from "./webgl2-entity-grounding";
-import {
-	createEntityGroundingSelection,
-	createEntityGroundingSelectionScratch,
-	createIndoorGroundingCell,
-	createOutdoorDirectionalShadowCaster,
-	createOutdoorDirectionalShadowSelection,
-	createOutdoorDirectionalShadowSelectionScratch,
-	createOutdoorDirectionalShadowTerrain,
-	indexIndoorVisibilityIslands,
-	resolveEntityShadowCaster,
-	selectIndoorGroundingCasters,
-	selectOutdoorDirectionalShadowCasters,
-	type EntityGroundingCaster,
-	type EntityShadowCasterShape,
-	type EntityGroundingSelection,
-	type IndoorGroundingCell,
-	type OutdoorDirectionalShadowCaster,
-	type OutdoorDirectionalShadowSelection,
-} from "./entity-grounding";
-import { bindWebGL2OutdoorDirectionalShadowUniforms } from "./webgl2-outdoor-directional-shadow";
-import {
-	createWebGL2ObjectProgram,
-	OBJECT_TEXTURE_UNITS,
-	type WebGL2FogObjectProgram,
-	type WebGL2DynamicObjectProgram,
-	type WebGL2FogDynamicObjectProgram,
-	type WebGL2FogInstancedObjectProgram,
-	type WebGL2InstancedObjectProgram,
-	type WebGL2ObjectProgram,
-	type WebGL2StaticTableObjectProgram,
-	type WebGL2FogStaticTableObjectProgram,
-} from "./webgl2-object-program";
-import { bindWebGL2ObjectInstanceRange } from "./webgl2-instance-buffer";
-import type { LandblockOwnerId } from "../game-types";
-import { UNAUTHORED_SCENE_LIGHTING } from "../environment/scene-environment";
-import { VIEWER_LIGHT } from "../environment/viewer-light";
-import {
-	MAX_DYNAMIC_LIGHTS,
-	MAX_STATIC_LIGHTS,
-	type RuntimeLight,
-	fitLightsToBudget,
-} from "../environment/runtime-lights";
-import type { LandblockLights } from "../environment/outdoor-light-index";
-import {
-	TERRAIN_LIGHT_MASK_ALL,
-	TERRAIN_LIGHT_MASK_LENGTH,
-} from "../environment/terrain-light-mask";
-import {
-	createWebGL2TerrainLightMaskTexture,
-	destroyWebGL2TerrainLightMaskTexture,
-	uploadWebGL2TerrainLightMask,
-	type WebGL2TerrainLightMaskTexture,
-} from "./webgl2-terrain-light-mask";
-import {
-	objectLightingRole,
-	resolveAuthoredLightResponse,
-	resolveSceneLightingByRole,
-	type SceneLightingByRole,
-} from "../environment/scene-lighting";
-import { bindWebGL2DistanceFog, type WebGL2FogUniforms } from "./webgl2-fog";
-import {
-	bindWebGL2DynamicLights,
-	bindWebGL2SceneLighting,
-	bindWebGL2StaticLights,
-	type LightAnchorOrigin,
-	createDynamicLightScratch,
-	type WebGL2DirectionalLightingUniforms,
-} from "./webgl2-lighting";
-import {
-	formAdjacentObjectInstanceRuns,
-	dynamicObjectPhase,
-	formGroupedObjectInstanceRuns,
-	areStaticObjectDrawsCompatible,
-	type ObjectBlendPolicy,
-	bucketObjectSubmissions,
-	createObjectSubmissionPhasesFromBuckets,
-	type ObjectFrameSubmission,
-	type ObjectSubmissionBuckets,
-	type ObjectSubmissionPhases,
-	type PreparedObjectTextureBinding,
-	type TransparentObjectSortFacts,
-	EMPTY_DYNAMIC_RANGE_ADMISSION,
-	summarizeDynamicRangeAdmission,
-} from "./object-rendering-policy";
-import {
-	BakedDrawMergeCensusCollector,
-	type BakedDrawMergeCensus,
-} from "./baked-draw-merge-census";
-import { createObjectMaterialTable } from "./object-material-table";
-import { compileStaticMaterialSpans } from "./static-material-spans";
-import {
-	CompiledObjectDrawStore,
-	type CompiledObjectDraw,
-} from "./compiled-object-draws";
-import type { PreparedPortalProjection } from "./portal-view-window";
-import type { PortalScopeWindowCullInput } from "./portal-scope-window-culler";
-import {
-	type DynamicRenderDomainSelection,
-	selectedDynamicRenderScopeKeys,
-	assertSelectedDynamicRenderDomain,
-} from "./dynamic-render-scopes";
-import type { WebGL2TextureFilteringSupport } from "./webgl2-texture-filtering-support";
-import { SHARED_FRONTEND_TUNING } from "../../frontend-tuning";
-import { normalizedRgbaColor } from "../../frontend-color";
-import {
-	WebGL2TextureSamplerCatalog,
-	type TextureSamplingClass,
-} from "./webgl2-texture-sampler-catalog";
-import { devicePixelArea, validateRenderScale } from "./render-scale";
-import { type RenderExtent, validateRenderExtent } from "./render-extent";
-import type { TextureFilteringPolicy } from "./texture-filtering-policy";
-import type { Camera } from "../runtime/types";
+import type { RendererCombatEffectsCapability } from "../systems/combat-effects-system";
 import type {
 	RendererParticleCapability,
 	RendererSkyCapability,
 } from "./renderer";
-import { SKY_FAR_PLANE, skyViewMatrix, WebGL2SkyPass } from "./webgl2-sky-pass";
-import type { SkyDrawPass } from "../environment/sky-state";
-import { ParticleMeshResidency } from "./particle-mesh-residency";
+import type { PortalTransitionPresentationReceipt } from "../../client/portal-transition-presentation";
+import type { RenderWorld } from "./render-world";
 import {
-	type ParticleDrawContext,
-	type ParticleRecordFrame,
-	WebGL2ParticlePass,
-} from "./webgl2-particle-pass";
+	MAX_DYNAMIC_LIGHTS,
+	fitLightsToBudget,
+	type RuntimeLight,
+} from "../environment/runtime-lights";
+import { VIEWER_LIGHT } from "../environment/viewer-light";
 import {
-	EXTERIOR_PARTICLE_RENDER_OWNER,
-	SKY_PARTICLE_RENDER_OWNER,
-	type ParticleSourceRange,
-} from "../systems/particle-system";
-import type { ParticleDrawRange } from "./particle-render-routing";
-import {
-	ViewSubmissionStoragePool,
-	type ViewSubmissionStorage,
-} from "./view-submission-storage";
-import {
-	createWebGL2SkyProgram,
-	type WebGL2SkyProgram,
-} from "./webgl2-sky-program";
-import { WebGL2DeviceStateApplicator } from "./webgl2-device-state-applicator";
-import {
-	WebGL2ObjectDrawCompiler,
-	type WebGL2ObjectDrawInput,
-	type WebGL2PreparedObjectDrawCompatibility,
-} from "./webgl2-object-draw-compiler";
-import {
-	WebGL2DynamicAppearances,
-	selectOpaqueDynamicAppearanceVariant,
-	type PreparedDynamicAppearance,
-} from "./webgl2-dynamic-appearances";
-import { DynamicBatchedRanges } from "./dynamic-batched-ranges";
-import { WebGL2DynamicPosePages } from "./webgl2-dynamic-pose-pages";
-import { DynamicDepthPreparations } from "./dynamic-depth-preparation";
+	resolveAuthoredLightResponse,
+	resolveSceneLightingByRole,
+} from "../environment/scene-lighting";
+import type { WebGL2TextureFilteringSupport } from "./webgl2-texture-filtering-support";
+import { devicePixelArea, validateRenderScale } from "./render-scale";
+import type { RenderExtent } from "./render-extent";
+import type { WebGL2ResourceManager } from "./webgl2-resource-manager";
 import type { DynamicLayout } from "../geometry/dynamic-layout";
 import type { DynamicAppearance } from "../systems/dynamic-appearance";
-import { WebGL2FrameProfiler } from "./webgl2-gpu-frame-profiler";
-import {
-	WebGL2PortalScopeAtlasPipeline,
-	type WebGL2PortalScopeAtlasFrame,
-} from "./webgl2-portal-scope-atlas-pipeline";
-import {
-	WebGL2FlatSceneTarget,
-	type WebGL2FlatSceneTargetSet,
-} from "./webgl2-flat-scene-target";
-import {
-	WebGL2FlatScenePresentation,
-	type FlatScenePresentationInput,
-} from "./webgl2-flat-scene-presentation";
+import type { WebGL2PortalScopeAtlasPipeline } from "./webgl2-portal-scope-atlas-pipeline";
 import type { PortalWarpDriveTuning } from "./portal-warp-drive-tuning";
-import type { EntitySelectionOutlineSettings } from "./entity-selection-outline-policy";
-import { resolvePortalTransitionComposition } from "./portal-transition-composition";
-import { WebGL2TransitionSnapshot } from "./webgl2-transition-snapshot";
 import {
 	AMBIENT_OCCLUSION_DISTANCE_FADE,
 	resolveEffectiveAmbientOcclusionPolicy,
-	type EffectiveAmbientOcclusionPolicy,
 } from "./ambient-occlusion-policy";
-import { WebGL2SaoPass, type WebGL2SaoCoverageCensus } from "./webgl2-sao-pass";
-import { composeObjectPartTransform } from "../resolution/object-part-transform";
+import type { WebGL2SaoCoverageCensus } from "./webgl2-sao-pass";
+import { RendererFrameDiagnosticsAndProfiler } from "./webgl2-frame-diagnostics";
+import { WebGL2DeviceAndTargetPool } from "./webgl2-device-targets";
+import { SceneContributionCompilerAndSelector } from "./webgl2-scene-compiler";
+import { ObjectAndShadowPassExecutor } from "./webgl2-object-shadow-pass";
+import { TerrainPassExecutor } from "./webgl2-terrain-pass";
+import { SkyParticleOverlayAndSelectionPasses } from "./webgl2-overlay-particle-sky-passes";
 import {
-	playingClip,
-	sampleAnimationPose,
-	type PlayingClip,
-} from "../animation/animation-playback";
+	BLACK_SCENE_CLEAR_COLOR,
+	FRONTEND_CLEAR_COLOR,
+	ORIGIN,
+	PROBE_SHADING,
+	portalTransitionPresentationReceipt,
+	type PortalExecutionProbeResult,
+	type PreparedPortalView,
+	type PreparedView,
+	type PreparedViewGeometry,
+	type SceneRenderDomain,
+	type SceneShading,
+} from "./webgl2-renderer-types";
 
-/**
- * Texture unit for the terrain light mask, after the six the terrain shader samples: unit 0 is the
- * per-landblock surface field, units 1-5 the region-constant pass textures.
- * Object programs bind only units 0-2, so nothing contends for it.
- */
-const TERRAIN_LIGHT_MASK_TEXTURE_UNIT = 6;
-
-/** Frontend-authored fallback decoded once for every clear path owned by this renderer. */
-const FRONTEND_CLEAR_COLOR = normalizedRgbaColor(
-	SHARED_FRONTEND_TUNING.rendering.clearColor,
-);
-
-/** Opaque background for sealed interiors and the isolated portal tunnel. */
-const BLACK_SCENE_CLEAR_COLOR = [0, 0, 0, 1] as const;
-
-/** Stand-in before any emitter has published records, so the context is never partially built. */
-const EMPTY_PARTICLE_RECORDS: ParticleRecordFrame = {
-	data: new Float32Array(0),
-	dirtyRows: null,
-};
-
-/** Keep terrain behind authored outdoor geometry at near-coplanar depth intersections. */
-const TERRAIN_DEPTH_OFFSET = { factor: 1, units: 1 } as const;
-
-/**
- * Convert a canonical scene position into the frame's anchor-relative render frame.
- *
- * Shaders receive landblock-local positions offset by `uLandblockOffset`, which is relative to
- * the frame anchor rather than the scene origin. Anything compared against a vertex position must
- * be converted the same way.
- */
-function anchorRelativePosition(
-	position: Vec3,
-	anchorLandblockId: LandblockOwnerId,
-): Vec3 {
-	const origin = createLandblockWorldOrigin(anchorLandblockId);
-	return new Vec3(position.x - origin.x, position.y, position.z - origin.z);
-}
-
-interface SceneShading {
-	/** Environment/fog clear color shared by views that can see outdoors. */
-	readonly clearColor: readonly [number, number, number, number];
-	/** Effective optional near-field presentation policy resolved once for this frame. */
-	readonly ambientOcclusion: EffectiveAmbientOcclusionPolicy;
-	readonly fog: FrameInput["environment"]["distanceFog"];
-	/** Resolved sky for this frame, celestial and weather, or null when the region authors none. */
-	readonly sky: FrameInput["environment"]["sky"];
-	/** Whether authored weather draws at all, mirroring retail weather admission. */
-	readonly weatherEnabled: boolean;
-	/** Scene-space origin of the frame anchor, subtracted from every light position at bind. */
-	readonly anchorOrigin: LightAnchorOrigin;
-	/** How much of an authored outdoor lamp survives the frame's daylight, in [0, 1]. */
-	readonly authoredLightResponse: number;
-	/** Frame-global dynamic lights; they reach every draw regardless of role. */
-	readonly dynamicLights: readonly RuntimeLight[];
-	/**
-	 * Authored outdoor lights reaching one landblock with their terrain cell masks, memoized
-	 * across frames by the index. Objects consume only the lights; terrain also uploads the masks.
-	 */
-	readonly staticLights: (landblockId: LandblockOwnerId) => LandblockLights;
-	/** Lighting per draw role, derived once per frame so draw loops stay allocation-free. */
-	readonly lighting: SceneLightingByRole;
-}
-
-/**
- * Shading for the browser-harness portal execution probe, which renders outside any
- * resolved frame environment. Fog stays disabled exactly as this probe path always had it.
- */
-const PROBE_SHADING: SceneShading = {
-	clearColor: [
-		FRONTEND_CLEAR_COLOR.red,
-		FRONTEND_CLEAR_COLOR.green,
-		FRONTEND_CLEAR_COLOR.blue,
-		FRONTEND_CLEAR_COLOR.alpha,
-	],
-	ambientOcclusion: { kind: "disabled" },
-	fog: null,
-	// Probe views measure world draws only; the sky contributes no depth and no selection.
-	sky: null,
-	weatherEnabled: false,
-	// No lights, so neither the rebasing origin nor the daylight response is observable.
-	anchorOrigin: { x: 0, z: 0 },
-	authoredLightResponse: 0,
-	dynamicLights: [],
-	staticLights: () => EMPTY_LANDBLOCK_LIGHTS,
-	lighting: resolveSceneLightingByRole(UNAUTHORED_SCENE_LIGHTING, null),
-};
-
-/** Ranking position used before any view has been committed. */
-const ORIGIN = sceneVec3(Vec3.zero());
-const EMPTY_LIGHTS: readonly RuntimeLight[] = [];
-
-/** Synthetic single render domain used by the deliberately unpartitioned flat debug mode. */
-const FLAT_PARTICLE_DOMAIN = "particle-render-domain:flat";
-const FLAT_SKY_PARTICLE_DOMAIN = "particle-render-domain:flat-sky";
-/** Unlit result for draws that resolve no landblock lights at all. */
-const EMPTY_LANDBLOCK_LIGHTS: LandblockLights = {
-	lights: EMPTY_LIGHTS,
-	cellMasks: new Uint32Array(TERRAIN_LIGHT_MASK_LENGTH),
-};
-
-/** Retail portal room lighting: one distant light and a modest ambient floor. */
-const PORTAL_TRANSITION_LIGHTING = {
-	ambientLevel: 0.3,
-	ambientColor: { red: 1, green: 1, blue: 1, alpha: 1 },
-	sunVector: new Vec3(-0.3, 1.9, -0.65),
-	sunColor: { red: 1, green: 1, blue: 1, alpha: 1 },
-} as const;
-const PORTAL_TRANSITION_SCOPE = "portal-transition";
-const PORTAL_TRANSITION_ANCHOR = normalizeLandblockOwner("0x0000ffff");
-const PORTAL_TRANSITION_CAMERA: Camera = {
-	far: 100,
-	fov: 75,
-	near: 0.01,
-	placement: {
-		envCellId: null,
-		landblockId: PORTAL_TRANSITION_ANCHOR,
-		position: sceneVec3(Vec3.zero()),
-		rotation: Quat.identity(),
-	},
-};
-
-interface TerrainFrameInput {
-	/** Logical resources and placement for authored terrain or an ocean backdrop tile. */
-	readonly drawUnit: TerrainSurfaceDrawUnit;
-	/** Device resources resolved by this renderer for the terrain shader contract. */
-	readonly program: TerrainProgramInput;
-}
-
-/** View-constant uniforms shared by the near and sampler-free far terrain programs. */
-interface TerrainGroupUniforms
-	extends WebGL2FogUniforms, WebGL2DirectionalLightingUniforms {
-	readonly cameraPosition: WebGLUniformLocation;
-	readonly clipTransform: WebGLUniformLocation;
-	readonly landblockOffset: WebGLUniformLocation;
-	readonly localToLandblock: WebGLUniformLocation;
-	readonly projection: WebGLUniformLocation;
-	readonly view: WebGLUniformLocation;
-}
-
-/** One opaque or alpha-test static-object range paired with its resolved node placement. */
-interface ObjectFrameInput {
-	readonly source:
-		| "outdoor"
-		| "generated"
-		| "env-cell-shell"
-		| "env-cell-resident"
-		| "portal-transition";
-	/** Canonical authored scope; an instance run must never cross this atlas-routing boundary. */
-	readonly renderScopeKey: string;
-	readonly cullFaceOverride:
-		StaticObjectDrawUnit["material"]["polygon"]["cullFace"] | null;
-	/** Which GL call form this submission takes; must match the program's transform source. */
-	readonly drawKind: "single" | "instanced";
-	readonly geometry: GeometryResourceKey;
-	readonly indexCount: number;
-	readonly indexStart: number;
-	readonly instances:
-		| null
-		| {
-				/** Stable grouping identity, absent when the submission phase ignores authored cohorts. */
-				readonly transparentCohortKey: string | null;
-				readonly instance: import("../systems/static-resources").ObjectInstanceData;
-				readonly kind: "frame-template";
-		  }
-		| {
-				readonly firstInstance: number;
-				readonly instanceCount: number;
-				readonly kind: "frame-range";
-		  };
-	readonly landblockId: LandblockOwnerId;
-	readonly localToLandblock: Mat4;
-	readonly material: ObjectMaterialBinding;
-	readonly ordering: ObjectMaterialOrdering;
-	/** Retail draw eligibility retained through compilation for frame-time filtering. */
-	readonly retailVisibility: RetailGeometryVisibility;
-	/** Buildings provenance projected once; no draw consumer reconstructs it from source labels. */
-	readonly receivesOutdoorPssm: boolean;
-	/** Landblock-space ordering facts; the brand holds every producer to that frame. */
-	readonly transparentSort: {
-		readonly stableId: string;
-		readonly center: LandblockVec3;
-	} | null;
-}
-
-type PreparedObjectDrawCompatibility = WebGL2PreparedObjectDrawCompatibility;
-
-/**
- * One object contribution paired with every renderer-resolved fact consumed at submission.
- *
- * `compiled` is shared by reference with every frame that submits this draw unit, so a frame
- * never copies compiled facts to use them. Nothing anchor-relative is stored: the offset is
- * looked up per frame by `landblockId`, which is what lets a static submission itself be cached
- * across re-anchoring.
- */
-interface PreparedObjectFrameInput extends ObjectFrameInput {
-	/** Compiled coarse partition; exact prepared compatibility remains authoritative. */
-	readonly batchKey: string;
-	/**
-	 * Compiled facts held directly rather than behind their cache entry.
-	 *
-	 * Run formation compares these for every adjacent submission pair, so the hot loop reads them
-	 * without a second dereference. Both values are owned by the cache entry and shared by
-	 * reference; nothing is copied to place them here.
-	 */
-	readonly blendPolicy: ObjectBlendPolicy;
-	readonly compatibility: PreparedObjectDrawCompatibility;
-}
-
-/** One ordered phase's scheduling semantics; cohort identity is explicit instead of incidental. */
-interface FrameInstancePhasePolicy {
-	readonly grouping: "adjacent" | "grouped";
-	readonly cohort: "ignore" | "require";
-}
-
-/**
- * Build one submission with a fixed field order, from every producer.
- *
- * Run formation reads these fields for every adjacent pair in the frame, so all submissions are
- * constructed here rather than by per-site spreads: one construction site means one object shape,
- * and the hot comparison stays monomorphic instead of degrading as producers are added.
- */
-function createObjectSubmission(
-	object: ObjectFrameInput,
-	compiled: CompiledObjectDraw<PreparedObjectDrawCompatibility>,
-): PreparedObjectFrameInput {
-	return {
-		batchKey: compiled.batchKey,
-		blendPolicy: compiled.blendPolicy,
-		compatibility: compiled.compatibility,
-		cullFaceOverride: object.cullFaceOverride,
-		drawKind: object.drawKind,
-		geometry: object.geometry,
-		indexCount: object.indexCount,
-		indexStart: object.indexStart,
-		instances: object.instances,
-		landblockId: object.landblockId,
-		localToLandblock: object.localToLandblock,
-		material: object.material,
-		ordering: object.ordering,
-		retailVisibility: object.retailVisibility,
-		receivesOutdoorPssm: object.receivesOutdoorPssm,
-		renderScopeKey: object.renderScopeKey,
-		source: object.source,
-		transparentSort: object.transparentSort,
-	};
-}
-
-/** Anchor-relative landblock offset, resolved once per visible landblock per frame. */
-type LandblockRenderOffset = readonly [number, number, number];
-
-/**
- * One static publication's complete submission set plus the node-level facts a frame reports.
- *
- * Cached whole against the publication, so a visible node performs one lookup per frame instead
- * of rebuilding a submission, a scope key, and a layer key for every draw unit it owns.
- */
-interface CompiledStaticNodeSubmissions {
-	readonly objectBuckets: ObjectSubmissionBuckets<PreparedObjectFrameInput>;
-	readonly landblockId: LandblockOwnerId;
-	readonly source: ObjectFrameInput["source"];
-	/** Key this publication contributes to the visible-layer census. */
-	readonly visibleLayerKey: string;
-	/** Cell scope this publication occupies, or null for outdoor publications. */
-	readonly envCellScopeKey: string | null;
-}
-
-type AnyObjectProgram =
-	| WebGL2StaticTableObjectProgram
-	| WebGL2FogStaticTableObjectProgram
-	| WebGL2ObjectProgram
-	| WebGL2FogObjectProgram
-	| WebGL2InstancedObjectProgram
-	| WebGL2FogInstancedObjectProgram;
-
-/** Shared activation/lighting accepts table-backed programs without legacy material uniforms. */
-type LitObjectProgram =
-	AnyObjectProgram | WebGL2DynamicObjectProgram | WebGL2FogDynamicObjectProgram;
-
-/** One admitted merged root per view; color ranges use composed scene depth. */
-interface PreparedDynamicColor {
-	/** Existing dynamic lighting role, independent of the selected portal domain. */
-	readonly source: "dynamic";
-	/** Whole-entity pose-page identity. */
-	readonly nodeId: SceneNodeId;
-	/** Placement owner for rebasing and lighting, independent of portal domains. */
-	readonly landblockId: LandblockOwnerId;
-	/** Resolved merged vertex allocation and appearance index/material generation. */
-	readonly geometry: WebGL2GeometryBinding;
-	readonly appearance: Extract<PreparedDynamicAppearance, { kind: "drawable" }>;
-}
-
-/** Opaque color shares contiguous spans across views of the same current entity pose. */
-interface PreparedDynamicOpaque extends PreparedDynamicColor {
-	/** Eligible physical spans borrowed until the frame's final view finishes. */
-	readonly ranges: ReturnType<DynamicBatchedRanges["prepare"]>;
-}
-
-/** One transparent range or additive span in the shared far/near/additive submission sequence. */
-interface PreparedDynamicBlended extends PreparedDynamicColor {
-	/** Ordinary merged draw discriminator; never admitted into instance runs. */
-	readonly drawKind: "merged";
-	/** Physical range and state already compiled for this appearance generation. */
-	readonly range: PreparedDynamicOpaque["appearance"]["plan"]["ranges"][number];
-	/** Frame-effective phase, including opaque material promoted by a part fade. */
-	readonly ordering: "transparent" | "additive";
-	/** Selected contiguous index elements; transparent ranges retain their original extent. */
-	readonly indexCount: number;
-	/** Existing source cohort and tie-break/center facts for the bounded transparency sorter. */
-	readonly transparentCohortKey: string;
-	readonly transparentSort: ObjectFrameInput["transparentSort"];
-	/** Prepared variant; construction never occurs during execution. */
-	readonly program: WebGL2DynamicObjectProgram | WebGL2FogDynamicObjectProgram;
-}
-
-/** Physical mesh submissions share ordering without sharing incompatible GPU input contracts. */
-type ObjectColorSubmission = PreparedObjectFrameInput | PreparedDynamicBlended;
-
-/** Anchor-relative matrices and content reused by all passes for one view. */
-interface PreparedViewGeometry extends PreparedPortalProjection {
-	/** Runtime-owned cell classification selecting this view's uncovered background. */
-	readonly cameraInsideSealedCell: boolean;
-	/** Independent retained outputs for this camera, shared by its color and auxiliary passes. */
-	readonly submissionStorage: ViewSubmissionStorage;
-	/** Camera position expressed in the view's anchor-relative render frame. */
-	readonly cameraPosition: Vec3;
-	/** Camera whose projection this view derives, retained so the sky can extend its far plane. */
-	readonly camera: Camera;
-	/** Projection matrix derived from the current drawing-buffer aspect ratio. */
-	readonly projection: Mat4;
-	/** Original camera frustum retained for topology and selected-scope culling. */
-	readonly frustum: Frustum;
-	/** Anchor-relative camera view transform. */
-	readonly view: Mat4;
-	/** Landblock defining the view's render-world origin. */
-	readonly anchorLandblockId: FrameInput["anchorLandblockId"];
-}
-
-/** Resolved scene contributions independent from flat or portal scheduling policy. */
-interface PreparedEntityAnalyticShadows {
-	readonly indoorByScopeKey: ReadonlyMap<string, EntityGroundingSelection>;
-	readonly outdoorByLandblockId: ReadonlyMap<
-		LandblockOwnerId,
-		OutdoorDirectionalShadowSelection
-	>;
-	readonly outdoorEnabled: boolean;
-	readonly indoorSettings: EntityShadowSettings["indoorGrounding"];
-	readonly outdoorSettings: EntityShadowSettings["outdoorDirectional"];
-}
-
-/** Depth and portal route shared by both components of one entity's overlay. */
-type PreparedOverlayRoute =
-	| {
-			/** Selected and hovered entities draw once as overlays. */ readonly kind: "overlay";
-	  }
-	| {
-			/** Other entities test depth within their admitted domains. */ readonly kind: "scene";
-			readonly renderScopeKeys: readonly string[];
-	  };
-
-const OVERLAY_ROUTE: PreparedOverlayRoute = { kind: "overlay" };
-
-/** Renderer state before its first frame; every drawn frame replaces it from `FrameInput`. */
-const NO_ENTITY_OVERLAYS: EntityOverlayLookup = { presentation: () => null };
-
-/** One entity's shared overlay anchor; its components reference it by identity for composition. */
-interface PreparedOverlayEntity {
-	readonly anchor: Vec3;
-	readonly distanceSquared: number;
-	readonly identity: string;
-	readonly route: PreparedOverlayRoute;
-}
-
-/** One independently admitted overlay component before its own legibility and budget cut. */
-interface PreparedOverlayComponent {
-	readonly entity: PreparedOverlayEntity;
-	readonly anchor: Vec3;
-	readonly distanceSquared: number;
-	readonly identity: string;
-	readonly priority: EntityOverlayPriority;
-}
-
-interface PreparedLabelComponent extends PreparedOverlayComponent {
-	readonly label: NameplateVisual;
-}
-
-interface PreparedBarComponent extends PreparedOverlayComponent {
-	readonly fraction: number;
-}
-
-type PreparedEntityOverlay = ComposedEntityOverlay<
-	PreparedOverlayEntity,
-	NameplateVisual
->;
-
-interface MutableEntityOverlayDrawInstance extends EntityOverlayDrawInstance {
-	depthTest: boolean;
-	anchor: Vec3;
-	binding: NameplateTextureBinding | null;
-	healthFraction: number | null;
-}
-
-interface MutableEntityOverlayScopedDrawInstance extends EntityOverlayScopedDrawInstance {
-	depthTest: boolean;
-	anchor: Vec3;
-	binding: NameplateTextureBinding | null;
-	healthFraction: number | null;
-	renderScopeKey: string;
-}
-
-interface PreparedSceneContributions {
-	/** Opaque/alpha-test dynamic meshes submitted without per-range instance expansion. */
-	readonly dynamicOpaque: readonly PreparedDynamicOpaque[];
-	/** Terrain selected by this renderer from its RenderWorld. */
-	readonly terrain: readonly TerrainFrameInput[];
-	/** Ordered phase populations assembled from compiled static and dynamic sources. */
-	readonly objectBuckets: ObjectSubmissionBuckets<ObjectColorSubmission>;
-	/**
-	 * Anchor-relative offset per visible landblock for this frame.
-	 *
-	 * The only anchor-relative fact in a submission, held here rather than on each object so
-	 * submissions survive re-anchoring and can be cached with their publication.
-	 */
-	readonly landblockOffsets: ReadonlyMap<string, LandblockRenderOffset>;
-	/** Final view-owned draw ranges after particle owner routing. */
-	readonly particles: readonly ParticleDrawRange[];
-	/** Sky-attached particle batches drawn before the landscape. */
-	readonly skyParticles: readonly ParticleDrawRange[];
-	/** Fixed per-receiver analytic-shadow records produced from the same visible-entry walk. */
-	readonly entityAnalyticShadows: PreparedEntityAnalyticShadows | null;
-	/** Composed admitted labels and bars, in back-to-front blend order. */
-	readonly entityOverlays: readonly PreparedEntityOverlay[];
-	/** Shared perspective scale applied by the overlay pass for this prepared view. */
-	readonly entityOverlaySettings: EntityOverlaySettings;
-	/** Health bar geometry and colors for this prepared view. */
-	readonly healthBars: HealthBarSettings;
-}
-
-/** Anchor-relative matrices and content reused by all passes for one view. */
-interface PreparedView
-	extends PreparedViewGeometry, PreparedSceneContributions {}
-
-/** CPU shadow decisions retained independently of whichever view last used the GPU targets. */
-interface PreparedOutdoorShadowView {
-	/** Selected mapped casters and cascades, or null for the simple analytic policy. */
-	readonly maps: ReturnType<WebGL2OutdoorPssmPass["prepare"]>;
-	/** Projection shared by mapped and analytic consumers of this view. */
-	readonly projection: ResolvedOutdoorShadowProjection;
-	/** Whole-root analytic tier chosen during mapped caster preparation. */
-	readonly analyticCasters: readonly EntityShadowCasterShape[];
-}
-
-/** Complete CPU inputs retained until this portal camera's sequential GPU execution. */
-interface PreparedPortalView {
-	/** Color contributions and camera matrices belonging to this view. */
-	readonly view: PreparedView;
-	/** Independent portal visibility, tiles, and propagation streams. */
-	readonly frame: WebGL2PortalScopeAtlasFrame;
-	/** Particle ranges routed against this view's selected scopes. */
-	readonly particlesByScope: ReadonlyMap<string, readonly ParticleDrawRange[]>;
-	/** Outdoor caster decisions when this view selects an outdoor scope. */
-	readonly shadows: PreparedOutdoorShadowView | null;
-}
-
-/** Whether one contribution owns exterior-global passes such as sky and weather. */
-type SceneRenderDomain = "exterior" | "indoor";
-
-/** Explicit production-geometry evidence for the public scope-atlas path. */
-export interface PortalExecutionProbeResult {
-	readonly crossingCount: number;
-	readonly objectSubmissionCount: number;
-	readonly planningDurationMs: number;
-	readonly scopeCount: number;
-	readonly selectionMetrics: FrameSelectionMetrics;
-	readonly targetBytes: number;
-	readonly terrainSubmissionCount: number;
-	readonly traversalDepth: number;
-}
-
-/** Mutable backing state copied only when Explorer samples renderer diagnostics. */
-interface MutableFrameSelectionMetrics {
-	ambientOcclusion: {
-		activeBytes: number;
-		allocatedGenerationCount: number;
-		pixelCount: number;
-		applicationCount: number;
-		disposedGenerationCount: number;
-		effectiveDistanceFade: {
-			disabledAt: number;
-			fullStrengthUntil: number;
-		} | null;
-	};
-	entitySelection: {
-		activeMaskBytes: number;
-		allocatedTargetGenerationCount: number;
-		compositeDrawCount: number;
-		disposedTargetGenerationCount: number;
-		maskDrawCount: number;
-		selectedSphereProxyCount: number;
-		selectedPartCount: number;
-		selectedTriangleCount: number;
-		skippedReason: "no-target" | "hidden-or-empty" | null;
-	};
-	envCellRenderMode: FrameInput["frameSettings"]["envCellRenderMode"];
-	viewCount: number;
-	visibleSceneEntries: number;
-	terrainFrameInputs: number;
-	visibleStaticLayerCount: number;
-	visibleStaticNodeCount: number;
-	visibleDynamicEntityCount: number;
-	visibleDynamicSourceRangeCount: number;
-	testedObjectPresentationCount: number;
-	retainedObjectPresentationCount: number;
-	rejectedObjectPresentationCount: number;
-	visibleEnvCellShells: number;
-	visibleEnvCellScopeCount: number;
-	visibleEnvCellResidentNodes: number;
-	submittedEnvCellShellDrawCount: number;
-	submittedEnvCellShellTriangleCount: number;
-	submittedEnvCellResidentDrawCount: number;
-	submittedEnvCellResidentTriangleCount: number;
-	envCellShellCullOverrideCount: number;
-	portalSelectedScopeCount: number;
-	portalSelectedCrossingCount: number;
-	portalCompletedCullDepth: number;
-	portalPropagationDrawCount: number;
-	portalProjectionPrimitiveCount: number;
-	portalAtlasTilePixelCount: number;
-	portalFrontierRetreatCount: number;
-	portalTruncatedViewCount: number;
-	portalFramebufferCount: number;
-	portalTargetBytes: number;
-	portalTransitionSnapshotBytes: number;
-	portalTransitionOriginCaptured: boolean;
-	portalTransitionSnapshotAllocatedGenerationCount: number;
-	portalTransitionSnapshotDisposedGenerationCount: number;
-	portalTransitionFramebufferCount: number;
-	portalTransitionTargetBytes: number;
-	submittedPortalTransitionDrawCount: number;
-	portalTransitionVisualInstalled: boolean;
-	portalTransitionGeneration: number | null;
-	portalTransitionKind: PortalTransitionFrame["kind"] | null;
-	portalTransitionOnlyFramePresented: boolean;
-	flatSceneFramebufferCount: number;
-	flatSceneTargetBytes: number;
-	flatSceneAllocatedGenerationCount: number;
-	flatSceneDisposedGenerationCount: number;
-	submittedStaticObjectDrawCount: number;
-	submittedStaticObjectTriangleCount: number;
-	submittedBakedStaticObjectDrawCount: number;
-	submittedBakedStaticObjectTriangleCount: number;
-	submittedInstancedSourceTriangleCount: number;
-	transparentObjectCandidateCount: number;
-	farTransparentObjectCandidateCount: number;
-	nearTransparentObjectCandidateCount: number;
-	transparentFrameRunCount: number;
-	farTransparentFrameRunCount: number;
-	nearTransparentFrameRunCount: number;
-	frameInstanceUploadCount: number;
-	frameInstanceUploadBytes: number;
-	submittedTransparentObjectDrawCount: number;
-	submittedTransparentInstanceCount: number;
-	submittedAdditiveObjectDrawCount: number;
-	submittedDynamicDrawCount: number;
-	submittedParticleBatchCount: number;
-	submittedParticleInstanceCount: number;
-	unresolvedParticleBatchCount: number;
-	/** Record-texture rows uploaded this frame; near the store height means a degenerate span. */
-	uploadedParticleRecordRowCount: number;
-	frameInstanceCapacity: number;
-	frameInstanceGrowthCount: number;
-	frameInstanceViewHighWaterMark: number;
-	droppedLights: number;
-	staticLightBinds: number;
-	/** Per-landblock terrain mask uploads; unlit landblocks skip theirs entirely. */
-	terrainLightMaskUploads: number;
-	farTerrainDraws: number;
-	farTerrainPaletteUploads: number;
-	farTerrainCutoffLandblocks: number | null;
-	objectLightingBinds: number;
-	objectProgramChanges: number;
-	objectTextureBinds: number;
-	objectDrawCalls: number;
-	objectUniformUploads: number;
-	objectSuppressedUniformUploads: number;
-}
+export type { PortalExecutionProbeResult } from "./webgl2-renderer-types";
 
 export class WebGL2Renderer implements Renderer {
 	/** Explicit diagnostic capability, separated from the production draw methods. */
 	readonly frameDiagnostics: RendererFrameDiagnostics;
-	static readonly #identityMatrix = Mat4.identity();
+	/** Each combat subsystem leases one independently disposable draw adapter. */
+	readonly combatEffects: RendererCombatEffectsCapability;
+	/** Authored particle residency and per-frame source submission. */
+	readonly particles: RendererParticleCapability;
+	/** Region-scoped celestial sky residency. */
+	readonly sky: RendererSkyCapability;
 
-	readonly #matrixScratch = new Float32Array(16);
-	/** Reusable sky matrices; the pass runs every frame and must not allocate in it. */
-	readonly #skyMatrixScratch = new Float32Array(16);
-	readonly #skyProjectionScratch = new Float32Array(16);
-	readonly #skyViewScratch = new Float32Array(16);
-	#skyPass: WebGL2SkyPass | null = null;
-	#particleResidency: ParticleMeshResidency | null = null;
-	#particlePass: WebGL2ParticlePass | null = null;
-	/** Lazily allocated procedural geometry shared by all summon relationships. */
-	#summonChainPass: WebGL2SummonChainPass | null = null;
-	#frameSummonLeashes: readonly SummonLeashInput[] = [];
-	readonly #worldMarkerPass: WebGL2WorldMarkerPass;
-	readonly #worldTrajectoryPass: WebGL2WorldTrajectoryPass;
-	readonly #desiredTrajectoryPass: WebGL2WorldTrajectoryPass;
-	readonly #entityOverlayPass: WebGL2EntityOverlayPass;
-	readonly #nameplateIconRepository: NameplateIconRepository;
-	readonly #nameplateTextureCache: WebGL2NameplateTextureCache;
-	readonly #entityOverlayDrawScratch: MutableEntityOverlayDrawInstance[] = [];
-	readonly #scopedEntityOverlayDrawScratch: MutableEntityOverlayScopedDrawInstance[] =
-		[];
-	readonly #nameplatePopulationScratch: NameplateVisual[] = [];
-	readonly #nameplateIconScratch: NameplateIconId[] = [];
-	#reconciledNameplateAppearance: NameplateAppearance | null = null;
-	#reconciledNameplatePopulationRevision = -1;
-	#reconciledNameplateDensity = Number.NaN;
-	#reconciledNameplateViewerIdentity: string | null | undefined = undefined;
-	#eligibleNameplateCandidateCount = 0;
-	#budgetRejectedNameplateCandidateCount = 0;
-	#eligibleHealthBarCandidateCount = 0;
-	#budgetRejectedHealthBarCandidateCount = 0;
-	#submittedEntityOverlayInstanceCount = 0;
-	#submittedEntityOverlayDrawCount = 0;
-	#frameWorldIndicator: WorldIndicatorInput | null = null;
-	/** Current realized selected root, resolved by the runtime rather than retained by the renderer. */
-	#frameSelectionTarget: EntitySelectionTarget | null = null;
-	/** Hover admission is independent from the selected-geometry outline. */
-	/** Final per-node overlay decisions borrowed for the current frame. */
-	#frameEntityOverlays: EntityOverlayLookup = NO_ENTITY_OVERLAYS;
-	/** Frame-global mask geometry prepared before any camera draws. */
-	#preparedSelection: {
-		readonly pass: WebGL2EntitySelectionPass;
-		readonly geometry: PreparedEntitySelection;
-	} | null = null;
-	#frameViewerEntityIdentity: string | null = null;
-	/** This frame's owner-local sources, replaced every submission rather than retained. */
-	#particleSources: readonly ParticleSourceRange[] = [];
-	/** Record storage published with the ranges that index into it. */
-	#particleRecords: ParticleRecordFrame = EMPTY_PARTICLE_RECORDS;
-	/** Reusable CPU outputs that remain independent while several cameras are prepared. */
-	readonly #viewSubmissions = new ViewSubmissionStoragePool();
-	/** Reusable particle matrices; the pass runs every frame and must not allocate in it. */
-	readonly #particleProjectionScratch = new Float32Array(16);
-	readonly #particleViewScratch = new Float32Array(16);
-	#skyProgram: WebGL2SkyProgram | null = null;
-	/** Lazy sky variant routing celestial and weather geometry into the packed outdoor tile. */
-	#portalAtlasSkyProgram: WebGL2SkyProgram | null = null;
-	/** Shared clock seconds for the current frame, driving derived texture-velocity phase. */
-	#frameClockSeconds = 0;
-	readonly #offsetScratch = new Vec3(0, 0, 0);
-	/**
-	 * Draw facts compiled once per draw unit instead of once per frame.
-	 *
-	 * Keyed by artifact draw units and shared instance source draws, so entries become collectable
-	 * with the publication that owns them; the named flushes cover the events that invalidate
-	 * every entry at once.
-	 */
-	readonly #compiledDraws = new CompiledObjectDrawStore<
-		CompiledStaticNodeSubmissions,
-		PreparedObjectDrawCompatibility
-	>();
-	/** Terrain programs resolved once per stable surface draw; see #resolveTerrainFrameInput. */
-	readonly #terrainFrameInputs = new WeakMap<
-		TerrainSurfaceDrawUnit,
-		TerrainFrameInput
-	>();
-	/** Frame settings that select compiled facts, retained to detect a change between frames. */
-	#compiledTextureFiltering: TextureFilteringPolicy | null = null;
-	#compiledEnvCellRenderMode: FrameSettings["envCellRenderMode"] | null = null;
-	/** Reused while deriving transparent range distances before sorting a view. */
-	readonly #transparentCenterScratch = new Vec3(0, 0, 0);
-	readonly #canvas: HTMLCanvasElement;
 	readonly #gl: WebGL2RenderingContext;
-	readonly #combatEffectAdapters = new Set<WebGL2CombatEffects>();
-	/** Context-local object compiler shared by world and isolated renderer implementations. */
-	readonly #objectDrawCompiler: WebGL2ObjectDrawCompiler;
-	/** Appearance resources follow template leases, not current visibility. */
-	readonly #dynamicAppearances: WebGL2DynamicAppearances;
-	/** Shared current-frame pose addresses, uploaded before executing any prepared camera. */
-	readonly #dynamicPosePages: WebGL2DynamicPosePages<SceneNodeId>;
-	/** One material-free geometry decision shared across selection and every mapped-shadow view. */
-	readonly #dynamicDepths: DynamicDepthPreparations;
-	/** Cold static-table shader variants keyed by fog, deferred portal visibility and PSSM. */
-	readonly #staticTablePrograms = new Map<
-		number,
-		WebGL2StaticTableObjectProgram | WebGL2FogStaticTableObjectProgram
-	>();
-	/** Frame-current opaque eligibility, shared across all selected camera domains. */
-	readonly #dynamicOpaqueRanges = new DynamicBatchedRanges("opaque");
-	/** Additive spans share appearance batches without entering the depth-writing opaque pass. */
-	readonly #dynamicAdditiveRanges = new DynamicBatchedRanges("additive");
-	/** One unfogged depth-tested program shared by every admitted ordered entity range. */
-	#dynamicBlendedProgram:
-		WebGL2DynamicObjectProgram | WebGL2FogDynamicObjectProgram | null = null;
-	/** Allocated only when a merged color root is first prepared. */
-	#dynamicOpaqueProgram:
-		WebGL2DynamicObjectProgram | WebGL2FogDynamicObjectProgram | null = null;
-	/** Compact root publication shared by every merged consumer. */
-	readonly #dynamicPresentations = new Map<
-		SceneNodeId,
-		VisibleDynamicPresentation | null
-	>();
-	/** Only roots selected by a merged draw consumer require GPU pose rows. */
-	readonly #poseUploadParts = new Map<
-		SceneNodeId,
-		readonly Pick<ActiveDynamicPart, "frameInstance" | "renderState">[]
-	>();
-	readonly #resources: WebGL2ResourceManager;
-	readonly #textureSamplers: WebGL2TextureSamplerCatalog;
-	/** Frontend-selected portal look consumed only by the lazy fullscreen presenter. */
-	readonly #portalWarpDriveTuning: PortalWarpDriveTuning;
+	readonly #world: RenderWorld;
 	/** Device-wide guard preventing draws through any stale handle after context loss. */
 	readonly #assertDeviceReady: () => void;
-	readonly #frameInstances: FrameInstanceStreamArena;
-	/** Geometry VAOs whose instance pointers and invariant enable/divisor state were bound together. */
-	readonly #configuredObjectInstanceVertexArrays =
-		new WeakSet<WebGLVertexArrayObject>();
-	/** Lazy-resource outdoor actor depth schedule reading the shared dynamic pose pages. */
-	readonly #outdoorPssmPass: WebGL2OutdoorPssmPass;
-	readonly #outdoorPssmReceiverPrograms: WebGL2OutdoorPssmReceiverPrograms;
-	readonly #entityGroundingPrograms: WebGL2EntityGroundingPrograms;
-	readonly #outdoorPssmUniformScratch = createWebGL2OutdoorPssmUniformScratch();
-	/** Current sequential view's receiver state; null prevents every inactive sample path. */
-	#activeOutdoorPssmFrame: ActiveOutdoorPssmFrame | null = null;
-	/** Reused frame-hot storage for analytic candidate collection and receiver selection. */
-	readonly #entityGroundingCasters: EntityGroundingCaster[] = [];
-	readonly #outdoorDirectionalCasters: OutdoorDirectionalShadowCaster[] = [];
-	readonly #indoorGroundingCells = new Map<string, IndoorGroundingCell>();
-	readonly #entityGroundingSelectionScratch =
-		createEntityGroundingSelectionScratch();
-	readonly #outdoorDirectionalSelectionScratch =
-		createOutdoorDirectionalShadowSelectionScratch();
-	readonly #indoorVisibilityIslands = new Map<
-		string,
-		SceneVisibilityIslandId
-	>();
-	/** Last topology indexed into the retained indoor-island lookup. */
-	#indoorVisibilityTopology: SceneTopologyView | null = null;
-	/** Reusable dynamic-light upload staging; renderer-owned to keep draw loops allocation-free. */
-	readonly #dynamicLightScratch: ReturnType<typeof createDynamicLightScratch>;
-	readonly #terrainLightMask: WebGL2TerrainLightMaskTexture;
-	/** Exact state mirror scoped to independently invalidated object phases. */
-	readonly #deviceState: WebGL2DeviceStateApplicator;
-	/** Portal owner created lazily when the first portal frame needs GPU resources. */
-	#portalScopeAtlasPipeline: WebGL2PortalScopeAtlasPipeline | null = null;
-	/** Unconditional flat-scene attachments, allocated lazily on the first flat frame. */
-	#flatSceneTarget: WebGL2FlatSceneTarget | null = null;
-	/** Flat color/depth presenter, compiled lazily with the first flat frame. */
-	#flatScenePresentation: WebGL2FlatScenePresentation | null = null;
-	/** Lazy material-free selected-entity mask owner. */
-	#entitySelectionPass: WebGL2EntitySelectionPass | null = null;
-	/** Outgoing world color retained only while a transition compositor needs it. */
-	#transitionSnapshot: WebGL2TransitionSnapshot | null = null;
-	#transitionSnapshotGeneration: number | null = null;
-	#activeTransition: PortalTransitionFrame | null = null;
-	/** Prepared setup visual retained for the transition-only tunnel target. */
-	#portalTransitionVisual: PortalTransitionVisual | null = null;
-	#portalTransitionClip: PlayingClip | null = null;
-	/** Transition-only authored tunnel color/depth target; ordinary frames never allocate it. */
-	#portalTransitionTarget: WebGL2FlatSceneTarget | null = null;
-	/** Optional SAO programs and scratch ownership, created only by the first enabled frame. */
-	#saoPass: WebGL2SaoPass | null = null;
-	/** Harness-only category view; production never enables synchronous depth census work. */
-	#saoCoverageVisualizationEnabled = false;
-	/**
-	 * One-frame baked-draw merge census in flight, or null on an ordinary frame.
-	 *
-	 * Collector and waiter are held together because neither is meaningful alone: the census
-	 * spans exactly the frame between installation and the next frame finish.
-	 */
-	#mergeCensusRequest: {
-		readonly collector: BakedDrawMergeCensusCollector;
-		readonly resolve: (census: BakedDrawMergeCensus) => void;
-	} | null = null;
-	readonly #visibleStaticLayers = new Set<string>();
-	readonly #visibleEnvCellScopes = new Set<string>();
-	/** Dynamic roots selected in any view of the frame, retained as production feedback. */
-	readonly #selectedDynamicNodeIds = new Set<SceneNodeId>();
-	/** Read-only runtime gateway used to collect this renderer's frame submissions. */
-	readonly #world: RenderWorld;
-	readonly #nearTerrainProgram: WebGL2NearTerrainProgram;
-	readonly #farTerrainProgram: WebGL2FarTerrainProgram;
-	readonly #objectProgram: WebGL2FogObjectProgram;
-	readonly #instancedObjectProgram: WebGL2FogInstancedObjectProgram;
-	/** Transparent and additive materials deliberately use a shader with no fog uniforms. */
-	readonly #blendedObjectProgram: WebGL2ObjectProgram;
-	readonly #blendedInstancedObjectProgram: WebGL2InstancedObjectProgram;
-	/** Lazy scope-envelope variants; flat and legacy portal frames never compile them. */
-	#portalBlendedObjectProgram: WebGL2ObjectProgram | null = null;
-	#portalBlendedInstancedObjectProgram: WebGL2InstancedObjectProgram | null =
-		null;
-	/** Complete float-compatible fallback for every statically active object sampler. */
-	readonly #objectFallbackBinding: PreparedObjectTextureBinding<
-		WebGLTexture,
-		WebGLSampler
-	>;
-	/** Requested quality captured at frame entry and consumed by every nested draw path. */
-	#frameTextureFiltering: TextureFilteringPolicy =
-		SHARED_FRONTEND_TUNING.rendering.frameDefaults.textureFiltering;
-	/** Portal footprint cutoff resolved to drawing-buffer pixels once at frame entry. */
-	#minimumPortalFootprintDevicePixelArea = 0;
-	/** Object-presentation footprint cutoff resolved to drawing-buffer pixels at frame entry. */
-	#minimumObjectFootprintDevicePixelArea = 0;
-	/** Sampling density the drawing buffer is currently sized for, retained for resize alone. */
-	#renderScale: number =
-		SHARED_FRONTEND_TUNING.rendering.frameDefaults.renderScale;
-	/** This frame's presentation grade, snapshotted once and consumed at present time. */
-	#frameColorGrade: ColorGradeSettings = {
-		enabled: false,
-		parameters: DEFAULT_COLOR_GRADE_PARAMETERS,
-	};
-	/** This frame's depth-independent selection edge appearance. */
-	#frameEntitySelectionOutline: EntitySelectionOutlineSettings =
-		SHARED_FRAME_SETTINGS.entitySelectionOutline;
-	/** Explicit session; null avoids clocks, extension probes, and GPU query resources. */
-	#frameProfiler: WebGL2FrameProfiler | null = null;
-	/** Reused metrics record for the frame's effective AO distance interval. */
-	readonly #ambientOcclusionDistanceFadeMetrics = {
-		disabledAt: 0,
-		fullStrengthUntil: 0,
-	};
-	/** Reused per-frame diagnostics; cold reads return a copied snapshot. */
-	readonly #frameSelectionMetrics: MutableFrameSelectionMetrics = {
-		ambientOcclusion: {
-			activeBytes: 0,
-			allocatedGenerationCount: 0,
-			pixelCount: 0,
-			applicationCount: 0,
-			disposedGenerationCount: 0,
-			effectiveDistanceFade: null,
-		},
-		entitySelection: {
-			activeMaskBytes: 0,
-			allocatedTargetGenerationCount: 0,
-			compositeDrawCount: 0,
-			disposedTargetGenerationCount: 0,
-			maskDrawCount: 0,
-			selectedSphereProxyCount: 0,
-			selectedPartCount: 0,
-			selectedTriangleCount: 0,
-			skippedReason: "no-target",
-		},
-		envCellRenderMode: "flat",
-		terrainFrameInputs: 0,
-		viewCount: 0,
-		visibleDynamicEntityCount: 0,
-		visibleDynamicSourceRangeCount: 0,
-		testedObjectPresentationCount: 0,
-		retainedObjectPresentationCount: 0,
-		rejectedObjectPresentationCount: 0,
-		visibleEnvCellShells: 0,
-		visibleEnvCellScopeCount: 0,
-		visibleEnvCellResidentNodes: 0,
-		submittedEnvCellShellDrawCount: 0,
-		submittedEnvCellShellTriangleCount: 0,
-		submittedEnvCellResidentDrawCount: 0,
-		submittedEnvCellResidentTriangleCount: 0,
-		envCellShellCullOverrideCount: 0,
-		portalSelectedScopeCount: 0,
-		portalSelectedCrossingCount: 0,
-		portalCompletedCullDepth: 0,
-		portalPropagationDrawCount: 0,
-		portalProjectionPrimitiveCount: 0,
-		portalAtlasTilePixelCount: 0,
-		portalFrontierRetreatCount: 0,
-		portalTruncatedViewCount: 0,
-		portalFramebufferCount: 0,
-		portalTargetBytes: 0,
-		portalTransitionSnapshotBytes: 0,
-		portalTransitionOriginCaptured: false,
-		portalTransitionSnapshotAllocatedGenerationCount: 0,
-		portalTransitionSnapshotDisposedGenerationCount: 0,
-		portalTransitionFramebufferCount: 0,
-		portalTransitionTargetBytes: 0,
-		submittedPortalTransitionDrawCount: 0,
-		portalTransitionVisualInstalled: false,
-		portalTransitionGeneration: null,
-		portalTransitionKind: null,
-		portalTransitionOnlyFramePresented: false,
-		flatSceneFramebufferCount: 0,
-		flatSceneTargetBytes: 0,
-		flatSceneAllocatedGenerationCount: 0,
-		flatSceneDisposedGenerationCount: 0,
-		visibleSceneEntries: 0,
-		visibleStaticLayerCount: 0,
-		visibleStaticNodeCount: 0,
-		submittedStaticObjectDrawCount: 0,
-		submittedStaticObjectTriangleCount: 0,
-		submittedBakedStaticObjectDrawCount: 0,
-		submittedBakedStaticObjectTriangleCount: 0,
-		submittedInstancedSourceTriangleCount: 0,
-		transparentObjectCandidateCount: 0,
-		farTransparentObjectCandidateCount: 0,
-		nearTransparentObjectCandidateCount: 0,
-		transparentFrameRunCount: 0,
-		farTransparentFrameRunCount: 0,
-		nearTransparentFrameRunCount: 0,
-		frameInstanceUploadCount: 0,
-		frameInstanceUploadBytes: 0,
-		submittedTransparentObjectDrawCount: 0,
-		submittedTransparentInstanceCount: 0,
-		submittedAdditiveObjectDrawCount: 0,
-		submittedDynamicDrawCount: 0,
-		submittedParticleBatchCount: 0,
-		submittedParticleInstanceCount: 0,
-		unresolvedParticleBatchCount: 0,
-		uploadedParticleRecordRowCount: 0,
-		frameInstanceCapacity: 0,
-		frameInstanceGrowthCount: 0,
-		frameInstanceViewHighWaterMark: 0,
-		droppedLights: 0,
-		staticLightBinds: 0,
-		terrainLightMaskUploads: 0,
-		farTerrainDraws: 0,
-		farTerrainPaletteUploads: 0,
-		farTerrainCutoffLandblocks: null,
-		objectLightingBinds: 0,
-		objectProgramChanges: 0,
-		objectTextureBinds: 0,
-		objectDrawCalls: 0,
-		objectUniformUploads: 0,
-		objectSuppressedUniformUploads: 0,
-	};
-	#frameWidth = 0;
-	#frameHeight = 0;
 
-	public static async build(
+	readonly #diagnostics: RendererFrameDiagnosticsAndProfiler;
+	readonly #deviceTargets: WebGL2DeviceAndTargetPool;
+	readonly #sceneCompiler: SceneContributionCompilerAndSelector;
+	readonly #objectShadowPass: ObjectAndShadowPassExecutor;
+	readonly #terrainPass: TerrainPassExecutor;
+	readonly #overlayPasses: SkyParticleOverlayAndSelectionPasses;
+
+	static async build(
 		canvas: HTMLCanvasElement,
 		gl: WebGL2RenderingContext,
 		resources: WebGL2ResourceManager,
@@ -1319,167 +122,66 @@ export class WebGL2Renderer implements Renderer {
 		portalWarpDriveTuning: PortalWarpDriveTuning,
 		assertDeviceReady: () => void,
 	) {
-		this.#canvas = canvas;
 		this.#gl = gl;
-		this.#resources = resources;
 		this.#world = world;
 		this.#assertDeviceReady = assertDeviceReady;
-		this.#portalWarpDriveTuning = portalWarpDriveTuning;
-		this.#worldMarkerPass = new WebGL2WorldMarkerPass(gl);
-		this.#worldTrajectoryPass = new WebGL2WorldTrajectoryPass(gl);
-		this.#desiredTrajectoryPass = new WebGL2WorldTrajectoryPass(gl);
-		this.#textureSamplers = new WebGL2TextureSamplerCatalog(
+
+		this.#diagnostics = new RendererFrameDiagnosticsAndProfiler(
 			gl,
-			textureFilteringSupport,
+			assertDeviceReady,
 		);
-		this.#objectDrawCompiler = new WebGL2ObjectDrawCompiler({
+		this.#deviceTargets = new WebGL2DeviceAndTargetPool(
+			canvas,
+			gl,
 			resources,
-			resolveAtlasTexture: (key) => world.resolveAtlasTexture(key),
-			resolveStaticDetail: (role) =>
-				world.resolveActiveRegionStaticDetail(role),
-			resolveTexture2D: (key) => world.resolveTexture2D(key),
-			samplers: this.#textureSamplers,
-			textureFiltering: () => this.#frameTextureFiltering,
+			textureFilteringSupport,
+			portalWarpDriveTuning,
+			assertDeviceReady,
+			this.#diagnostics,
+		);
+		this.#sceneCompiler = new SceneContributionCompilerAndSelector(
+			world,
+			this.#deviceTargets,
+			this.#diagnostics,
+		);
+		this.#objectShadowPass = new ObjectAndShadowPassExecutor(
+			world,
+			this.#deviceTargets,
+			this.#diagnostics,
+			this.#sceneCompiler,
+		);
+		this.#terrainPass = new TerrainPassExecutor(
+			this.#deviceTargets,
+			this.#diagnostics,
+			this.#objectShadowPass,
+			this.#sceneCompiler,
+		);
+		this.#overlayPasses = new SkyParticleOverlayAndSelectionPasses(
+			world,
+			this.#deviceTargets,
+			this.#diagnostics,
+			this.#sceneCompiler,
+			this.#objectShadowPass,
+		);
+
+		this.combatEffects = this.#overlayPasses.combatEffects;
+		this.particles = this.#overlayPasses.particles;
+		this.sky = this.#overlayPasses.sky;
+		this.frameDiagnostics = this.#diagnostics.createCapability({
+			getAppearancesUsage: () =>
+				this.#sceneCompiler.dynamicAppearances.getResourceUsage(),
+			getPosesUsage: () =>
+				this.#sceneCompiler.dynamicPosePages.getResourceUsage(),
+			getCompiledObjectDrawsDiagnostics: () =>
+				this.#sceneCompiler.compiledDraws.getDiagnostics(),
+			getOutdoorTargetsDiagnostics: () =>
+				this.#objectShadowPass.outdoorPssmPass.getDiagnostics(),
+			getNameplateCacheDiagnostics: () =>
+				this.#overlayPasses.nameplateTextureCache.diagnostics(),
+			getNameplateIconDiagnostics: () =>
+				this.#overlayPasses.nameplateIconRepository.diagnostics(),
 		});
-		this.#dynamicAppearances = new WebGL2DynamicAppearances(
-			gl,
-			(material, ordering) =>
-				this.#objectDrawCompiler.prepareSurface(material, ordering),
-		);
-		this.#nameplateIconRepository = new NameplateIconRepository(
-			NAMEPLATE_ICON_CATALOG,
-			browserNameplateIconServices(),
-		);
-		this.#nameplateTextureCache = new WebGL2NameplateTextureCache(
-			gl,
-			new Canvas2DNameplateRasterizer(this.#nameplateIconRepository),
-		);
-		this.#frameInstances = new FrameInstanceStreamArena(gl);
-		this.#dynamicPosePages = new WebGL2DynamicPosePages(gl);
-		this.#dynamicDepths = new DynamicDepthPreparations(
-			(nodeId) => this.#publishDynamicPresentation(nodeId),
-			(appearance) => this.#dynamicAppearances.get(appearance),
-		);
-		this.#outdoorPssmPass = new WebGL2OutdoorPssmPass(
-			gl,
-			{
-				getGeometry: (key) => resources.getGeometry(world.resolveGeometry(key)),
-				getPose: (nodeId) => this.#dynamicPosePages.get(nodeId),
-			},
-			{
-				getDynamicDepth: (nodeId, showRetailHiddenGeometry) =>
-					this.#dynamicDepths.prepare(nodeId, showRetailHiddenGeometry),
-				hasOutdoorDynamicShadowGeometry: (nodeId, showRetailHiddenGeometry) =>
-					this.#dynamicDepths.hasOutdoorDynamicShadowGeometry(
-						nodeId,
-						showRetailHiddenGeometry,
-					),
-				readRenderContribution: (nodeId) =>
-					world.readRenderContribution(nodeId),
-				getEntityShadowDynamicFacts: (nodeId) =>
-					world.getEntityShadowDynamicFacts(nodeId),
-				queryOutdoorShadowCasterMasks: (...args) =>
-					world.queryOutdoorShadowCasterMasks(...args),
-			},
-		);
-		this.#outdoorPssmReceiverPrograms = new WebGL2OutdoorPssmReceiverPrograms(
-			gl,
-		);
-		this.#entityGroundingPrograms = new WebGL2EntityGroundingPrograms(gl);
-		this.#dynamicLightScratch = createDynamicLightScratch();
-		this.#terrainLightMask = createWebGL2TerrainLightMaskTexture(gl);
-		this.#deviceState = new WebGL2DeviceStateApplicator(gl);
-		this.#nearTerrainProgram = createWebGL2NearTerrainProgram(gl);
-		this.#farTerrainProgram = createWebGL2FarTerrainProgram(gl);
-		this.#objectProgram = createWebGL2ObjectProgram(gl);
-		this.#instancedObjectProgram = createWebGL2ObjectProgram(gl, {
-			distanceFog: true,
-			transformSource: "attribute",
-		});
-		this.#blendedObjectProgram = createWebGL2ObjectProgram(gl, {
-			distanceFog: false,
-		});
-		this.#blendedInstancedObjectProgram = createWebGL2ObjectProgram(gl, {
-			distanceFog: false,
-			transformSource: "attribute",
-		});
-		this.#objectFallbackBinding = {
-			sampler: this.#textureSamplers.getSampler({
-				mipLevels: 1,
-				policy: SHARED_FRONTEND_TUNING.rendering.frameDefaults.textureFiltering,
-				samplingClass: "exact",
-				wrap: TextureWrapMode.Clamp,
-			}),
-			texture: createObjectFallbackTexture(gl),
-		};
-		this.#entityOverlayPass = new WebGL2EntityOverlayPass(
-			gl,
-			this.#textureSamplers.getSampler({
-				mipLevels: 1,
-				policy: "linear",
-				samplingClass: "filterable",
-				wrap: TextureWrapMode.Clamp,
-			}),
-			this.#objectFallbackBinding.texture,
-		);
-		this.frameDiagnostics = {
-			snapshot: () => ({
-				dynamicResources: {
-					appearances: this.#dynamicAppearances.getResourceUsage(),
-					poses: this.#dynamicPosePages.getResourceUsage(),
-				},
-				compiledObjectDraws: this.#compiledDraws.getDiagnostics(),
-				entityShadows: {
-					outdoorTargets: this.#outdoorPssmPass.getDiagnostics(),
-				},
-				nameplates: {
-					budgetRejectedCandidateCount:
-						this.#budgetRejectedNameplateCandidateCount,
-					cache: this.#nameplateTextureCache.diagnostics(),
-					eligibleCandidateCount: this.#eligibleNameplateCandidateCount,
-					icons: this.#nameplateIconRepository.diagnostics(),
-				},
-				healthBars: {
-					budgetRejectedCandidateCount:
-						this.#budgetRejectedHealthBarCandidateCount,
-					eligibleCandidateCount: this.#eligibleHealthBarCandidateCount,
-				},
-				entityOverlays: {
-					submittedDrawCount: this.#submittedEntityOverlayDrawCount,
-					submittedInstanceCount: this.#submittedEntityOverlayInstanceCount,
-				},
-				profile: this.#frameProfiler?.getProfile() ?? null,
-				profilingEnabled: this.#frameProfiler !== null,
-				selectionMetrics: {
-					...this.#frameSelectionMetrics,
-					ambientOcclusion: {
-						...this.#frameSelectionMetrics.ambientOcclusion,
-						effectiveDistanceFade: this.#frameSelectionMetrics.ambientOcclusion
-							.effectiveDistanceFade
-							? {
-									...this.#frameSelectionMetrics.ambientOcclusion
-										.effectiveDistanceFade,
-								}
-							: null,
-					},
-					entitySelection: {
-						...this.#frameSelectionMetrics.entitySelection,
-					},
-				},
-			}),
-			setProfilingEnabled: (enabled) => this.#setFrameProfilingEnabled(enabled),
-			resetProfile: () => this.#frameProfiler?.reset(),
-			captureBakedDrawMergeCensus: () =>
-				new Promise<BakedDrawMergeCensus>((resolve) => {
-					if (this.#mergeCensusRequest !== null) {
-						throw new Error("A baked draw merge census is already in flight.");
-					}
-					this.#mergeCensusRequest = {
-						collector: new BakedDrawMergeCensusCollector(),
-						resolve,
-					};
-				}),
-		};
+
 		gl.clearColor(
 			FRONTEND_CLEAR_COLOR.red,
 			FRONTEND_CLEAR_COLOR.green,
@@ -1492,27 +194,18 @@ export class WebGL2Renderer implements Renderer {
 	drawFrame(input: FrameInput): RendererFrameFeedback {
 		this.#assertDeviceReady();
 		setWebGL2FailureFrame(this.#gl, input);
-		const profile = this.#frameProfiler?.beginFrame() ?? null;
+		const profile = this.#diagnostics.profiler?.beginFrame() ?? null;
 		try {
 			this.#drawFrameContent(input);
-			if (this.#combatEffectAdapters.size > 0) {
-				this.#frameProfiler?.setCpuPhase("transparencyAndOverlays");
-				this.#frameProfiler?.setGpuSystem("transparencyAndEffects");
-			}
-			for (const adapter of this.#combatEffectAdapters)
-				adapter.drawLane(
-					this.#canvas.width,
-					this.#canvas.height,
-					this.#renderScale,
-				);
-			this.#frameProfiler?.setGpuSystem("other");
-			this.#frameProfiler?.setCpuPhase("other");
+			this.#overlayPasses.drawCombatEffectLanes();
+			this.#diagnostics.profiler?.setGpuSystem("other");
+			this.#diagnostics.profiler?.setCpuPhase("other");
 			return Object.freeze({
 				portalTransitionReceipt: portalTransitionPresentationReceipt(
 					input.portalTransition,
 				),
 				selectedDynamicNodeIds: Object.freeze([
-					...this.#selectedDynamicNodeIds,
+					...this.#sceneCompiler.selectedDynamicNodeIds,
 				]),
 			});
 		} catch (error) {
@@ -1533,7 +226,7 @@ export class WebGL2Renderer implements Renderer {
 	): PortalTransitionPresentationReceipt | null {
 		this.#assertDeviceReady();
 		setWebGL2FailureFrame(this.#gl, input);
-		const profile = this.#frameProfiler?.beginFrame() ?? null;
+		const profile = this.#diagnostics.profiler?.beginFrame() ?? null;
 		try {
 			this.#drawPortalTransitionFrameContent(input);
 			return portalTransitionPresentationReceipt(input.portalTransition);
@@ -1550,45 +243,14 @@ export class WebGL2Renderer implements Renderer {
 	}
 
 	clearPresentation(): void {
-		this.#assertDeviceReady();
-		// Exceptional presentation failure is a clean cutover: stale portal/origin resources must not
-		// remain live behind the explicit black error surface.
-		this.#activeTransition = null;
-		this.#transitionSnapshot?.clear();
-		this.#transitionSnapshotGeneration = null;
-		this.#portalTransitionTarget?.destroy();
-		this.#portalTransitionTarget = null;
-		// `clearPresentation` is itself an observable presentation edge. Refresh the owned-resource
-		// facts now so failure diagnostics cannot report targets that this call already destroyed.
-		this.#frameSelectionMetrics.portalTransitionOnlyFramePresented = false;
-		this.#updateRenderTargetMetrics();
-		const gl = this.#gl;
-		gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
-		gl.viewport(0, 0, this.#frameWidth, this.#frameHeight);
-		gl.clearColor(0, 0, 0, 1);
-		gl.colorMask(true, true, true, true);
-		gl.depthMask(true);
-		gl.stencilMask(0xff);
-		gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT | gl.STENCIL_BUFFER_BIT);
+		this.#deviceTargets.clearPresentation(
+			this.#overlayPasses.entitySelectionPass,
+		);
 	}
 
 	/** Install one validated setup/animation pair for the transition-only authored tunnel pass. */
 	installPortalTransitionVisual(visual: PortalTransitionVisual): void {
-		this.#assertDeviceReady();
-		if (this.#portalTransitionVisual !== null) {
-			throw new Error("Portal transition visual is already installed.");
-		}
-		if (visual.template.parts.length === 0) {
-			throw new Error("Portal transition visual has no drawable parts.");
-		}
-		this.#portalTransitionVisual = visual;
-		this.#portalTransitionClip = playingClip(
-			visual.animation,
-			visual.lowFrame,
-			visual.animation.frameCount - 1,
-			visual.animation.framesPerSecond,
-			"loop",
-		);
+		this.#deviceTargets.installPortalTransitionVisual(visual);
 	}
 
 	/**
@@ -1598,87 +260,164 @@ export class WebGL2Renderer implements Renderer {
 	 * active-region detail are owned by the runtime and cannot be observed from inside a frame.
 	 */
 	invalidateResolvedResources(reason: ResolvedResourceInvalidation): void {
-		this.#compiledDraws.flush(reason);
-		if (reason === "atlas-publication") this.#dynamicAppearances.rebuild();
+		this.#sceneCompiler.invalidateResolvedResources(reason);
 	}
 
 	retainDynamicAppearance(
 		layout: DynamicLayout,
 		appearance: DynamicAppearance,
 	): () => void {
-		return this.#dynamicAppearances.retain(layout, appearance);
+		return this.#sceneCompiler.retainDynamicAppearance(layout, appearance);
 	}
 
 	/** Toggle the harness-only AO category view without widening production frame settings. */
 	setAmbientOcclusionCoverageVisualizationEnabled(enabled: boolean): void {
-		this.#saoCoverageVisualizationEnabled = enabled;
-		this.#saoPass?.setCoverageVisualizationEnabled(enabled);
+		this.#deviceTargets.setAmbientOcclusionCoverageVisualizationEnabled(
+			enabled,
+		);
 	}
 
 	/** Read the latest one-shot harness census, if a visualized AO frame completed. */
 	getAmbientOcclusionCoverageCensus(): WebGL2SaoCoverageCensus | null {
-		return this.#saoPass?.getCoverageCensus() ?? null;
+		return this.#deviceTargets.getAmbientOcclusionCoverageCensus();
+	}
+
+	/**
+	 * Execute the public portal path through production contribution and GPU paths.
+	 *
+	 * This harness seam shares both planning and execution with continuous portal rendering.
+	 */
+	probePortalExecution(
+		anchorLandblockId: FrameInput["anchorLandblockId"],
+		viewInput: FrameViewInput,
+		rootScope: SceneScope,
+		extent: RenderExtent,
+		frameSettings: FrameSettings,
+	): PortalExecutionProbeResult {
+		this.#assertDeviceReady();
+		this.#deviceTargets.applyRenderExtent(extent);
+		this.#resetFrame(1, "portal");
+		this.#overlayPasses.prepareEntitySelection(
+			frameSettings.showRetailHiddenGeometry,
+		);
+		const prepared = this.#sceneCompiler.prepareViewGeometry(
+			anchorLandblockId,
+			viewInput,
+		);
+		const pipeline = this.#deviceTargets.acquirePortalScopeAtlasPipeline();
+		const planningStartedAt = performance.now();
+		const frame = pipeline.prepare(
+			this.#world.getPortalTopologyView(),
+			this.#sceneCompiler.createPortalScopeWindowCullInput(
+				prepared,
+				viewInput,
+				rootScope,
+			),
+		);
+		const planningDurationMs = performance.now() - planningStartedAt;
+		this.#diagnostics.accumulatePortalScopeAtlasMetrics(frame);
+		const plan = this.#sceneCompiler.preparePortalContributions(
+			prepared,
+			frame,
+			frameSettings,
+			null,
+			this.#objectShadowPass,
+			this.#overlayPasses,
+		);
+		this.#sceneCompiler.uploadDynamicPoses(
+			this.#deviceTargets.frameClockSeconds,
+		);
+		this.#executePortalScopeAtlasFrame(
+			plan,
+			PROBE_SHADING,
+			frameSettings,
+			pipeline,
+		);
+		this.#updateRenderTargetMetrics();
+		this.#finishFrameSelectionMetrics();
+		return {
+			crossingCount: frame.atlas.visibility.selectedCrossingCount,
+			objectSubmissionCount: frame.opaqueRouting.trace.objectSubmissionCount,
+			planningDurationMs,
+			scopeCount: frame.count,
+			selectionMetrics: { ...this.#diagnostics.metrics },
+			targetBytes: this.#diagnostics.metrics.portalTargetBytes,
+			terrainSubmissionCount: frame.opaqueRouting.trace.terrainSubmissionCount,
+			traversalDepth: frame.atlas.commands.traversalDepth,
+		};
+	}
+
+	async destroy(): Promise<void> {
+		this.#overlayPasses.destroyParticlesAndCombatEffects();
+		this.#sceneCompiler.resetDynamicFrameState();
+		this.#objectShadowPass.destroyDynamicPrograms();
+		this.#sceneCompiler.clearDynamicFrameCaches();
+		this.#overlayPasses.clearPreparedSelection();
+		this.#sceneCompiler.destroyDynamicResources();
+		this.#diagnostics.destroy();
+		this.#deviceTargets.destroySamplers();
+		this.#terrainPass.destroyLightMask();
+		this.#deviceTargets.destroyTargetsAndPresentation();
+		this.#overlayPasses.destroyEntitySelectionPass();
+		this.#deviceTargets.destroySaoPass();
+		this.#overlayPasses.destroyPassesAndNameplates();
+		this.#overlayPasses.destroySkyPrograms();
+		this.#terrainPass.destroyPrograms();
+		this.#objectShadowPass.destroy();
 	}
 
 	#drawFrameContent(input: FrameInput): void {
 		const entityShadows = createEntityShadowSettings(
 			input.frameSettings.entityShadows,
 		);
-		if (entityShadows.mode !== "shadow-maps") this.#outdoorPssmPass.disable();
-		this.#activeOutdoorPssmFrame = null;
-		this.#frameTextureFiltering = input.frameSettings.quality.textureFiltering;
-		// Compiled facts embed the samplers filtering selects and the cull-face override the
-		// env-cell mode selects, so a change to either invalidates every compiled entry. Both
-		// arrive as frame settings, which is the only place the renderer can observe them change.
-		if (this.#compiledTextureFiltering !== this.#frameTextureFiltering) {
-			this.#dynamicAppearances.rebuild();
-			if (this.#compiledTextureFiltering !== null) {
-				this.#compiledDraws.flush("texture-filtering");
-			}
-			this.#compiledTextureFiltering = this.#frameTextureFiltering;
+		if (entityShadows.mode !== "shadow-maps") {
+			this.#objectShadowPass.disableOutdoorPssm();
 		}
-		if (
-			this.#compiledEnvCellRenderMode !== input.frameSettings.envCellRenderMode
-		) {
-			if (this.#compiledEnvCellRenderMode !== null) {
-				this.#compiledDraws.flush("env-cell-render-mode");
-			}
-			this.#compiledEnvCellRenderMode = input.frameSettings.envCellRenderMode;
-		}
-		this.#frameClockSeconds = input.timeSeconds;
-		this.#frameWorldIndicator = input.worldIndicator ?? null;
-		this.#frameSummonLeashes = input.summonLeashes ?? [];
-		this.#frameSelectionTarget = input.selectionTarget;
-		this.#frameEntityOverlays = input.entityOverlays;
-		this.#frameViewerEntityIdentity = input.viewerEntityIdentity;
+		this.#objectShadowPass.resetActiveOutdoorPssmFrame();
+		const textureFiltering = input.frameSettings.quality.textureFiltering;
+		this.#deviceTargets.setFrameTextureFiltering(textureFiltering);
+		this.#sceneCompiler.syncCompiledSettings(
+			textureFiltering,
+			input.frameSettings.envCellRenderMode,
+		);
+		this.#deviceTargets.setFrameClockSeconds(input.timeSeconds);
+		this.#overlayPasses.setFrameInputs(
+			input.worldIndicator ?? null,
+			input.summonLeashes ?? [],
+			input.selectionTarget,
+			input.entityOverlays,
+			input.viewerEntityIdentity,
+		);
 		// Snapshotted here because the flat schedule never receives frame settings, and both
 		// schedules reach presentation through the same shared helper.
-		this.#frameColorGrade = input.frameSettings.colorGrade;
-		this.#frameEntitySelectionOutline =
-			input.frameSettings.entitySelectionOutline;
+		this.#deviceTargets.setFramePresentationState(
+			input.frameSettings.colorGrade,
+			input.frameSettings.entitySelectionOutline,
+		);
 		const quality = input.frameSettings.quality;
 		validateRenderScale(quality.renderScale, "Frame settings");
-		this.#renderScale = quality.renderScale;
+		this.#deviceTargets.setRenderScale(quality.renderScale);
 		// Cutoffs are authored in CSS pixels so a density change stays a sampling decision. The
 		// conversion happens once here; the projection math downstream is drawing-buffer only.
-		this.#minimumPortalFootprintDevicePixelArea = devicePixelArea(
-			quality.minimumPortalFootprintCssPixelArea,
-			this.#renderScale,
-		);
-		this.#minimumObjectFootprintDevicePixelArea = devicePixelArea(
-			quality.minimumObjectFootprintCssPixelArea,
-			this.#renderScale,
+		this.#sceneCompiler.setMinimumFootprintAreas(
+			devicePixelArea(
+				quality.minimumPortalFootprintCssPixelArea,
+				quality.renderScale,
+			),
+			devicePixelArea(
+				quality.minimumObjectFootprintCssPixelArea,
+				quality.renderScale,
+			),
 		);
 		// Capture before resizing the scene target: if a transition begins on the same frame as a
 		// drawing-buffer resize, the outgoing image is still the last completed native-sized frame.
-		this.#prepareTransitionSnapshot(input.portalTransition);
-		this.#applyRenderExtent(input.extent);
-		this.#activeTransition = input.portalTransition ?? null;
-		this.#resetFrameSelectionMetrics(
-			input.views.length,
-			input.frameSettings.envCellRenderMode,
+		this.#deviceTargets.prepareTransitionSnapshot(input.portalTransition);
+		this.#deviceTargets.applyRenderExtent(input.extent);
+		this.#deviceTargets.setActiveTransition(input.portalTransition ?? null);
+		this.#resetFrame(input.views.length, input.frameSettings.envCellRenderMode);
+		this.#overlayPasses.prepareEntitySelection(
+			input.frameSettings.showRetailHiddenGeometry,
 		);
-		this.#prepareEntitySelection(input.frameSettings.showRetailHiddenGeometry);
 		const fog = input.frameSettings.distanceFogEnabled
 			? input.environment.distanceFog
 			: null;
@@ -1696,17 +435,10 @@ export class WebGL2Renderer implements Renderer {
 			input.frameSettings.ambientOcclusion,
 			AMBIENT_OCCLUSION_DISTANCE_FADE,
 		);
-		if (ambientOcclusion.kind === "disabled") this.#saoPass?.disable();
-		if (ambientOcclusion.kind === "enabled") {
-			this.#ambientOcclusionDistanceFadeMetrics.disabledAt =
-				ambientOcclusion.distanceFade.disabledAt;
-			this.#ambientOcclusionDistanceFadeMetrics.fullStrengthUntil =
-				ambientOcclusion.distanceFade.fullStrengthUntil;
-			this.#frameSelectionMetrics.ambientOcclusion.effectiveDistanceFade =
-				this.#ambientOcclusionDistanceFadeMetrics;
-		} else {
-			this.#frameSelectionMetrics.ambientOcclusion.effectiveDistanceFade = null;
+		if (ambientOcclusion.kind === "disabled") {
+			this.#deviceTargets.disableSaoPass();
 		}
+		this.#diagnostics.recordAmbientOcclusionDistanceFade(ambientOcclusion);
 		// Dynamic lights are frame-global and reach every draw, so they are assembled once here
 		// rather than per role. Positions stay in canonical scene space; the bind rebases them.
 		const sceneCameraPosition =
@@ -1728,7 +460,7 @@ export class WebGL2Renderer implements Renderer {
 			sceneCameraPosition,
 			MAX_DYNAMIC_LIGHTS,
 		);
-		this.#frameSelectionMetrics.droppedLights += fittedDynamic.dropped;
+		this.#diagnostics.metrics.droppedLights += fittedDynamic.dropped;
 		const clear = fog?.color ?? input.environment.backgroundColor;
 		const shading: SceneShading = {
 			clearColor: [clear.red, clear.green, clear.blue, clear.alpha],
@@ -1742,7 +474,11 @@ export class WebGL2Renderer implements Renderer {
 			),
 			dynamicLights: fittedDynamic.lights,
 			staticLights: (landblockId) =>
-				this.#resolveStaticLights(input, landblockId, sceneCameraPosition),
+				this.#objectShadowPass.resolveStaticLights(
+					input,
+					landblockId,
+					sceneCameraPosition,
+				),
 			lighting: resolveSceneLightingByRole(
 				input.environment.lighting,
 				input.views.some((view) => view.cameraInsideSealedCell)
@@ -1750,38 +486,39 @@ export class WebGL2Renderer implements Renderer {
 					: null,
 			),
 		};
-		this.#beginFrame(shading.clearColor);
-		this.#particlePass?.beginFrame(this.#particleRecords);
+		this.#deviceTargets.beginFrame(shading.clearColor);
+		this.#overlayPasses.beginParticleFrame();
 
 		if (input.frameSettings.envCellRenderMode === "flat") {
-			this.#frameProfiler?.setCpuPhase("sceneSelection");
+			this.#diagnostics.profiler?.setCpuPhase("sceneSelection");
 			const plans = input.views.map((view) => {
-				const geometry = this.#prepareViewGeometry(
+				const geometry = this.#sceneCompiler.prepareViewGeometry(
 					input.anchorLandblockId,
 					view,
 				);
 
-				const shadows = this.#prepareOutdoorShadows(
+				const shadows = this.#objectShadowPass.prepareOutdoorShadows(
 					geometry,
 					entityShadows,
 					input.frameSettings.showRetailHiddenGeometry,
 					shading,
 				);
-				const contributions = this.#collectScene(
+				const contributions = this.#sceneCompiler.collectScene(
 					geometry,
 					input.frameSettings,
 					shadows,
+					this.#objectShadowPass,
+					this.#overlayPasses,
 				);
 				return { view: { ...geometry, ...contributions }, shadows };
 			});
-			this.#frameProfiler?.setCpuPhase("opaqueSubmission");
-			this.#dynamicPosePages.upload(
-				this.#poseUploadParts,
-				this.#frameClockSeconds,
+			this.#diagnostics.profiler?.setCpuPhase("opaqueSubmission");
+			this.#sceneCompiler.uploadDynamicPoses(
+				this.#deviceTargets.frameClockSeconds,
 			);
 			for (const plan of plans) {
-				this.#frameProfiler?.setCpuPhase("opaqueSubmission");
-				this.#executeOutdoorShadows(plan.shadows);
+				this.#diagnostics.profiler?.setCpuPhase("opaqueSubmission");
+				this.#objectShadowPass.executeOutdoorShadows(plan.shadows);
 				this.#drawFlatView(
 					plan.view,
 					shading,
@@ -1789,13 +526,12 @@ export class WebGL2Renderer implements Renderer {
 					input.frameSettings.showRetailHiddenGeometry,
 				);
 			}
-			this.#frameProfiler?.setCpuPhase("other");
+			this.#diagnostics.profiler?.setCpuPhase("other");
 		} else {
-			const pipeline = (this.#portalScopeAtlasPipeline ??=
-				new WebGL2PortalScopeAtlasPipeline(this.#gl));
+			const pipeline = this.#deviceTargets.acquirePortalScopeAtlasPipeline();
 			const plans = input.views.map((view) => {
-				this.#frameProfiler?.setCpuPhase("sceneSelection");
-				const prepared = this.#prepareViewGeometry(
+				this.#diagnostics.profiler?.setCpuPhase("sceneSelection");
+				const prepared = this.#sceneCompiler.prepareViewGeometry(
 					input.anchorLandblockId,
 					view,
 				);
@@ -1809,10 +545,9 @@ export class WebGL2Renderer implements Renderer {
 					pipeline,
 				);
 			});
-			this.#frameProfiler?.setCpuPhase("opaqueSubmission");
-			this.#dynamicPosePages.upload(
-				this.#poseUploadParts,
-				this.#frameClockSeconds,
+			this.#diagnostics.profiler?.setCpuPhase("opaqueSubmission");
+			this.#sceneCompiler.uploadDynamicPoses(
+				this.#deviceTargets.frameClockSeconds,
 			);
 			for (const plan of plans) {
 				this.#executePortalScopeAtlasFrame(
@@ -1822,7 +557,7 @@ export class WebGL2Renderer implements Renderer {
 					pipeline,
 				);
 			}
-			this.#frameProfiler?.setCpuPhase("other");
+			this.#diagnostics.profiler?.setCpuPhase("other");
 		}
 
 		this.#updateRenderTargetMetrics();
@@ -1832,49 +567,42 @@ export class WebGL2Renderer implements Renderer {
 	#drawPortalTransitionFrameContent(
 		input: PortalTransitionOnlyFrameInput,
 	): void {
-		this.#frameTextureFiltering = input.frameSettings.quality.textureFiltering;
-		if (this.#compiledTextureFiltering !== this.#frameTextureFiltering) {
-			this.#dynamicAppearances.rebuild();
-			if (this.#compiledTextureFiltering !== null) {
-				this.#compiledDraws.flush("texture-filtering");
-			}
-			this.#compiledTextureFiltering = this.#frameTextureFiltering;
-		}
-		this.#frameColorGrade = input.frameSettings.colorGrade;
-		this.#frameEntitySelectionOutline =
-			input.frameSettings.entitySelectionOutline;
+		const textureFiltering = input.frameSettings.quality.textureFiltering;
+		this.#deviceTargets.setFrameTextureFiltering(textureFiltering);
+		this.#sceneCompiler.syncCompiledSettings(textureFiltering);
+		this.#deviceTargets.setFramePresentationState(
+			input.frameSettings.colorGrade,
+			input.frameSettings.entitySelectionOutline,
+		);
 		validateRenderScale(
 			input.frameSettings.quality.renderScale,
 			"Frame settings",
 		);
-		this.#renderScale = input.frameSettings.quality.renderScale;
-		this.#prepareTransitionSnapshot(input.portalTransition);
-		this.#applyRenderExtent(input.extent);
-		this.#activeTransition = input.portalTransition;
-		this.#resetFrameSelectionMetrics(0, input.frameSettings.envCellRenderMode);
-		this.#frameSelectionMetrics.portalTransitionOnlyFramePresented = true;
+		this.#deviceTargets.setRenderScale(input.frameSettings.quality.renderScale);
+		this.#deviceTargets.prepareTransitionSnapshot(input.portalTransition);
+		this.#deviceTargets.applyRenderExtent(input.extent);
+		this.#deviceTargets.setActiveTransition(input.portalTransition);
+		this.#resetFrame(0, input.frameSettings.envCellRenderMode);
+		this.#diagnostics.metrics.portalTransitionOnlyFramePresented = true;
 
-		const target = this.#acquireFlatSceneTarget();
-		this.#beginFlatOpaqueScene(target, BLACK_SCENE_CLEAR_COLOR);
-		this.#frameProfiler?.setCpuPhase("postAndPresentation");
-		this.#drawPortalTransitionTunnel(
+		const target = this.#deviceTargets.acquireFlatSceneTarget();
+		this.#deviceTargets.beginFlatOpaqueScene(target, BLACK_SCENE_CLEAR_COLOR);
+		this.#diagnostics.profiler?.setCpuPhase("postAndPresentation");
+		this.#deviceTargets.drawPortalTransitionTunnel(
 			target,
 			input.frameSettings.showRetailHiddenGeometry,
+			this.#sceneCompiler,
+			this.#objectShadowPass,
 		);
-		this.#presentFlatScene(target, null);
-		this.#frameProfiler?.setCpuPhase("other");
+		this.#deviceTargets.presentFlatScene(
+			target,
+			null,
+			this.#overlayPasses,
+			this.#objectShadowPass,
+		);
+		this.#diagnostics.profiler?.setCpuPhase("other");
 		this.#updateRenderTargetMetrics();
 		this.#finishFrameSelectionMetrics();
-	}
-
-	#setFrameProfilingEnabled(enabled: boolean): void {
-		this.#assertDeviceReady();
-		if (enabled) {
-			this.#frameProfiler ??= new WebGL2FrameProfiler(this.#gl);
-			return;
-		}
-		this.#frameProfiler?.destroy();
-		this.#frameProfiler = null;
 	}
 
 	/** Prepare one production portal view from its authoritative camera residency. */
@@ -1886,205 +614,38 @@ export class WebGL2Renderer implements Renderer {
 		entityShadows: EntityShadowSettings,
 		pipeline: WebGL2PortalScopeAtlasPipeline,
 	): PreparedPortalView {
-		this.#frameProfiler?.setCpuPhase("portalPlanning");
+		this.#diagnostics.profiler?.setCpuPhase("portalPlanning");
 		const placement = viewInput.camera.placement;
 		const rootScope = scopeFor(placement.landblockId, placement.envCellId);
 
 		const frame = pipeline.prepare(
 			this.#world.getPortalTopologyView(),
-			this.#createPortalScopeWindowCullInput(prepared, viewInput, rootScope),
+			this.#sceneCompiler.createPortalScopeWindowCullInput(
+				prepared,
+				viewInput,
+				rootScope,
+			),
 		);
 
-		this.#accumulatePortalScopeAtlasMetrics(frame);
-		this.#frameProfiler?.setCpuPhase("sceneSelection");
+		this.#diagnostics.accumulatePortalScopeAtlasMetrics(frame);
+		this.#diagnostics.profiler?.setCpuPhase("sceneSelection");
 		const shadows =
 			frame.atlas.visibility.selectedScopeOrdinal("outdoor") !== null
-				? this.#prepareOutdoorShadows(
+				? this.#objectShadowPass.prepareOutdoorShadows(
 						prepared,
 						entityShadows,
 						frameSettings.showRetailHiddenGeometry,
 						shading,
 					)
 				: null;
-		return this.#preparePortalContributions(
+		return this.#sceneCompiler.preparePortalContributions(
 			prepared,
 			frame,
 			frameSettings,
 			shadows,
+			this.#objectShadowPass,
+			this.#overlayPasses,
 		);
-	}
-
-	/** Aggregate one independent view's scope-atlas plan into the frame snapshot. */
-	#accumulatePortalScopeAtlasMetrics(frame: WebGL2PortalScopeAtlasFrame): void {
-		const atlas = frame.atlas;
-		const visibility = atlas.visibility;
-		const metrics = this.#frameSelectionMetrics;
-		metrics.portalSelectedScopeCount += visibility.selectedScopeCount;
-		metrics.portalSelectedCrossingCount += visibility.selectedCrossingCount;
-		metrics.portalCompletedCullDepth += visibility.completedDepth;
-		metrics.portalPropagationDrawCount +=
-			atlas.commands.maskPropagationCommandCount;
-		metrics.portalProjectionPrimitiveCount += frame.projectionPrimitiveCount;
-		metrics.portalAtlasTilePixelCount += atlas.trace.tilePixelCount;
-		metrics.portalFrontierRetreatCount += atlas.trace.frontierRetreatCount;
-		if (visibility.status === "truncated")
-			metrics.portalTruncatedViewCount += 1;
-	}
-
-	/** Copy renderer-lifetime target ownership into the current diagnostics snapshot. */
-	#updateRenderTargetMetrics(): void {
-		const diagnostics =
-			this.#portalScopeAtlasPipeline?.getDiagnostics() ?? null;
-		this.#frameSelectionMetrics.portalFramebufferCount =
-			diagnostics?.activeFramebufferCount ?? 0;
-		this.#frameSelectionMetrics.portalTargetBytes =
-			diagnostics?.activeBytes ?? 0;
-		const transitionSnapshot = this.#transitionSnapshot?.getDiagnostics();
-		this.#frameSelectionMetrics.portalTransitionSnapshotBytes =
-			transitionSnapshot?.activeBytes ?? 0;
-		this.#frameSelectionMetrics.portalTransitionOriginCaptured =
-			(transitionSnapshot?.activeBytes ?? 0) > 0;
-		this.#frameSelectionMetrics.portalTransitionSnapshotAllocatedGenerationCount =
-			transitionSnapshot?.allocatedGenerationCount ?? 0;
-		this.#frameSelectionMetrics.portalTransitionSnapshotDisposedGenerationCount =
-			transitionSnapshot?.disposedGenerationCount ?? 0;
-		const transitionTarget = this.#portalTransitionTarget;
-		this.#frameSelectionMetrics.portalTransitionFramebufferCount =
-			transitionTarget?.activeFramebufferCount ?? 0;
-		this.#frameSelectionMetrics.portalTransitionTargetBytes =
-			transitionTarget?.activeBytes ?? 0;
-		this.#frameSelectionMetrics.portalTransitionVisualInstalled =
-			this.#portalTransitionVisual !== null;
-		this.#frameSelectionMetrics.portalTransitionGeneration =
-			this.#activeTransition?.generation ?? null;
-		this.#frameSelectionMetrics.portalTransitionKind =
-			this.#activeTransition?.kind ?? null;
-		const flatTarget = this.#flatSceneTarget;
-		this.#frameSelectionMetrics.flatSceneFramebufferCount =
-			flatTarget?.activeFramebufferCount ?? 0;
-		this.#frameSelectionMetrics.flatSceneTargetBytes =
-			flatTarget?.activeBytes ?? 0;
-		this.#frameSelectionMetrics.flatSceneAllocatedGenerationCount =
-			flatTarget?.allocatedGenerationCount ?? 0;
-		this.#frameSelectionMetrics.flatSceneDisposedGenerationCount =
-			flatTarget?.disposedGenerationCount ?? 0;
-		const selectionDiagnostics = this.#entitySelectionPass?.getDiagnostics();
-		this.#frameSelectionMetrics.entitySelection.activeMaskBytes =
-			selectionDiagnostics?.activeMaskBytes ?? 0;
-		this.#frameSelectionMetrics.entitySelection.allocatedTargetGenerationCount =
-			selectionDiagnostics?.allocatedTargetGenerationCount ?? 0;
-		this.#frameSelectionMetrics.entitySelection.disposedTargetGenerationCount =
-			selectionDiagnostics?.disposedTargetGenerationCount ?? 0;
-		const saoPass = this.#saoPass;
-		const ambientOcclusionMetrics =
-			this.#frameSelectionMetrics.ambientOcclusion;
-		ambientOcclusionMetrics.activeBytes = saoPass?.activeBytes ?? 0;
-		ambientOcclusionMetrics.allocatedGenerationCount =
-			saoPass?.allocatedGenerationCount ?? 0;
-		ambientOcclusionMetrics.disposedGenerationCount =
-			saoPass?.disposedGenerationCount ?? 0;
-	}
-
-	/**
-	 * Execute the public portal path through production contribution and GPU paths.
-	 *
-	 * This harness seam shares both planning and execution with continuous portal rendering.
-	 */
-	probePortalExecution(
-		anchorLandblockId: FrameInput["anchorLandblockId"],
-		viewInput: FrameViewInput,
-		rootScope: SceneScope,
-		extent: RenderExtent,
-		frameSettings: FrameSettings,
-	): PortalExecutionProbeResult {
-		this.#assertDeviceReady();
-		this.#applyRenderExtent(extent);
-		this.#resetFrameSelectionMetrics(1, "portal");
-		this.#prepareEntitySelection(frameSettings.showRetailHiddenGeometry);
-		const prepared = this.#prepareViewGeometry(anchorLandblockId, viewInput);
-		const pipeline = (this.#portalScopeAtlasPipeline ??=
-			new WebGL2PortalScopeAtlasPipeline(this.#gl));
-		const planningStartedAt = performance.now();
-		const frame = pipeline.prepare(
-			this.#world.getPortalTopologyView(),
-			this.#createPortalScopeWindowCullInput(prepared, viewInput, rootScope),
-		);
-		const planningDurationMs = performance.now() - planningStartedAt;
-		this.#accumulatePortalScopeAtlasMetrics(frame);
-		const plan = this.#preparePortalContributions(
-			prepared,
-			frame,
-			frameSettings,
-			null,
-		);
-		this.#dynamicPosePages.upload(
-			this.#poseUploadParts,
-			this.#frameClockSeconds,
-		);
-		this.#executePortalScopeAtlasFrame(
-			plan,
-			PROBE_SHADING,
-			frameSettings,
-			pipeline,
-		);
-		this.#updateRenderTargetMetrics();
-		this.#finishFrameSelectionMetrics();
-		return {
-			crossingCount: frame.atlas.visibility.selectedCrossingCount,
-			objectSubmissionCount: frame.opaqueRouting.trace.objectSubmissionCount,
-			planningDurationMs,
-			scopeCount: frame.count,
-			selectionMetrics: { ...this.#frameSelectionMetrics },
-			targetBytes: this.#frameSelectionMetrics.portalTargetBytes,
-			terrainSubmissionCount: frame.opaqueRouting.trace.terrainSubmissionCount,
-			traversalDepth: frame.atlas.commands.traversalDepth,
-		};
-	}
-
-	/** Resolve selected scene and particle inputs before any view begins dynamic execution. */
-	#preparePortalContributions(
-		prepared: PreparedViewGeometry,
-		frame: WebGL2PortalScopeAtlasFrame,
-		frameSettings: FrameSettings,
-		shadows: PreparedOutdoorShadowView | null,
-	): PreparedPortalView {
-		const visible = this.#world.queryScopeWindowSelectionScene(
-			prepared.clipFromAnchor,
-			prepared.frustum.cameraPosition,
-			prepared.anchorLandblockId,
-			frame,
-			renderCullingGroupFilter(frameSettings.layerVisibility),
-		);
-
-		const contributions = this.#resolveSceneContributions(
-			prepared,
-			visible.entries,
-			frameSettings,
-			frame.atlas.visibility,
-			shadows,
-		);
-		const particlesByScope = prepared.submissionStorage.particles.route(
-			`scope-atlas:${frame.atlas.visibility.topologyRevision}`,
-			this.#particleSources,
-			(owner) => {
-				if (owner === SKY_PARTICLE_RENDER_OWNER) return "sky";
-				const renderScopeKey =
-					owner === EXTERIOR_PARTICLE_RENDER_OWNER
-						? "outdoor"
-						: this.#world.getRenderScopeKey(owner);
-				if (renderScopeKey === null) return null;
-				return frame.atlas.visibility.selectedScopeOrdinal(renderScopeKey) ===
-					null
-					? null
-					: renderScopeKey;
-			},
-		);
-		return {
-			view: { ...prepared, ...contributions },
-			frame,
-			particlesByScope,
-			shadows,
-		};
 	}
 
 	/** Execute the same already-prepared compositor schedule for continuous frames and probes. */
@@ -2095,15 +656,15 @@ export class WebGL2Renderer implements Renderer {
 		pipeline: WebGL2PortalScopeAtlasPipeline,
 	): void {
 		const { view, frame, particlesByScope } = plan;
-		const clearColor = this.#viewClearColor(view, shading);
-		this.#frameProfiler?.setCpuPhase("opaqueSubmission");
-		this.#executeOutdoorShadows(plan.shadows);
-		this.#frameProfiler?.setCpuPhase("other");
-		const target = this.#acquireFlatSceneTarget();
+		const clearColor = this.#deviceTargets.viewClearColor(view, shading);
+		this.#diagnostics.profiler?.setCpuPhase("opaqueSubmission");
+		this.#objectShadowPass.executeOutdoorShadows(plan.shadows);
+		this.#diagnostics.profiler?.setCpuPhase("other");
+		const target = this.#deviceTargets.acquireFlatSceneTarget();
 		const usesPortalAtlas = !frame.atlas.directRootOutput;
 		if (usesPortalAtlas) {
-			this.#frameProfiler?.setCpuPhase("portalComposition");
-			this.#frameProfiler?.setGpuSystem("portalComposition");
+			this.#diagnostics.profiler?.setCpuPhase("portalComposition");
+			this.#diagnostics.profiler?.setGpuSystem("portalComposition");
 		}
 		const portalTargets = pipeline.beginOpaqueScene(
 			frame,
@@ -2111,26 +672,28 @@ export class WebGL2Renderer implements Renderer {
 			target.framebuffer,
 		);
 		if (usesPortalAtlas) {
-			this.#frameProfiler?.setGpuSystem("other");
+			this.#diagnostics.profiler?.setGpuSystem("other");
 		}
-		this.#frameProfiler?.setCpuPhase("sceneSelection");
-		const objectPhases = this.#createObjectSubmissionPhases(view);
-		const objectRuns = this.#prepareViewObjectRuns(objectPhases);
+		this.#diagnostics.profiler?.setCpuPhase("sceneSelection");
+		const objectPhases =
+			this.#objectShadowPass.createObjectSubmissionPhases(view);
+		const objectRuns =
+			this.#objectShadowPass.prepareViewObjectRuns(objectPhases);
 		const hasOutdoorScope =
 			frame.atlas.visibility.selectedScopeOrdinal("outdoor") !== null;
 		if (hasOutdoorScope) {
-			this.#frameProfiler?.setCpuPhase("transparencyAndOverlays");
-			this.#drawSky(view, shading, "before-world", pipeline);
+			this.#diagnostics.profiler?.setCpuPhase("transparencyAndOverlays");
+			this.#overlayPasses.drawSky(view, shading, "before-world", pipeline);
 			const skyBatches = particlesByScope.get("sky");
 			if (
 				skyBatches &&
 				skyBatches.length > 0 &&
 				SHARED_FRONTEND_TUNING.rendering.skyParticles.opacityScale > 0
 			) {
-				this.#drawParticleBatches(
+				this.#overlayPasses.drawParticleBatches(
 					view,
 					skyBatches,
-					this.#frameClockSeconds *
+					this.#deviceTargets.frameClockSeconds *
 						SHARED_FRONTEND_TUNING.rendering.skyParticles.speedMultiplier,
 					SHARED_FRONTEND_TUNING.rendering.skyParticles.opacityScale,
 				);
@@ -2139,1506 +702,84 @@ export class WebGL2Renderer implements Renderer {
 		// Submit opaque objects before terrain so buildings, walls, and props populate hardware
 		// Early-Z before multi-layer near-terrain shading executes. Terrain uses LESS with the
 		// same positive polygon offset, keeping coplanar object-vs-terrain ties identical.
-		this.#frameProfiler?.setCpuPhase("opaqueSubmission");
-		this.#drawOpaqueObjects(view, objectRuns.opaque, shading, pipeline);
-		this.#frameProfiler?.setCpuPhase("terrainSubmission");
-		this.#drawTerrain(view, shading, pipeline);
+		this.#diagnostics.profiler?.setCpuPhase("opaqueSubmission");
+		this.#objectShadowPass.drawOpaqueObjects(
+			view,
+			objectRuns.opaque,
+			shading,
+			pipeline,
+		);
+		this.#diagnostics.profiler?.setCpuPhase("terrainSubmission");
+		this.#terrainPass.drawTerrain(view, shading, pipeline);
 		if (portalTargets !== null) {
-			this.#frameProfiler?.setCpuPhase("portalComposition");
-			this.#frameProfiler?.setGpuSystem("portalComposition");
+			this.#diagnostics.profiler?.setCpuPhase("portalComposition");
+			this.#diagnostics.profiler?.setGpuSystem("portalComposition");
 		} else {
-			this.#frameProfiler?.setCpuPhase("other");
+			this.#diagnostics.profiler?.setCpuPhase("other");
 		}
 		pipeline.execute(target.framebuffer);
 		pipeline.beginDeferredScene(target.framebuffer);
 		if (portalTargets !== null) {
-			this.#frameProfiler?.setGpuSystem("other");
+			this.#diagnostics.profiler?.setGpuSystem("other");
 		}
 		// Entity color participates once, after static portal composition. Its depth both
 		// occludes later draws and contributes to the same AO evaluation as static geometry.
-		this.#frameProfiler?.setCpuPhase("opaqueSubmission");
-		this.#drawDynamicOpaque(view, shading);
+		this.#diagnostics.profiler?.setCpuPhase("opaqueSubmission");
+		this.#objectShadowPass.drawDynamicOpaque(view, shading);
 		if (shading.ambientOcclusion.kind === "enabled") {
-			this.#frameProfiler?.setCpuPhase("postAndPresentation");
-			this.#frameProfiler?.setGpuSystem("ambientOcclusion");
-			this.#getSaoPass().apply(
-				target,
-				view.camera,
-				view.projection,
-				shading.ambientOcclusion,
-			);
-			this.#recordAmbientOcclusionWork(
+			this.#diagnostics.profiler?.setCpuPhase("postAndPresentation");
+			this.#diagnostics.profiler?.setGpuSystem("ambientOcclusion");
+			this.#deviceTargets
+				.getSaoPass()
+				.apply(target, view.camera, view.projection, shading.ambientOcclusion);
+			this.#diagnostics.recordAmbientOcclusionWork(
 				target.extent.width * target.extent.height,
 			);
-			this.#frameProfiler?.setGpuSystem("other");
+			this.#diagnostics.profiler?.setGpuSystem("other");
 		}
-		this.#frameProfiler?.setCpuPhase("transparencyAndOverlays");
+		this.#diagnostics.profiler?.setCpuPhase("transparencyAndOverlays");
 		// Outdoor foreground weather follows complete-scene AO, including doorway images.
 		if (hasOutdoorScope) {
-			this.#drawSky(view, shading, "after-landscape", null);
+			this.#overlayPasses.drawSky(view, shading, "after-landscape", null);
 		}
 		// AO and sky change framebuffer, viewport and sampler bindings.
-		this.#frameProfiler?.setCpuPhase(
+		this.#diagnostics.profiler?.setCpuPhase(
 			portalTargets !== null ? "portalComposition" : "other",
 		);
 		pipeline.beginDeferredScene(target.framebuffer);
-		this.#frameProfiler?.setCpuPhase("transparencyAndOverlays");
-		this.#drawBlendedObjects(view, objectRuns.blended, shading, pipeline);
-		this.#drawWorldParticles(view, particlesByScope);
-		this.#drawEntityOverlays(view, pipeline);
-		this.#drawSummonLeashes(view);
-		this.#drawCombatEffects(view, pipeline, frame.atlas.visibility);
-		const indicator = this.#frameWorldIndicator;
-		if (indicator !== null) {
-			const portal = { visibility: frame.atlas.visibility, routing: pipeline };
-			if (indicator.desiredTrajectory)
-				this.#drawWorldTrajectory(
-					view,
-					indicator.desiredTrajectory,
-					portal,
-					this.#desiredTrajectoryPass,
-				);
-			if (indicator.trajectory)
-				this.#drawWorldTrajectory(
-					view,
-					indicator.trajectory,
-					portal,
-					this.#worldTrajectoryPass,
-				);
-			for (const marker of [indicator.marker, indicator.landingMarker]) {
-				if (
-					marker &&
-					frame.atlas.visibility.selectedScopeOrdinal(marker.renderScopeKey) !==
-						null
-				)
-					this.#drawWorldMarker(view, marker, {
-						key: marker.renderScopeKey,
-						routing: pipeline,
-					});
-			}
-		}
-		this.#frameProfiler?.setCpuPhase("postAndPresentation");
-		this.#drawPortalTransitionTunnel(
+		this.#diagnostics.profiler?.setCpuPhase("transparencyAndOverlays");
+		this.#objectShadowPass.drawBlendedObjects(
+			view,
+			objectRuns.blended,
+			shading,
+			pipeline,
+		);
+		this.#overlayPasses.drawWorldParticles(view, particlesByScope);
+		this.#overlayPasses.drawEntityOverlays(view, pipeline);
+		this.#overlayPasses.drawSummonLeashes(view);
+		this.#overlayPasses.drawCombatEffects(
+			view,
+			pipeline,
+			frame.atlas.visibility,
+		);
+		this.#overlayPasses.drawWorldIndicator(view, {
+			visibility: frame.atlas.visibility,
+			routing: pipeline,
+		});
+		this.#diagnostics.profiler?.setCpuPhase("postAndPresentation");
+		this.#deviceTargets.drawPortalTransitionTunnel(
 			target,
 			frameSettings.showRetailHiddenGeometry,
+			this.#sceneCompiler,
+			this.#objectShadowPass,
 		);
-		this.#presentFlatScene(target, view);
-		this.#frameProfiler?.setCpuPhase("other");
-	}
-
-	async destroy(): Promise<void> {
-		this.particles.clear();
-		for (const adapter of this.#combatEffectAdapters) adapter.release();
-		this.#combatEffectAdapters.clear();
-		this.#dynamicDepths.beginFrame();
-		this.#dynamicOpaqueRanges.beginFrame();
-		this.#dynamicAdditiveRanges.beginFrame();
-		if (this.#dynamicOpaqueProgram !== null)
-			this.#gl.deleteProgram(this.#dynamicOpaqueProgram.program);
-		this.#dynamicOpaqueProgram = null;
-		if (this.#dynamicBlendedProgram !== null)
-			this.#gl.deleteProgram(this.#dynamicBlendedProgram.program);
-		this.#dynamicBlendedProgram = null;
-		this.#dynamicPresentations.clear();
-		this.#poseUploadParts.clear();
-		this.#preparedSelection = null;
-		this.#dynamicAppearances.destroy();
-		this.#dynamicPosePages.destroy();
-		this.#frameProfiler?.destroy();
-		this.#frameProfiler = null;
-		this.#textureSamplers.destroy();
-		destroyWebGL2TerrainLightMaskTexture(this.#gl, this.#terrainLightMask);
-		this.#portalScopeAtlasPipeline?.destroy();
-		this.#portalScopeAtlasPipeline = null;
-		this.#flatSceneTarget?.destroy();
-		this.#flatSceneTarget = null;
-		this.#transitionSnapshot?.destroy();
-		this.#transitionSnapshot = null;
-		this.#transitionSnapshotGeneration = null;
-		this.#activeTransition = null;
-		this.#portalTransitionTarget?.destroy();
-		this.#portalTransitionTarget = null;
-		this.#portalTransitionVisual = null;
-		this.#portalTransitionClip = null;
-		this.#flatScenePresentation?.destroy();
-		this.#flatScenePresentation = null;
-		this.#entitySelectionPass?.destroy();
-		this.#entitySelectionPass = null;
-		this.#saoPass?.destroy();
-		this.#saoPass = null;
-		this.#skyPass?.destroy();
-		this.#skyPass = null;
-		this.#summonChainPass?.destroy();
-		this.#worldMarkerPass.destroy();
-		this.#worldTrajectoryPass.destroy();
-		this.#desiredTrajectoryPass.destroy();
-		this.#entityOverlayPass.destroy();
-		this.#nameplateTextureCache.destroy();
-		this.#nameplateIconRepository.destroy();
-		if (this.#skyProgram) this.#gl.deleteProgram(this.#skyProgram.program);
-		this.#skyProgram = null;
-		if (this.#portalAtlasSkyProgram) {
-			this.#gl.deleteProgram(this.#portalAtlasSkyProgram.program);
-		}
-		this.#portalAtlasSkyProgram = null;
-		this.#gl.deleteProgram(this.#nearTerrainProgram.program);
-		this.#gl.deleteProgram(this.#farTerrainProgram.program);
-		this.#gl.deleteProgram(this.#objectProgram.program);
-		this.#gl.deleteProgram(this.#instancedObjectProgram.program);
-		this.#gl.deleteProgram(this.#blendedObjectProgram.program);
-		this.#gl.deleteProgram(this.#blendedInstancedObjectProgram.program);
-		if (this.#portalBlendedObjectProgram) {
-			this.#gl.deleteProgram(this.#portalBlendedObjectProgram.program);
-		}
-		this.#portalBlendedObjectProgram = null;
-		if (this.#portalBlendedInstancedObjectProgram) {
-			this.#gl.deleteProgram(this.#portalBlendedInstancedObjectProgram.program);
-		}
-		this.#portalBlendedInstancedObjectProgram = null;
-		this.#gl.deleteTexture(this.#objectFallbackBinding.texture);
-		this.#outdoorPssmReceiverPrograms.destroy();
-		for (const program of this.#staticTablePrograms.values())
-			this.#gl.deleteProgram(program.program);
-		this.#staticTablePrograms.clear();
-		this.#entityGroundingPrograms.destroy();
-		this.#outdoorPssmPass.destroy();
-		this.#frameInstances.destroy();
-	}
-
-	/** A frame's consumers all borrow the same composed matrices and installed appearance. */
-	#publishDynamicPresentation(
-		nodeId: SceneNodeId,
-	): VisibleDynamicPresentation | null {
-		const existing = this.#dynamicPresentations.get(nodeId);
-		if (existing !== undefined) return existing;
-		const presentation = this.#world.getVisibleDynamicPresentation(nodeId);
-		this.#dynamicPresentations.set(nodeId, presentation);
-		return presentation;
-	}
-
-	/** Select one view's shadow inputs without drawing or changing active receiver state. */
-	#prepareOutdoorShadows(
-		prepared: PreparedViewGeometry,
-		entityShadows: EntityShadowSettings,
-		showRetailHiddenGeometry: boolean,
-		shading: SceneShading,
-	): PreparedOutdoorShadowView | null {
-		if (entityShadows.mode === "none") return null;
-		if (entityShadows.mode === "simple") {
-			if (!hasOutdoorShadowLight(shading.lighting.terrain.sunVector))
-				return null;
-			const projection = resolveOutdoorShadowProjection(
-				shading.lighting.terrain.sunVector,
-				entityShadows.projection,
-			);
-			return {
-				maps: null,
-				projection,
-				analyticCasters: [],
-			};
-		}
-
-		const preparedShadows = this.#outdoorPssmPass.prepare({
-			anchorCoordinates: prepared.anchorCoordinates,
-			anchorLandblockId: prepared.anchorLandblockId,
-			aspectRatio: this.#frameWidth / Math.max(1, this.#frameHeight),
-			camera: {
-				far: prepared.camera.far,
-				near: prepared.camera.near,
-				position: prepared.cameraPosition,
-				rotation: prepared.camera.placement.rotation,
-				verticalFovDegrees: prepared.camera.fov,
-			},
-			cameraFrustum: prepared.frustum,
-			casterBudget: entityShadows.casterBudget,
-			frameHeight: this.#frameHeight,
-			frameWidth: this.#frameWidth,
-			selectedDynamicNodeIds: this.#selectedDynamicNodeIds,
-			showRetailHiddenGeometry,
-			projectionSettings: entityShadows.projection,
-			settings: entityShadows.pssm,
-			sunVector: shading.lighting.terrain.sunVector,
-		});
-		if (preparedShadows !== null) {
-			for (const batch of preparedShadows.storage.batches)
-				for (const caster of batch.casters)
-					this.#poseUploadParts.set(caster.nodeId, caster.parts);
-		}
-		return preparedShadows === null
-			? null
-			: {
-					maps: preparedShadows,
-					projection: preparedShadows.projection,
-					analyticCasters: preparedShadows.storage.analyticCasters,
-				};
-	}
-
-	/** Execute selected mapped casters only; selection has already completed. */
-	#executeOutdoorShadows(prepared: PreparedOutdoorShadowView | null): void {
-		this.#activeOutdoorPssmFrame = null;
-		if (prepared === null || prepared.maps === null) return;
-		const { maps } = prepared;
-
-		this.#frameProfiler?.setGpuSystem("shadowMaps");
-		this.#activeOutdoorPssmFrame = this.#outdoorPssmPass.render(maps);
-
-		if (this.#activeOutdoorPssmFrame) {
-			this.#deviceState.invalidate();
-		}
-		this.#frameProfiler?.setGpuSystem("other");
-	}
-
-	#viewClearColor(
-		view: PreparedViewGeometry,
-		shading: SceneShading,
-	): readonly [number, number, number, number] {
-		return view.cameraInsideSealedCell
-			? BLACK_SCENE_CLEAR_COLOR
-			: shading.clearColor;
-	}
-
-	#beginFrame(clearColor: readonly [number, number, number, number]): void {
-		const gl = this.#gl;
-		gl.clearColor(...clearColor);
-		gl.colorMask(true, true, true, true);
-		gl.depthMask(true);
-		gl.disable(gl.BLEND);
-		gl.disable(gl.CULL_FACE);
-		gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT | gl.STENCIL_BUFFER_BIT);
-	}
-
-	#prepareViewGeometry(
-		anchorLandblockId: FrameInput["anchorLandblockId"],
-		input: FrameViewInput,
-		extent: RenderExtent = {
-			width: this.#frameWidth,
-			height: this.#frameHeight,
-		},
-	): PreparedViewGeometry {
-		const camera = input.camera;
-		const anchorCoordinates = getLandblockCoordinates(anchorLandblockId);
-		const cameraPosition = anchorRelativePosition(
-			camera.placement.position,
-			anchorLandblockId,
-		);
-		const aspectRatio = extent.width / Math.max(1, extent.height);
-		const projection = createPerspectiveMat4(
-			camera.fov,
-			aspectRatio,
-			camera.near,
-			camera.far,
-		);
-		const view = createViewMat4(cameraPosition, camera.placement.rotation);
-		const clipFromAnchor = multiplyMat4(projection, view);
-		return {
-			submissionStorage: this.#viewSubmissions.acquire(),
-			anchorCoordinates,
-			anchorLandblockId,
-			camera,
-			cameraInsideSealedCell: input.cameraInsideSealedCell,
-			cameraPosition,
-			clipFromAnchor,
-			frustum: createFrustumFromClipMatrix(clipFromAnchor, cameraPosition),
-			projection,
+		this.#deviceTargets.presentFlatScene(
+			target,
 			view,
-		};
-	}
-
-	#createPortalScopeWindowCullInput(
-		prepared: PreparedViewGeometry,
-		viewInput: FrameViewInput,
-		rootScope: SceneScope,
-	): PortalScopeWindowCullInput {
-		const aspectRatio = this.#frameWidth / Math.max(1, this.#frameHeight);
-		return {
-			anchorCoordinates: prepared.anchorCoordinates,
-			clipFromAnchor: prepared.clipFromAnchor,
-			nearClipVolume: createCameraNearClipVolume(
-				viewInput.camera,
-				// Anchor-relative, matching the view matrix this volume is compared against.
-				{
-					position: prepared.cameraPosition,
-					rotation: viewInput.camera.placement.rotation,
-				},
-				aspectRatio,
-			),
-			portalFootprint: {
-				drawingBuffer: {
-					height: this.#frameHeight,
-					width: this.#frameWidth,
-				},
-				minimumPixelArea: this.#minimumPortalFootprintDevicePixelArea,
-			},
-			rootScope,
-		};
-	}
-
-	#collectScene(
-		prepared: PreparedViewGeometry,
-		frameSettings: FrameSettings,
-		shadows: PreparedOutdoorShadowView | null,
-	): PreparedSceneContributions {
-		const visible = this.#world.queryFlatScene(
-			prepared.frustum,
-			prepared.anchorLandblockId,
-			renderCullingGroupFilter(frameSettings.layerVisibility),
+			this.#overlayPasses,
+			this.#objectShadowPass,
 		);
-
-		const contributions = this.#resolveSceneContributions(
-			prepared,
-			visible.entries,
-			frameSettings,
-			null,
-			shadows,
-		);
-		const routed = prepared.submissionStorage.particles.route(
-			FLAT_PARTICLE_DOMAIN,
-			this.#particleSources,
-			(owner) =>
-				owner === SKY_PARTICLE_RENDER_OWNER
-					? FLAT_SKY_PARTICLE_DOMAIN
-					: FLAT_PARTICLE_DOMAIN,
-		);
-		return {
-			...contributions,
-			particles: routed.get(FLAT_PARTICLE_DOMAIN) ?? [],
-			skyParticles: routed.get(FLAT_SKY_PARTICLE_DOMAIN) ?? [],
-		};
-	}
-
-	/**
-	 * Resolve already-selected scene identities without importing flat or portal topology policy.
-	 *
-	 * Callers must consume a SceneGraph query's reused entry buffer before issuing another query.
-	 */
-	#resolveSceneContributions(
-		prepared: PreparedViewGeometry,
-		visibleEntries: readonly SceneNodeId[],
-		frameSettings: FrameSettings,
-		portalVisibility: DynamicRenderDomainSelection | null,
-		shadows: PreparedOutdoorShadowView | null,
-	): PreparedSceneContributions {
-		this.#frameProfiler?.setCpuPhase("transparencyAndOverlays");
-		this.#reconcileNameplateTextureCache(
-			frameSettings.nameplates.appearance,
-			frameSettings.quality.renderScale,
-			this.#frameViewerEntityIdentity,
-		);
-		this.#frameProfiler?.setCpuPhase("sceneSelection");
-		const terrain: TerrainFrameInput[] = [];
-		const objectBuckets: {
-			opaque: ObjectColorSubmission[];
-			additive: ObjectColorSubmission[];
-			transparent: ObjectColorSubmission[];
-		} = { opaque: [], additive: [], transparent: [] };
-		const dynamicOpaque: PreparedDynamicOpaque[] = [];
-		const labels: PreparedLabelComponent[] = [];
-		const bars: PreparedBarComponent[] = [];
-		const entityShadowsEnabled = frameSettings.entityShadows.mode !== "none";
-		const simpleOutdoorShadows = frameSettings.entityShadows.mode === "simple";
-		const storage = prepared.submissionStorage;
-		this.#entityGroundingCasters.length = 0;
-		this.#outdoorDirectionalCasters.length = 0;
-		this.#indoorGroundingCells.clear();
-		if (entityShadowsEnabled) {
-			const topology = this.#world.getPortalTopologyView();
-			if (
-				this.#indoorVisibilityTopology !== topology ||
-				this.#indoorVisibilityTopology.revision !== topology.revision
-			) {
-				indexIndoorVisibilityIslands(topology, this.#indoorVisibilityIslands);
-				this.#indoorVisibilityTopology = topology;
-			}
-		}
-
-		// One offset per visible landblock, not one per object: it is the same value for every
-		// object in a landblock. Submissions carry only their landblock id, so a cached static
-		// submission stays valid across re-anchoring and the frame never rewrites it.
-		const landblockOffsets = new Map<LandblockOwnerId, LandblockRenderOffset>();
-		const retainOffset = (landblockId: LandblockOwnerId): void => {
-			if (landblockOffsets.has(landblockId)) return;
-			const offset = createLandblockOffset(
-				getLandblockCoordinates(landblockId),
-				prepared.anchorCoordinates,
-			);
-			landblockOffsets.set(landblockId, [offset.x, offset.y, offset.z]);
-		};
-		this.#frameSelectionMetrics.visibleSceneEntries += visibleEntries.length;
-		for (const nodeId of visibleEntries) {
-			const contribution = this.#world.readRenderContribution(nodeId);
-			if (!contribution) continue;
-			if (contribution.kind === "static-object") {
-				if (!this.#retainsObjectFootprint(contribution.footprint, prepared)) {
-					continue;
-				}
-				// A static publication has exactly one submission set; its culling group is fixed
-				// for the renderable's lifetime and serves as the variant name.
-				const compiled = this.#compiledDraws.resolveNodeSubmissions(
-					contribution.renderable,
-					contribution.cullingGroup,
-					() => this.#compileStaticNodeSubmissions(nodeId, contribution),
-				);
-				this.#frameSelectionMetrics.visibleStaticNodeCount += 1;
-				if (compiled.source === "env-cell-resident") {
-					this.#frameSelectionMetrics.visibleEnvCellResidentNodes += 1;
-				}
-				this.#visibleStaticLayers.add(compiled.visibleLayerKey);
-				if (compiled.envCellScopeKey !== null) {
-					this.#visibleEnvCellScopes.add(compiled.envCellScopeKey);
-				}
-				retainOffset(compiled.landblockId);
-				for (const phase of ["opaque", "additive", "transparent"] as const)
-					for (const object of compiled.objectBuckets[phase])
-						if (
-							retainsRetailGeometry(
-								object.retailVisibility,
-								frameSettings.showRetailHiddenGeometry,
-							)
-						)
-							objectBuckets[phase].push(object);
-				continue;
-			}
-			if (contribution.kind === "dynamic") {
-				if (!this.#retainsObjectFootprint(contribution.footprint, prepared)) {
-					continue;
-				}
-				const renderTarget = this.#publishDynamicPresentation(nodeId);
-				let admission = EMPTY_DYNAMIC_RANGE_ADMISSION;
-				if (renderTarget !== null) {
-					assertSelectedDynamicRenderDomain(
-						renderTarget.renderScopes,
-						portalVisibility,
-					);
-					retainOffset(renderTarget.landblockId);
-					const presentation = renderTarget;
-					const appearance = this.#dynamicAppearances.get(
-						presentation.visual.appearance,
-					);
-					const opaqueVariant = selectOpaqueDynamicAppearanceVariant(
-						appearance,
-						presentation.visual.parts.length,
-						presentation.allPartsOpaque,
-						frameSettings.showRetailHiddenGeometry,
-					);
-					admission = opaqueVariant
-						? opaqueVariant.admission
-						: summarizeDynamicRangeAdmission(
-								appearance.rangeGroupsByPart,
-								presentation.visual.parts,
-								frameSettings.showRetailHiddenGeometry,
-							);
-					if (appearance.kind === "drawable") {
-						const ranges = opaqueVariant
-							? opaqueVariant.opaqueSpans
-							: this.#dynamicOpaqueRanges.prepare(
-									nodeId,
-									appearance.plan,
-									presentation.visual.parts,
-									frameSettings.showRetailHiddenGeometry,
-								);
-						if (ranges.length > 0) {
-							this.#dynamicOpaqueProgram ??= createWebGL2ObjectProgram(
-								this.#gl,
-								{
-									distanceFog: true,
-									outdoorPssm: false,
-									portalVisibility: false,
-									transformSource: "pose-table",
-									materialSource: "table",
-								},
-							);
-							const geometry = this.#resources.getGeometry(
-								this.#world.resolveGeometry(presentation.visual.layout.key),
-							);
-							this.#poseUploadParts.set(nodeId, presentation.visual.parts);
-							dynamicOpaque.push({
-								source: "dynamic",
-								nodeId,
-								landblockId: presentation.landblockId,
-								geometry,
-								appearance,
-								ranges,
-							});
-						}
-						const appendBlended = (
-							range: PreparedDynamicBlended["range"],
-							indexCount: number,
-							ordering: PreparedDynamicBlended["ordering"],
-						): void => {
-							const part = presentation.visual.parts[range.source.partSelector];
-							if (part === undefined)
-								throw new Error(
-									"Merged ordered range references a missing part.",
-								);
-							const program = (this.#dynamicBlendedProgram ??=
-								createWebGL2ObjectProgram(this.#gl, {
-									distanceFog: false,
-									outdoorPssm: false,
-									portalVisibility: false,
-									transformSource: "pose-table",
-									materialSource: "table",
-								}));
-							const transparentSort =
-								ordering === "transparent"
-									? {
-											center: landblockVec3(
-												transformPoint3(
-													part.frameInstance.sourceToLandblock,
-													range.source.transparentSort.center,
-													landblockVec3(Vec3.zero()),
-												),
-											),
-											stableId: `${presentation.identity}/part:${part.partIndex}/${range.source.transparentSort.key}`,
-										}
-									: null;
-							const geometry = this.#resources.getGeometry(
-								this.#world.resolveGeometry(presentation.visual.layout.key),
-							);
-							this.#poseUploadParts.set(nodeId, presentation.visual.parts);
-							objectBuckets[ordering].push({
-								source: "dynamic",
-								drawKind: "merged",
-								nodeId,
-								landblockId: presentation.landblockId,
-								geometry,
-								appearance,
-								range,
-								indexCount,
-								ordering,
-								transparentSort,
-								program,
-								transparentCohortKey: `${presentation.landblockId}/${range.source.transparentSort.key}`,
-							});
-						};
-						for (const span of opaqueVariant
-							? opaqueVariant.additiveSpans
-							: this.#dynamicAdditiveRanges.prepare(
-									nodeId,
-									appearance.plan,
-									presentation.visual.parts,
-									frameSettings.showRetailHiddenGeometry,
-								)) {
-							const range = appearance.plan.physicalRanges[span.rangeIndex];
-							if (range === undefined)
-								throw new Error("Additive span lost its physical range.");
-							appendBlended(range, span.indexCount, "additive");
-						}
-						for (const range of opaqueVariant
-							? opaqueVariant.transparentRanges
-							: appearance.plan.ranges) {
-							const part = presentation.visual.parts[range.source.partSelector];
-							if (part === undefined)
-								throw new Error("Ordered range references a missing part.");
-							const ordering = dynamicObjectPhase(
-								range.source.ordering,
-								part.frameInstance.color.a,
-								range.source.retailVisibility,
-								frameSettings.showRetailHiddenGeometry,
-							);
-							if (ordering !== "transparent") continue;
-
-							appendBlended(range, range.source.indexCount, ordering);
-						}
-					}
-				}
-				if (
-					entityShadowsEnabled &&
-					isEntityShadowCasterClass(contribution.entityClass) &&
-					admission.hasMaterialFreeShadowGeometry &&
-					(simpleOutdoorShadows || this.#world.hasIndoorShadowScope(nodeId))
-				) {
-					const facts = this.#world.getEntityShadowDynamicFacts(nodeId);
-					const reachesIndoor = facts.spatialMembership.scopes.some(
-						(scope) => scope.kind === "env-cell",
-					);
-					const reachesOutdoors = facts.spatialMembership.scopes.some(
-						(scope) => scope.kind === "outdoor",
-					);
-					const caster =
-						reachesIndoor || (simpleOutdoorShadows && reachesOutdoors)
-							? resolveEntityShadowCaster(
-									{
-										identity: facts.identity,
-										rigidBounds: facts.rigidBounds,
-										placement: contribution.footprint.placement,
-										spatialMembership: facts.spatialMembership,
-									},
-									this.#indoorVisibilityIslands,
-									frameSettings.entityShadows.indoorGrounding,
-								)
-							: null;
-					if (caster?.indoorGrounding) {
-						this.#entityGroundingCasters.push(caster.indoorGrounding);
-					}
-					if (caster?.reachesOutdoors && shadows) {
-						this.#outdoorDirectionalCasters.push(
-							createOutdoorDirectionalShadowCaster(
-								caster.shape,
-								shadows.projection,
-								frameSettings.entityShadows.outdoorDirectional,
-							),
-						);
-					}
-				}
-				const overlay =
-					renderTarget !== null && admission.sourceRangeGroupCount > 0
-						? this.#frameEntityOverlays.presentation(nodeId)
-						: null;
-				if (overlay !== null && renderTarget !== null)
-					this.#prepareEntityOverlay(
-						nodeId,
-						overlay,
-						renderTarget,
-						contribution,
-						prepared,
-						frameSettings.entityOverlays,
-						portalVisibility,
-						labels,
-						bars,
-					);
-				this.#selectedDynamicNodeIds.add(nodeId);
-				this.#frameSelectionMetrics.visibleDynamicEntityCount += 1;
-				this.#frameSelectionMetrics.visibleDynamicSourceRangeCount +=
-					admission.sourceRangeGroupCount;
-				continue;
-			}
-			if (contribution.kind === "env-cell") {
-				if (entityShadowsEnabled) {
-					const facts = this.#world.getIndoorGroundingEnvCellFacts(nodeId);
-					const cell = createIndoorGroundingCell(
-						facts.scope,
-						facts.bounds,
-						this.#indoorVisibilityIslands,
-					);
-					this.#indoorGroundingCells.set(cell.scopeKey, cell);
-				}
-				this.#frameSelectionMetrics.visibleEnvCellShells += 1;
-				const compiled = this.#compiledDraws.resolveNodeSubmissions(
-					contribution.renderable,
-					frameSettings.envCellRenderMode,
-					() =>
-						this.#compileShellNodeSubmissions(
-							nodeId,
-							contribution,
-							frameSettings.envCellRenderMode,
-						),
-				);
-				if (compiled.envCellScopeKey !== null) {
-					this.#visibleEnvCellScopes.add(compiled.envCellScopeKey);
-				}
-				this.#visibleStaticLayers.add(compiled.visibleLayerKey);
-				retainOffset(compiled.landblockId);
-
-				for (const phase of ["opaque", "additive", "transparent"] as const)
-					objectBuckets[phase].push(...compiled.objectBuckets[phase]);
-				continue;
-			}
-			terrain.push(this.#resolveTerrainFrameInput(contribution.drawUnit));
-			this.#frameSelectionMetrics.terrainFrameInputs += 1;
-		}
-		if (
-			frameSettings.layerVisibility.terrain &&
-			(portalVisibility === null ||
-				portalVisibility.selectedRenderDomainOrdinal("outdoor") !== null)
-		) {
-			for (const drawUnit of this.#world.readOceanBackdropDrawUnits()) {
-				const offset = createLandblockOffset(
-					drawUnit.coordinates,
-					prepared.anchorCoordinates,
-					this.#offsetScratch,
-				);
-				if (
-					!frustumIntersectsAABB(
-						prepared.frustum,
-						OCEAN_BACKDROP_BOUNDS,
-						offset.x,
-						offset.y,
-						offset.z,
-					)
-				)
-					continue;
-				terrain.push(this.#resolveTerrainFrameInput(drawUnit));
-				this.#frameSelectionMetrics.terrainFrameInputs += 1;
-			}
-		}
-		let outdoorDirectionalEnabled = false;
-		if (entityShadowsEnabled) {
-			const cameraPosition = new Vec3(
-				prepared.camera.placement.position.x,
-				prepared.camera.placement.position.y,
-				prepared.camera.placement.position.z,
-			);
-			const anchorOrigin = createLandblockWorldOrigin(
-				prepared.anchorLandblockId,
-			);
-			let selectionIndex = 0;
-			for (const cell of this.#indoorGroundingCells.values()) {
-				const selection = (storage.indoorSelections[selectionIndex] ??=
-					createEntityGroundingSelection());
-				selectIndoorGroundingCasters(
-					cell,
-					this.#entityGroundingCasters,
-					cameraPosition,
-					anchorOrigin,
-					selection,
-					this.#entityGroundingSelectionScratch,
-				);
-				storage.indoorByScopeKey.set(cell.scopeKey, selection);
-				selectionIndex += 1;
-			}
-			if (shadows) {
-				for (const shape of shadows.analyticCasters) {
-					this.#outdoorDirectionalCasters.push(
-						createOutdoorDirectionalShadowCaster(
-							shape,
-							shadows.projection,
-							frameSettings.entityShadows.outdoorDirectional,
-						),
-					);
-				}
-			}
-			if (this.#outdoorDirectionalCasters.length > 0) {
-				let outdoorSelectionIndex = 0;
-				for (const terrainInput of terrain) {
-					if (terrainInput.drawUnit.kind !== "landblock") continue;
-					const landblock = createOutdoorDirectionalShadowTerrain(
-						terrainInput.drawUnit.landblockId,
-					);
-					const selection = (storage.outdoorSelections[
-						outdoorSelectionIndex
-					] ??= createOutdoorDirectionalShadowSelection());
-					selectOutdoorDirectionalShadowCasters(
-						landblock,
-						this.#outdoorDirectionalCasters,
-						cameraPosition,
-						anchorOrigin,
-						selection,
-						this.#outdoorDirectionalSelectionScratch,
-					);
-					storage.outdoorByLandblockId.set(landblock.landblockId, selection);
-					outdoorDirectionalEnabled ||= selection.count > 0;
-					outdoorSelectionIndex += 1;
-				}
-			}
-		}
-
-		const { referenceDistance } = frameSettings.entityOverlays;
-		retainLegibleOverlays(
-			labels,
-			prepared.clipFromAnchor,
-			maximumLegibleOverlayDepth(
-				referenceDistance,
-				frameSettings.nameplates.appearance.name.fontSizePixels,
-				frameSettings.nameplates.minimumLegibleNamePixels,
-			),
-			true,
-		);
-		const eligibleLabelCount = labels.length;
-		retainOverlayBudget(labels, frameSettings.nameplates.maximumVisible);
-		this.#eligibleNameplateCandidateCount += eligibleLabelCount;
-		this.#budgetRejectedNameplateCandidateCount +=
-			eligibleLabelCount - labels.length;
-		retainLegibleOverlays(
-			bars,
-			prepared.clipFromAnchor,
-			maximumLegibleOverlayDepth(
-				referenceDistance,
-				frameSettings.healthBars.heightCssPixels,
-				frameSettings.healthBars.minimumLegibleBarPixels,
-			),
-			false,
-		);
-		const eligibleBarCount = bars.length;
-		retainOverlayBudget(bars, frameSettings.healthBars.maximumVisible);
-		this.#eligibleHealthBarCandidateCount += eligibleBarCount;
-		this.#budgetRejectedHealthBarCandidateCount +=
-			eligibleBarCount - bars.length;
-		// Keep adjacent roots in the same landblock and physical appearance so their
-		// landblock uniform, material table, and VAO-local index binding stay resident.
-		const appearanceOrder = new Map<WebGLBuffer, number>();
-		for (const object of dynamicOpaque) {
-			const buffer = object.appearance.indexBuffer;
-			if (!appearanceOrder.has(buffer))
-				appearanceOrder.set(buffer, appearanceOrder.size);
-		}
-		const appearanceRank = (buffer: WebGLBuffer): number => {
-			const rank = appearanceOrder.get(buffer);
-			if (rank === undefined)
-				throw new Error("Dynamic appearance was not ranked before sorting.");
-			return rank;
-		};
-		dynamicOpaque.sort(
-			(left, right) =>
-				(left.landblockId < right.landblockId
-					? -1
-					: left.landblockId > right.landblockId
-						? 1
-						: 0) ||
-				appearanceRank(left.appearance.indexBuffer) -
-					appearanceRank(right.appearance.indexBuffer) ||
-				(left.nodeId < right.nodeId ? -1 : left.nodeId > right.nodeId ? 1 : 0),
-		);
-
-		return {
-			entityAnalyticShadows: entityShadowsEnabled
-				? {
-						indoorByScopeKey: storage.indoorByScopeKey,
-						outdoorByLandblockId: storage.outdoorByLandblockId,
-						outdoorEnabled: outdoorDirectionalEnabled,
-						outdoorSettings: frameSettings.entityShadows.outdoorDirectional,
-						indoorSettings: frameSettings.entityShadows.indoorGrounding,
-					}
-				: null,
-			dynamicOpaque,
-			landblockOffsets,
-			entityOverlays: composeEntityOverlays(labels, bars),
-			entityOverlaySettings: frameSettings.entityOverlays,
-			healthBars: frameSettings.healthBars,
-			objectBuckets,
-			particles: [],
-			skyParticles: [],
-			terrain,
-		};
-	}
-
-	#retainsObjectFootprint(
-		footprint: ObjectPresentationFootprint,
-		prepared: PreparedViewGeometry,
-	): boolean {
-		if (footprint.kind === "ineligible")
-			return retainsProjectedObjectFootprint(
-				null,
-				this.#minimumObjectFootprintDevicePixelArea,
-			);
-		const landblockOffset = createLandblockOffset(
-			getLandblockCoordinates(footprint.placement.landblockId),
-			prepared.anchorCoordinates,
-		);
-		const retained = retainsProjectedObjectFootprint(
-			{
-				bounds: footprint.localBounds,
-				clipFromAnchor: prepared.clipFromAnchor,
-				landblockOffsetX: landblockOffset.x,
-				landblockOffsetY: landblockOffset.y,
-				landblockOffsetZ: landblockOffset.z,
-				localToLandblock: footprint.placement.localToLandblock,
-				viewportHeight: this.#frameHeight,
-				viewportWidth: this.#frameWidth,
-			},
-			this.#minimumObjectFootprintDevicePixelArea,
-		);
-		if (this.#minimumObjectFootprintDevicePixelArea > 0) {
-			this.#frameSelectionMetrics.testedObjectPresentationCount += 1;
-			if (retained)
-				this.#frameSelectionMetrics.retainedObjectPresentationCount += 1;
-			else this.#frameSelectionMetrics.rejectedObjectPresentationCount += 1;
-		}
-		return retained;
-	}
-
-	/**
-	 * Resolve a terrain surface program once, against the draw unit that owns it.
-	 *
-	 * Terrain draw units are built when their landblock realizes and live until it is removed, and
-	 * every resource they name is immutable for its key: texture arrays are created once per key
-	 * and generated surfaces once per source. There is therefore no invalidation event to ride —
-	 * an entry simply becomes collectable with the installation that produced its draw unit.
-	 */
-	#resolveTerrainFrameInput(
-		drawUnit: TerrainSurfaceDrawUnit,
-	): TerrainFrameInput {
-		const existing = this.#terrainFrameInputs.get(drawUnit);
-		if (existing !== undefined) return existing;
-		const resolved: TerrainFrameInput = {
-			drawUnit,
-			program: {
-				geometry: this.#world.resolveGeometry(drawUnit.geometry),
-				composition: this.#world.resolveTexture2D(drawUnit.composition),
-				surfaceField: this.#world.resolveTexture2D(drawUnit.surfaceField),
-				textures: {
-					blendMasks: this.#world.resolveTextureArray(
-						drawUnit.textures.blendMasks,
-					),
-					colors: this.#world.resolveTerrainColorTextureArray(
-						drawUnit.textures.colors,
-					),
-					detail: this.#world.resolveTexture2D(drawUnit.textures.detail),
-					roadMasks: this.#world.resolveTextureArray(
-						drawUnit.textures.roadMasks,
-					),
-				},
-			},
-		};
-		this.#terrainFrameInputs.set(drawUnit, resolved);
-		return resolved;
-	}
-
-	/**
-	 * Build one shell publication's submission set for one env-cell render mode, once per mode.
-	 *
-	 * Like static publications, shell submissions hold nothing frame-variant; the render mode is
-	 * part of the cache variant because it selects the cull-face override.
-	 */
-	#compileShellNodeSubmissions(
-		nodeId: SceneNodeId,
-		contribution: Extract<RenderContribution, { kind: "env-cell" }>,
-		envCellRenderMode: FrameSettings["envCellRenderMode"],
-	): CompiledStaticNodeSubmissions {
-		const objects: PreparedObjectFrameInput[] = [];
-
-		const node = this.#world.resolveEnvCellNode(
-			nodeId,
-			contribution.renderable,
-		);
-		if (node.placement.scope.kind !== "env-cell") {
-			throw new Error(`EnvCell shell ${nodeId} has outdoor residency.`);
-		}
-		const scope = node.placement.scope;
-		for (const resolved of node.drawUnits) {
-			objects.push(
-				this.#compileStaticSubmission(resolved.drawUnit, {
-					cullFaceOverride: envCellRenderMode === "flat" ? "back" : null,
-					drawKind: "single",
-					geometry: resolved.geometry,
-					indexCount: resolved.drawUnit.indexCount,
-					indexStart: resolved.drawUnit.indexStart,
-					instances: null,
-					landblockId: node.placement.landblockId,
-					localToLandblock: node.placement.localToLandblock,
-					material: resolved.drawUnit.material,
-					ordering: resolved.drawUnit.ordering,
-					receivesOutdoorPssm: false,
-					retailVisibility: "normally-visible",
-					renderScopeKey: scopeKey(scope),
-					source: "env-cell-shell",
-					transparentSort: resolved.drawUnit.transparentSort,
-				}),
-			);
-		}
-		const envCellScopeKey = `${scope.landblockId}/${scope.envCellId}`;
-		return {
-			envCellScopeKey,
-			landblockId: node.placement.landblockId,
-			objectBuckets: bucketObjectSubmissions(objects),
-			source: "env-cell-shell",
-			visibleLayerKey: `${envCellScopeKey}/env-cell-shell`,
-		};
-	}
-
-	/**
-	 * Build one static publication's complete submission set, once for its lifetime.
-	 *
-	 * Static submissions hold nothing that varies between frames: placement, geometry, material,
-	 * ordering and sort facts are all fixed when the publication commits, and the one
-	 * anchor-relative fact is looked up per frame from the landblock offsets instead of stored
-	 * here. A visible node therefore costs one cache lookup and an array append per frame.
-	 */
-	#compileStaticNodeSubmissions(
-		nodeId: SceneNodeId,
-		contribution: Extract<RenderContribution, { kind: "static-object" }>,
-	): CompiledStaticNodeSubmissions {
-		let objects: PreparedObjectFrameInput[] = [];
-		const materialRows = new Map<
-			GeometryResourceKey,
-			Map<number, PreparedObjectDrawCompatibility>
-		>();
-		const source =
-			contribution.cullingGroup === "env-cell-static-residents"
-				? "env-cell-resident"
-				: contribution.cullingGroup === LandblockLayerKind.Generated
-					? "generated"
-					: "outdoor";
-		const node = this.#world.resolveStaticObjectNode(
-			nodeId,
-			contribution.renderable,
-		);
-		const scope = node.placement.scope;
-		const renderScopeKey = scopeKey(scope);
-		const receivesOutdoorPssm = isOutdoorPssmReceiverFootprint(
-			contribution.footprint,
-		);
-		for (const resolved of node.drawUnits) {
-			const { drawUnit } = resolved;
-			const object = this.#compileStaticSubmission(drawUnit, {
-				cullFaceOverride: null,
-				drawKind: "single",
-				geometry: resolved.geometry,
-				indexCount: drawUnit.indexCount,
-				indexStart: drawUnit.indexStart,
-				instances: null,
-				landblockId: node.placement.landblockId,
-				localToLandblock: node.placement.localToLandblock,
-				material: drawUnit.material,
-				ordering: drawUnit.ordering,
-				receivesOutdoorPssm,
-				retailVisibility: drawUnit.retailVisibility,
-				renderScopeKey,
-				source,
-				transparentSort: drawUnit.transparentSort,
-			});
-			objects.push(object);
-			let rows = materialRows.get(resolved.geometry);
-			if (!rows) {
-				rows = new Map();
-				materialRows.set(resolved.geometry, rows);
-			}
-			if (rows.has(drawUnit.materialSelector))
-				throw new Error("Static material row was published twice.");
-			rows.set(drawUnit.materialSelector, object.compatibility);
-		}
-		for (const [geometry, rows] of materialRows) {
-			const table = this.#resources.getGeometry(geometry).staticMaterials;
-			if (!table || rows.size !== table.rowCount)
-				throw new Error(
-					"Static publication material rows do not cover its geometry table.",
-				);
-			const surfaces = Array.from({ length: table.rowCount }, (_, selector) => {
-				const surface = rows.get(selector);
-				if (!surface)
-					throw new Error(`Static material row ${selector} is missing.`);
-				return surface;
-			});
-			this.#resources.updateGeometryMaterials(
-				geometry,
-				createObjectMaterialTable(surfaces),
-			);
-			// Cold resource uploads bind textures outside the draw-state applicator.
-			this.#deviceState.invalidate();
-		}
-		objects = compileStaticMaterialSpans(objects);
-		for (const resolved of node.frameStreamedInstances) {
-			const { template } = resolved;
-			const { draw } = template;
-			// Placement and sort facts stay per instance; immutable draw facts compile once per
-			// source partition and are invalidated with the existing publication/resource cache.
-			objects.push(
-				this.#compileStaticSubmission(draw, {
-					cullFaceOverride: null,
-					drawKind: "instanced",
-					geometry: resolved.geometry,
-					indexCount: draw.indexCount,
-					indexStart: draw.indexStart,
-					instances: {
-						transparentCohortKey: draw.cohortKey,
-						instance: template.instance,
-						kind: "frame-template",
-					},
-					landblockId: node.placement.landblockId,
-					localToLandblock: node.placement.localToLandblock,
-					material: draw.material,
-					ordering: "transparent",
-					receivesOutdoorPssm,
-					retailVisibility: draw.retailVisibility,
-					renderScopeKey,
-					source,
-					transparentSort: template.transparentSort,
-				}),
-			);
-		}
-		return {
-			envCellScopeKey:
-				scope.kind === "env-cell"
-					? `${scope.landblockId}/${scope.envCellId}`
-					: null,
-			landblockId: node.placement.landblockId,
-			objectBuckets: bucketObjectSubmissions(objects),
-			source,
-			visibleLayerKey:
-				scope.kind === "outdoor"
-					? `outdoor/${contribution.cullingGroup}`
-					: `${scope.landblockId}/${scope.envCellId}/${contribution.cullingGroup}`,
-		};
-	}
-
-	/** Pair one static contribution with its compiled draw facts, both retained for its lifetime. */
-	#compileStaticSubmission(
-		key: object,
-		object: ObjectFrameInput,
-	): PreparedObjectFrameInput {
-		const compiled = this.#compiledDraws.resolveDraw(key, object.ordering, () =>
-			this.#compileObjectDraw(object),
-		);
-		return createObjectSubmission(object, compiled);
-	}
-
-	/**
-	 * Compile every draw-consumed constant for one draw unit, once for its whole lifetime.
-	 *
-	 * Nothing resolved here varies with the camera or the anchor, so the result is cached against
-	 * the draw unit that owns it and shared by every later frame. The anchor-relative offset is
-	 * assembled per frame by the caller instead.
-	 */
-	#compileObjectDraw(
-		object: WebGL2ObjectDrawInput,
-	): CompiledObjectDraw<PreparedObjectDrawCompatibility> {
-		return this.#objectDrawCompiler.compile(object);
-	}
-
-	#resetFrameSelectionMetrics(
-		viewCount: number,
-		envCellRenderMode: FrameInput["frameSettings"]["envCellRenderMode"],
-	): void {
-		this.#portalScopeAtlasPipeline?.beginFrame();
-		this.#viewSubmissions.beginFrame();
-		this.#preparedSelection = null;
-		const metrics = this.#frameSelectionMetrics;
-		this.#eligibleNameplateCandidateCount = 0;
-		this.#budgetRejectedNameplateCandidateCount = 0;
-		this.#eligibleHealthBarCandidateCount = 0;
-		this.#budgetRejectedHealthBarCandidateCount = 0;
-		this.#submittedEntityOverlayInstanceCount = 0;
-		this.#submittedEntityOverlayDrawCount = 0;
-		metrics.ambientOcclusion.activeBytes = 0;
-		metrics.ambientOcclusion.allocatedGenerationCount = 0;
-		metrics.ambientOcclusion.pixelCount = 0;
-		metrics.ambientOcclusion.applicationCount = 0;
-		metrics.ambientOcclusion.disposedGenerationCount = 0;
-		metrics.ambientOcclusion.effectiveDistanceFade = null;
-		metrics.entitySelection.compositeDrawCount = 0;
-		metrics.entitySelection.maskDrawCount = 0;
-		metrics.entitySelection.selectedSphereProxyCount = 0;
-		metrics.entitySelection.selectedPartCount = 0;
-		metrics.entitySelection.selectedTriangleCount = 0;
-		metrics.entitySelection.skippedReason = "no-target";
-		metrics.envCellRenderMode = envCellRenderMode;
-		metrics.terrainFrameInputs = 0;
-		metrics.viewCount = viewCount;
-		metrics.visibleDynamicEntityCount = 0;
-		metrics.visibleDynamicSourceRangeCount = 0;
-		metrics.testedObjectPresentationCount = 0;
-		metrics.retainedObjectPresentationCount = 0;
-		metrics.rejectedObjectPresentationCount = 0;
-		metrics.visibleEnvCellShells = 0;
-		metrics.visibleEnvCellScopeCount = 0;
-		metrics.visibleEnvCellResidentNodes = 0;
-		metrics.submittedEnvCellShellDrawCount = 0;
-		metrics.submittedEnvCellShellTriangleCount = 0;
-		metrics.submittedEnvCellResidentDrawCount = 0;
-		metrics.submittedEnvCellResidentTriangleCount = 0;
-		metrics.envCellShellCullOverrideCount = 0;
-		metrics.portalSelectedScopeCount = 0;
-		metrics.portalSelectedCrossingCount = 0;
-		metrics.portalCompletedCullDepth = 0;
-		metrics.portalPropagationDrawCount = 0;
-		metrics.portalProjectionPrimitiveCount = 0;
-		metrics.portalAtlasTilePixelCount = 0;
-		metrics.portalFrontierRetreatCount = 0;
-		metrics.portalTruncatedViewCount = 0;
-		metrics.portalFramebufferCount = 0;
-		metrics.portalTargetBytes = 0;
-		metrics.portalTransitionSnapshotBytes = 0;
-		metrics.portalTransitionOriginCaptured = false;
-		metrics.portalTransitionSnapshotAllocatedGenerationCount = 0;
-		metrics.portalTransitionSnapshotDisposedGenerationCount = 0;
-		metrics.portalTransitionFramebufferCount = 0;
-		metrics.portalTransitionTargetBytes = 0;
-		metrics.submittedPortalTransitionDrawCount = 0;
-		metrics.portalTransitionVisualInstalled = false;
-		metrics.portalTransitionGeneration = null;
-		metrics.portalTransitionKind = null;
-		metrics.portalTransitionOnlyFramePresented = false;
-		metrics.flatSceneFramebufferCount = 0;
-		metrics.flatSceneTargetBytes = 0;
-		metrics.flatSceneAllocatedGenerationCount = 0;
-		metrics.flatSceneDisposedGenerationCount = 0;
-		metrics.visibleSceneEntries = 0;
-		this.#visibleStaticLayers.clear();
-		this.#visibleEnvCellScopes.clear();
-		this.#dynamicPresentations.clear();
-		this.#dynamicDepths.beginFrame();
-		this.#dynamicOpaqueRanges.beginFrame();
-		this.#dynamicAdditiveRanges.beginFrame();
-		this.#poseUploadParts.clear();
-		this.#outdoorPssmPass.beginFrame();
-		this.#selectedDynamicNodeIds.clear();
-		metrics.visibleStaticLayerCount = 0;
-		metrics.visibleStaticNodeCount = 0;
-		metrics.submittedStaticObjectDrawCount = 0;
-		metrics.submittedStaticObjectTriangleCount = 0;
-		metrics.submittedBakedStaticObjectDrawCount = 0;
-		metrics.submittedBakedStaticObjectTriangleCount = 0;
-		metrics.submittedInstancedSourceTriangleCount = 0;
-		metrics.transparentObjectCandidateCount = 0;
-		metrics.farTransparentObjectCandidateCount = 0;
-		metrics.nearTransparentObjectCandidateCount = 0;
-		metrics.transparentFrameRunCount = 0;
-		metrics.farTransparentFrameRunCount = 0;
-		metrics.nearTransparentFrameRunCount = 0;
-		metrics.frameInstanceUploadCount = 0;
-		metrics.frameInstanceUploadBytes = 0;
-		metrics.submittedTransparentObjectDrawCount = 0;
-		metrics.submittedTransparentInstanceCount = 0;
-		metrics.submittedAdditiveObjectDrawCount = 0;
-		metrics.submittedDynamicDrawCount = 0;
-		metrics.submittedParticleBatchCount = 0;
-		metrics.submittedParticleInstanceCount = 0;
-		metrics.unresolvedParticleBatchCount = 0;
-		metrics.uploadedParticleRecordRowCount = 0;
-		metrics.frameInstanceCapacity = 0;
-		metrics.frameInstanceGrowthCount = 0;
-		metrics.frameInstanceViewHighWaterMark = 0;
-		metrics.droppedLights = 0;
-		metrics.staticLightBinds = 0;
-		metrics.terrainLightMaskUploads = 0;
-		metrics.farTerrainDraws = 0;
-		metrics.farTerrainPaletteUploads = 0;
-		metrics.farTerrainCutoffLandblocks = null;
-		metrics.objectLightingBinds = 0;
-		metrics.objectProgramChanges = 0;
-		metrics.objectTextureBinds = 0;
-		metrics.objectDrawCalls = 0;
-		metrics.objectUniformUploads = 0;
-		metrics.objectSuppressedUniformUploads = 0;
-	}
-
-	/** Finish counters shared by ordinary frames and explicit portal execution probes. */
-	#finishFrameSelectionMetrics(): void {
-		const census = this.#mergeCensusRequest;
-		if (census !== null) {
-			this.#mergeCensusRequest = null;
-			census.resolve(census.collector.summarize());
-		}
-		const arena = this.#frameInstances.getDiagnostics();
-		this.#frameSelectionMetrics.visibleStaticLayerCount =
-			this.#visibleStaticLayers.size;
-		this.#frameSelectionMetrics.visibleEnvCellScopeCount =
-			this.#visibleEnvCellScopes.size;
-		this.#frameSelectionMetrics.frameInstanceCapacity = arena.capacity;
-		this.#frameSelectionMetrics.frameInstanceGrowthCount = arena.growthCount;
-		this.#frameSelectionMetrics.frameInstanceViewHighWaterMark =
-			arena.viewHighWaterMark;
-	}
-
-	/** Each combat subsystem leases one independently disposable draw adapter. */
-	readonly combatEffects: RendererCombatEffectsCapability = {
-		create: (tuning) => {
-			const adapter = new WebGL2CombatEffects(this.#gl, tuning);
-			this.#combatEffectAdapters.add(adapter);
-			return {
-				setAppearance: (appearance) => adapter.setAppearance(appearance),
-				refreshFontAtlas: () => adapter.refreshFontAtlas(),
-				submit: (instances) => adapter.submit(instances),
-				clear: () => adapter.clear(),
-				release: () => {
-					adapter.release();
-					this.#combatEffectAdapters.delete(adapter);
-				},
-			};
-		},
-	};
-
-	/**
-	 * Authored particle residency and per-frame source submission.
-	 *
-	 * Meshes accumulate across batches rather than being replaced, because one script closure names
-	 * a few emitters and different residents keep naming the same meshes.
-	 */
-	readonly particles: RendererParticleCapability = {
-		clear: () => {
-			this.#particleResidency?.destroy();
-			this.#particleResidency = null;
-			this.#particlePass?.destroy();
-			this.#particlePass = null;
-			this.#particleSources = [];
-			this.#particleRecords = EMPTY_PARTICLE_RECORDS;
-			this.#viewSubmissions.clearParticles();
-		},
-		install: async (source, preparer) => {
-			const residency = (this.#particleResidency ??= new ParticleMeshResidency(
-				this.#resources,
-			));
-			await residency.install(source, preparer);
-			// Linked on first residency rather than at construction: a scene with no authored
-			// particles never pays for a program it cannot draw with.
-			this.#particlePass ??= new WebGL2ParticlePass(
-				(hwGfxObjId) => this.#particleResidency?.resolve(hwGfxObjId) ?? null,
-			);
-		},
-		submit: (sources, records) => {
-			this.#particleSources = sources;
-			this.#particleRecords = records;
-		},
-	};
-
-	/**
-	 * Region-scoped celestial sky residency.
-	 *
-	 * Installed once per region load; the resource set is fixed for that region's lifetime, so
-	 * there is no incremental path and no per-frame residency work.
-	 */
-	readonly sky: RendererSkyCapability = {
-		clear: () => {
-			this.#skyPass?.destroy();
-			this.#skyPass = null;
-		},
-		install: async (source, preparer) => {
-			const pass = await WebGL2SkyPass.prepare(
-				this.#resources,
-				preparer,
-				source,
-			);
-			this.#skyPass?.destroy();
-			this.#skyPass = pass;
-			// Linked on first use rather than at construction: a region without authored sky
-			// objects never pays for a program it cannot draw with.
-			this.#skyProgram ??= createWebGL2SkyProgram(this.#gl);
-		},
-	};
-
-	/**
-	 * Draw one of the sky's two passes.
-	 *
-	 * The before pass runs into an untouched depth buffer with depth-always and depth writes
-	 * off, so the world pass that follows simply paints over it wherever geometry exists. That
-	 * ordering is why the sky needs no visibility test of its own, indoors or out.
-	 *
-	 * The after pass carries the authored weather that retail draws once the landscape is
-	 * down, under the same depth-always state — which is what keeps terrain from occluding
-	 * rain. It is gated outdoors here rather than inside the pass, because whether the viewer
-	 * is outside is a property of the view, not of the sky.
-	 */
-	#drawSky(
-		view: PreparedView,
-		shading: SceneShading,
-		skyPass: SkyDrawPass,
-		portalPipeline: WebGL2PortalScopeAtlasPipeline | null,
-	): void {
-		const pass = this.#skyPass;
-		const sky = shading.sky;
-		if (!pass || !sky || !this.#skyProgram) return;
-		// Retail viewer is player outside tests only that the viewer's cell is a landcell
-		// rather than an EnvCell. Deliberately not our sealed-cell test: retail suppresses the
-		// after pass from inside any EnvCell, including one that can see outdoors.
-		if (
-			skyPass === "after-landscape" &&
-			view.camera.placement.envCellId !== null
-		) {
-			return;
-		}
-		const program = portalPipeline
-			? (this.#portalAtlasSkyProgram ??= createWebGL2SkyProgram(this.#gl, {
-					portalAtlas: true,
-				}))
-			: this.#skyProgram;
-		// Program selection lives here because atlas routing writes a uniform owned by that variant.
-		// Uploading the tile before binding its program is INVALID_OPERATION and leaves the transform
-		// zeroed, collapsing every sky vertex without making the subsequent draw itself fail.
-		this.#gl.useProgram(program.program);
-		if (portalPipeline) {
-			const clipTransform = program.clipTransformUniform;
-			if (!clipTransform) {
-				throw new Error(
-					"Portal sky draw selected a program without an atlas transform.",
-				);
-			}
-			portalPipeline.routeOutdoorOpaqueSubmission(clipTransform);
-		}
-		pass.draw(
-			{
-				clockSeconds: this.#frameClockSeconds,
-				gl: this.#gl,
-				matrixScratch: this.#skyMatrixScratch,
-				program,
-				// The frame anchor translates horizontally only, so this render-frame height is
-				// already the absolute AC height the authored weather clamp is expressed in.
-				viewerHeight: view.cameraPosition.y,
-				weatherEnabled: shading.weatherEnabled,
-				// Retail rebuilds the projection with `zfar * 4` for the pass and restores it
-				// after; the world pass never sees this matrix.
-				projection: mat4ToFloat32Array(
-					createPerspectiveMat4(
-						view.camera.fov,
-						this.#frameWidth / Math.max(1, this.#frameHeight),
-						view.camera.near,
-						SKY_FAR_PLANE,
-					),
-					this.#skyProjectionScratch,
-				),
-				samplers: this.#textureSamplers,
-				textureFiltering: this.#frameTextureFiltering,
-				view: skyViewMatrix(view.view, this.#skyViewScratch),
-			},
-			sky,
-			skyPass,
-		);
-	}
-
-	#createParticleDrawContext(
-		view: PreparedViewGeometry,
-		clockSeconds: number,
-		opacityScale: number,
-	): ParticleDrawContext {
-		// The view names its own anchor landblock, so the origin records re-anchor against comes
-		// from the same place the view transform did.
-		const anchor = createLandblockWorldOrigin(view.anchorLandblockId);
-		return {
-			anchorOrigin: [anchor.x, anchor.y, anchor.z],
-			cameraPosition: [
-				view.cameraPosition.x,
-				view.cameraPosition.y,
-				view.cameraPosition.z,
-			],
-			clockSeconds,
-			gl: this.#gl,
-			opacityScale,
-			projection: mat4ToFloat32Array(
-				view.projection,
-				this.#particleProjectionScratch,
-			),
-			samplers: this.#textureSamplers,
-			state: this.#deviceState,
-			textureFiltering: this.#frameTextureFiltering,
-			view: mat4ToFloat32Array(view.view, this.#particleViewScratch),
-		};
-	}
-
-	#executeParticlePass(execute: (pass: WebGL2ParticlePass) => void): void {
-		const pass = this.#particlePass;
-		if (!pass) return;
-
-		this.#frameProfiler?.setGpuSystem("transparencyAndEffects");
-		execute(pass);
-		const diagnostics = pass.getDiagnostics();
-		this.#frameSelectionMetrics.submittedParticleBatchCount +=
-			diagnostics.drawnBatchCount;
-		this.#frameSelectionMetrics.submittedParticleInstanceCount +=
-			diagnostics.drawnParticleCount;
-		this.#frameSelectionMetrics.unresolvedParticleBatchCount +=
-			diagnostics.unresolvedBatchCount;
-		this.#frameSelectionMetrics.uploadedParticleRecordRowCount +=
-			diagnostics.uploadedRecordRowCount;
-		this.#frameProfiler?.setGpuSystem("other");
-	}
-
-	#drawParticleBatches(
-		view: PreparedView,
-		batches: readonly ParticleDrawRange[],
-		clockSeconds: number,
-		opacityScale: number,
-	): void {
-		if (batches.length === 0 || opacityScale <= 0) return;
-		this.#executeParticlePass((pass) => {
-			const context = this.#createParticleDrawContext(
-				view,
-				clockSeconds,
-				opacityScale,
-			);
-			pass.draw(context, batches);
-		});
-	}
-
-	#drawWorldParticles(
-		view: PreparedView,
-		particlesByScope: ReadonlyMap<string, readonly ParticleDrawRange[]>,
-	): void {
-		this.#executeParticlePass((pass) => {
-			const context = this.#createParticleDrawContext(
-				view,
-				this.#frameClockSeconds,
-				1.0,
-			);
-			pass.drawWorld(context, particlesByScope);
-		});
+		this.#diagnostics.profiler?.setCpuPhase("other");
 	}
 
 	/** Draw one flat view through the shared physical schedule. */
@@ -3648,2450 +789,118 @@ export class WebGL2Renderer implements Renderer {
 		domain: SceneRenderDomain,
 		showRetailHiddenGeometry: boolean,
 	): void {
-		this.#frameProfiler?.setCpuPhase("other");
-		const target = this.#acquireFlatSceneTarget();
-		this.#beginFlatOpaqueScene(target, this.#viewClearColor(view, shading));
-		this.#frameProfiler?.setCpuPhase("sceneSelection");
-		const objectPhases = this.#createObjectSubmissionPhases(view);
-		const objectRuns = this.#prepareViewObjectRuns(objectPhases);
+		this.#diagnostics.profiler?.setCpuPhase("other");
+		const target = this.#deviceTargets.acquireFlatSceneTarget();
+		this.#deviceTargets.beginFlatOpaqueScene(
+			target,
+			this.#deviceTargets.viewClearColor(view, shading),
+		);
+		this.#diagnostics.profiler?.setCpuPhase("sceneSelection");
+		const objectPhases =
+			this.#objectShadowPass.createObjectSubmissionPhases(view);
+		const objectRuns =
+			this.#objectShadowPass.prepareViewObjectRuns(objectPhases);
 		if (domain === "exterior") {
-			this.#frameProfiler?.setCpuPhase("transparencyAndOverlays");
-			this.#drawSky(view, shading, "before-world", null);
+			this.#diagnostics.profiler?.setCpuPhase("transparencyAndOverlays");
+			this.#overlayPasses.drawSky(view, shading, "before-world", null);
 			if (
 				view.skyParticles.length > 0 &&
 				SHARED_FRONTEND_TUNING.rendering.skyParticles.opacityScale > 0
 			) {
-				this.#drawParticleBatches(
+				this.#overlayPasses.drawParticleBatches(
 					view,
 					view.skyParticles,
-					this.#frameClockSeconds *
+					this.#deviceTargets.frameClockSeconds *
 						SHARED_FRONTEND_TUNING.rendering.skyParticles.speedMultiplier,
 					SHARED_FRONTEND_TUNING.rendering.skyParticles.opacityScale,
 				);
 			}
 		}
-		this.#frameProfiler?.setCpuPhase("opaqueSubmission");
-		this.#drawOpaqueObjects(view, objectRuns.opaque, shading, null);
-		this.#drawDynamicOpaque(view, shading);
-		this.#frameProfiler?.setCpuPhase("terrainSubmission");
-		this.#drawTerrain(view, shading, null);
+		this.#diagnostics.profiler?.setCpuPhase("opaqueSubmission");
+		this.#objectShadowPass.drawOpaqueObjects(
+			view,
+			objectRuns.opaque,
+			shading,
+			null,
+		);
+		this.#objectShadowPass.drawDynamicOpaque(view, shading);
+		this.#diagnostics.profiler?.setCpuPhase("terrainSubmission");
+		this.#terrainPass.drawTerrain(view, shading, null);
 		if (shading.ambientOcclusion.kind === "enabled") {
-			this.#frameProfiler?.setCpuPhase("postAndPresentation");
-			this.#frameProfiler?.setGpuSystem("ambientOcclusion");
-			this.#getSaoPass().apply(
-				target,
-				view.camera,
-				view.projection,
-				shading.ambientOcclusion,
-			);
-			this.#recordAmbientOcclusionWork(
+			this.#diagnostics.profiler?.setCpuPhase("postAndPresentation");
+			this.#diagnostics.profiler?.setGpuSystem("ambientOcclusion");
+			this.#deviceTargets
+				.getSaoPass()
+				.apply(target, view.camera, view.projection, shading.ambientOcclusion);
+			this.#diagnostics.recordAmbientOcclusionWork(
 				target.extent.width * target.extent.height,
 			);
-			this.#frameProfiler?.setGpuSystem("other");
+			this.#diagnostics.profiler?.setGpuSystem("other");
 		}
-		this.#frameProfiler?.setCpuPhase("transparencyAndOverlays");
+		this.#diagnostics.profiler?.setCpuPhase("transparencyAndOverlays");
 		// Retail's after-landscape weather: drawn once the landblock loop is down but before
 		// the deferred translucent flush, which is legitimately allowed to cover it.
 		if (domain === "exterior") {
-			this.#drawSky(view, shading, "after-landscape", null);
+			this.#overlayPasses.drawSky(view, shading, "after-landscape", null);
 		}
-		this.#drawBlendedObjects(view, objectRuns.blended, shading, null);
-		// After the blended pass: particles are transparent and must not occlude the geometry they
-		// sort against.
-		this.#drawParticleBatches(
+		this.#objectShadowPass.drawBlendedObjects(
 			view,
-			view.particles,
-			this.#frameClockSeconds,
-			1.0,
-		);
-		this.#drawEntityOverlays(view, null);
-		this.#drawSummonLeashes(view);
-		this.#drawCombatEffects(view, null, null);
-		const indicator = this.#frameWorldIndicator;
-		if (indicator?.desiredTrajectory)
-			this.#drawWorldTrajectory(
-				view,
-				indicator.desiredTrajectory,
-				null,
-				this.#desiredTrajectoryPass,
-			);
-		if (indicator?.trajectory)
-			this.#drawWorldTrajectory(
-				view,
-				indicator.trajectory,
-				null,
-				this.#worldTrajectoryPass,
-			);
-		if (indicator !== null) {
-			this.#drawWorldMarker(view, indicator.marker, null);
-			if (indicator.landingMarker)
-				this.#drawWorldMarker(view, indicator.landingMarker, null);
-		}
-		this.#gl.bindVertexArray(null);
-		this.#frameProfiler?.setCpuPhase("postAndPresentation");
-		this.#drawPortalTransitionTunnel(target, showRetailHiddenGeometry);
-		this.#presentFlatScene(target, view);
-		this.#frameProfiler?.setCpuPhase("other");
-	}
-
-	#reconcileNameplateTextureCache(
-		appearance: NameplateAppearance,
-		density: number,
-		viewerEntityIdentity: string | null,
-	): void {
-		this.#nameplateTextureCache.invalidateIcons(
-			this.#nameplateIconRepository.takeChanged(),
-		);
-		const revision = this.#world.getNameplatePopulationRevision();
-		if (
-			revision === this.#reconciledNameplatePopulationRevision &&
-			appearance === this.#reconciledNameplateAppearance &&
-			density === this.#reconciledNameplateDensity &&
-			viewerEntityIdentity === this.#reconciledNameplateViewerIdentity
-		)
-			return;
-		this.#nameplatePopulationScratch.length = 0;
-		this.#nameplateIconScratch.length = 0;
-		this.#world.forEachNameplateVisual((identity, visual) => {
-			const classified = {
-				...visual,
-				category: resolveNameplateCategory(
-					visual.entityClass,
-					identity === viewerEntityIdentity,
-				),
-			};
-			this.#nameplatePopulationScratch.push(classified);
-			for (const { iconId } of classified.content.indicators)
-				this.#nameplateIconScratch.push(iconId);
-		});
-		this.#nameplateIconRepository.reconcile(this.#nameplateIconScratch);
-		this.#nameplateTextureCache.reconcile(
-			this.#nameplatePopulationScratch,
-			appearance,
-			density,
-		);
-		this.#reconciledNameplatePopulationRevision = revision;
-		this.#reconciledNameplateAppearance = appearance;
-		this.#reconciledNameplateDensity = density;
-		this.#reconciledNameplateViewerIdentity = viewerEntityIdentity;
-	}
-
-	/** Like particles, spanning leashes use composed scene depth without per-domain duplication. */
-	#drawSummonLeashes(view: PreparedView): void {
-		if (this.#frameSummonLeashes.length === 0) return;
-		this.#summonChainPass ??= new WebGL2SummonChainPass(this.#gl);
-		const anchor = createLandblockWorldOrigin(view.anchorLandblockId);
-		for (const leash of this.#frameSummonLeashes)
-			this.#summonChainPass.draw(leash, anchor, view.clipFromAnchor);
-	}
-
-	#drawCombatEffects(
-		view: PreparedView,
-		routing: WebGL2PortalScopeAtlasPipeline | null,
-		visibility: DynamicRenderDomainSelection | null,
-	): void {
-		if (this.#combatEffectAdapters.size === 0) return;
-		this.#frameProfiler?.setGpuSystem("transparencyAndEffects");
-		for (const adapter of this.#combatEffectAdapters)
-			adapter.drawWorld({
-				clipFromAnchor: mat4ToFloat32Array(
-					view.clipFromAnchor,
-					this.#matrixScratch,
-				),
-				anchorLandblockId: view.anchorLandblockId,
-				width: this.#frameWidth,
-				height: this.#frameHeight,
-				density: this.#renderScale,
-				routing,
-				selectedScope: (scope) =>
-					visibility
-						? visibility.selectedRenderDomainOrdinal(scopeKey(scope))
-						: scope.kind === "outdoor" ||
-							  scope.envCellId === view.camera.placement.envCellId
-							? 0
-							: null,
-			});
-		this.#frameProfiler?.setGpuSystem("other");
-	}
-
-	/**
-	 * Resolve one visible entity's shared anchor and enqueue its independently admitted components.
-	 *
-	 * Entity visibility, depth, and portal domains still apply; the decision of which components
-	 * exist was made upstream and is never reinterpreted here.
-	 */
-	#prepareEntityOverlay(
-		nodeId: SceneNodeId,
-		overlay: NonNullable<ReturnType<EntityOverlayLookup["presentation"]>>,
-		renderTarget: VisibleDynamicPresentation,
-		contribution: Extract<RenderContribution, { kind: "dynamic" }>,
-		prepared: PreparedViewGeometry,
-		settings: EntityOverlaySettings,
-		portalVisibility: DynamicRenderDomainSelection | null,
-		labels: PreparedLabelComponent[],
-		bars: PreparedBarComponent[],
-	): void {
-		const facts = this.#world.getEntityOverlayFacts(nodeId);
-		if (facts === null) return;
-		const content = overlay.nameplate === null ? null : facts.content;
-		if (content === null && overlay.healthBar === null) return;
-		const landblockOffset = createLandblockOffset(
-			getLandblockCoordinates(renderTarget.landblockId),
-			prepared.anchorCoordinates,
-		);
-		const { anchor, distanceSquared } = resolveEntityOverlayAnchor(
-			facts.rigidBounds,
-			contribution.footprint.placement.localToLandblock,
-			landblockOffset,
-			prepared.cameraPosition,
-			settings.anchorPaddingWorldUnits,
-		);
-		const entity: PreparedOverlayEntity = {
-			anchor,
-			distanceSquared,
-			identity: facts.identity,
-			route:
-				overlay.occlusion === "overlay"
-					? OVERLAY_ROUTE
-					: {
-							kind: "scene",
-							renderScopeKeys: selectedDynamicRenderScopeKeys(
-								renderTarget.renderScopes,
-								portalVisibility,
-							),
-						},
-		};
-		if (content !== null && overlay.nameplate !== null)
-			labels.push({
-				entity,
-				anchor,
-				distanceSquared,
-				identity: facts.identity,
-				priority: overlay.nameplate,
-				label: {
-					category: resolveNameplateCategory(
-						contribution.entityClass,
-						facts.identity === this.#frameViewerEntityIdentity,
-					),
-					content,
-				},
-			});
-		if (overlay.healthBar !== null)
-			bars.push({
-				entity,
-				anchor,
-				distanceSquared,
-				identity: facts.identity,
-				priority: overlay.healthBar.priority,
-				fraction: overlay.healthBar.fraction,
-			});
-	}
-
-	#drawEntityOverlays(
-		view: PreparedView,
-		portalRouting: WebGL2PortalScopeAtlasPipeline | null,
-	): void {
-		const bar = view.healthBars;
-		const density = this.#renderScale;
-		const context = {
-			clipFromAnchor: mat4ToFloat32Array(
-				view.clipFromAnchor,
-				this.#matrixScratch,
-			),
-			healthBar: {
-				sizePixels: [
-					bar.widthCssPixels * density,
-					bar.heightCssPixels * density,
-				] as const,
-				gapPixels: bar.gapCssPixels * density,
-				borderWidthPixels: bar.borderWidthCssPixels * density,
-				fillColor: bar.fillColor,
-				backgroundColor: bar.backgroundColor,
-				borderColor: bar.borderColor,
-			},
-			referenceDistance: view.entityOverlaySettings.referenceDistance,
-			viewportHeight: this.#frameHeight,
-			viewportWidth: this.#frameWidth,
-		};
-		if (view.entityOverlays.length === 0) {
-			if (portalRouting)
-				this.#entityOverlayPass.drawScoped(context, [], portalRouting);
-			else this.#entityOverlayPass.draw(context, []);
-			return;
-		}
-		this.#nameplateTextureCache.beginDraw();
-		const acquire = (overlay: PreparedEntityOverlay) =>
-			overlay.label === null
-				? null
-				: this.#nameplateTextureCache.acquire(overlay.label);
-		if (portalRouting) {
-			let instanceCount = 0;
-			for (const overlay of view.entityOverlays) {
-				const { route } = overlay.entity;
-				if (route.kind === "overlay") continue;
-				const binding = acquire(overlay);
-				for (const renderScopeKey of route.renderScopeKeys) {
-					const instance = this.#scopedEntityOverlayDrawScratch[instanceCount];
-					if (instance === undefined) {
-						this.#scopedEntityOverlayDrawScratch.push({
-							anchor: overlay.entity.anchor,
-							depthTest: true,
-							binding,
-							healthFraction: overlay.healthFraction,
-							renderScopeKey,
-						});
-					} else {
-						instance.anchor = overlay.entity.anchor;
-						instance.depthTest = true;
-						instance.binding = binding;
-						instance.healthFraction = overlay.healthFraction;
-						instance.renderScopeKey = renderScopeKey;
-					}
-					instanceCount += 1;
-				}
-			}
-			this.#scopedEntityOverlayDrawScratch.length = instanceCount;
-			this.#entityOverlayPass.drawScoped(
-				context,
-				this.#scopedEntityOverlayDrawScratch,
-				portalRouting,
-			);
-			const scopedDiagnostics = this.#entityOverlayPass.diagnostics();
-			this.#submittedEntityOverlayDrawCount += scopedDiagnostics.drawCount;
-			this.#submittedEntityOverlayInstanceCount +=
-				scopedDiagnostics.instanceCount;
-		}
-		let instanceCount = 0;
-		for (const overlay of view.entityOverlays) {
-			const { route } = overlay.entity;
-			// Overlay-route entities draw once, unscoped, after ordinary scoped overlays.
-			if (portalRouting !== null && route.kind === "scene") continue;
-			const binding = acquire(overlay);
-			const depthTest = route.kind === "scene";
-			const instance = this.#entityOverlayDrawScratch[instanceCount];
-			if (instance === undefined) {
-				this.#entityOverlayDrawScratch.push({
-					anchor: overlay.entity.anchor,
-					depthTest,
-					binding,
-					healthFraction: overlay.healthFraction,
-				});
-			} else {
-				instance.anchor = overlay.entity.anchor;
-				instance.depthTest = depthTest;
-				instance.binding = binding;
-				instance.healthFraction = overlay.healthFraction;
-			}
-			instanceCount += 1;
-		}
-		this.#entityOverlayDrawScratch.length = instanceCount;
-		this.#entityOverlayPass.draw(context, this.#entityOverlayDrawScratch);
-		const diagnostics = this.#entityOverlayPass.diagnostics();
-		this.#submittedEntityOverlayDrawCount += diagnostics.drawCount;
-		this.#submittedEntityOverlayInstanceCount += diagnostics.instanceCount;
-	}
-
-	#drawWorldMarker(
-		view: PreparedViewGeometry,
-		marker: WorldMarkerInput,
-		portal: Parameters<WebGL2WorldMarkerPass["draw"]>[1],
-	): void {
-		const center = anchorRelativePosition(
-			marker.position,
-			view.anchorLandblockId,
-		);
-		const cameraDistance = Math.sqrt(
-			center.distanceSquaredTo(view.cameraPosition),
-		);
-		this.#worldMarkerPass.draw(
-			{
-				center,
-				clipFromAnchor: view.clipFromAnchor,
-				color: marker.color,
-				normal: marker.normal,
-				radius: Math.min(2.4, Math.max(marker.radius, cameraDistance * 0.012)),
-				shape: marker.shape,
-				spinAngle: marker.pending
-					? (this.#frameClockSeconds % 1) * Math.PI * 2
-					: null,
-			},
-			portal,
-		);
-	}
-
-	#drawWorldTrajectory(
-		view: PreparedViewGeometry,
-		trajectory: NonNullable<WorldIndicatorInput["trajectory"]>,
-		portal: Parameters<WebGL2WorldTrajectoryPass["draw"]>[2],
-		pass: WebGL2WorldTrajectoryPass,
-	): void {
-		pass.draw(
-			trajectory,
-			{
-				anchorOrigin: createLandblockWorldOrigin(view.anchorLandblockId),
-				clipFromAnchor: view.clipFromAnchor,
-				color: trajectory.color,
-				viewportHeight: this.#frameHeight,
-				viewportWidth: this.#frameWidth,
-			},
-			portal,
-		);
-	}
-
-	#prepareIsolatedSetupObjects(
-		template: ObjectVisualTemplate,
-		partPoses: readonly Mat4[],
-		root: Mat4,
-		scale: Vec3,
-		view: PreparedViewGeometry,
-		source: "portal-transition",
-		renderScopeKey: string,
-		showRetailHiddenGeometry: boolean,
-	): PreparedObjectFrameInput[] {
-		const objects: PreparedObjectFrameInput[] = [];
-		for (const part of template.parts) {
-			const pose = partPoses[part.partIndex];
-			if (!pose)
-				throw new Error(
-					`Isolated setup pose has no transform for part ${part.partIndex}.`,
-				);
-			const localToLandblock = multiplyMat4(
-				root,
-				composeObjectPartTransform(pose, scale, part.defaultScale),
-			);
-			const bounds = part.localBounds;
-			const center = new Vec3(
-				bounds ? (bounds.min.x + bounds.max.x) / 2 : 0,
-				bounds ? (bounds.min.y + bounds.max.y) / 2 : 0,
-				bounds ? (bounds.min.z + bounds.max.z) / 2 : 0,
-			);
-			const transparentCenter = landblockVec3(
-				transformPoint3(localToLandblock, center),
-			);
-			for (const drawUnit of part.drawUnits) {
-				if (
-					!retainsRetailGeometry(
-						drawUnit.retailVisibility,
-						showRetailHiddenGeometry,
-					)
-				)
-					continue;
-				const geometry = this.#world.resolveGeometry(drawUnit.geometry);
-				const object: ObjectFrameInput = {
-					cullFaceOverride: null,
-					drawKind: "single",
-					geometry,
-					indexCount: drawUnit.indexCount,
-					indexStart: drawUnit.indexStart,
-					instances: null,
-					landblockId: view.anchorLandblockId,
-					localToLandblock,
-					material: drawUnit.material,
-					ordering: drawUnit.ordering,
-					receivesOutdoorPssm: false,
-					retailVisibility: drawUnit.retailVisibility,
-					renderScopeKey,
-					source,
-					transparentSort: {
-						center: transparentCenter,
-						stableId: `${source}/${part.partIndex}/${drawUnit.batchKey}`,
-					},
-				};
-				const compiled = this.#compiledDraws.resolveDraw(
-					drawUnit,
-					drawUnit.ordering,
-					() => this.#compileObjectDraw(object),
-				);
-				objects.push(createObjectSubmission(object, compiled));
-			}
-		}
-		return objects;
-	}
-
-	/**
-	 * Render the authored portal setup into a transition-only target before final presentation.
-	 *
-	 * The setup is placed in a virtual camera room using the retail camera facts rather than added
-	 * to the world scene. That keeps world authority and culling untouched while still exercising
-	 * the same compiled geometry, atlas bindings, material partitions, and animation sampler used
-	 * by ordinary setup visuals.
-	 */
-	#drawPortalTransitionTunnel(
-		sceneTarget: WebGL2FlatSceneTargetSet,
-		showRetailHiddenGeometry: boolean,
-	): void {
-		const transition = this.#activeTransition;
-		const visual = this.#portalTransitionVisual;
-		const clip = this.#portalTransitionClip;
-		if (
-			transition === null ||
-			transition.kind === "destination-only-awaiting-handoff" ||
-			visual === null ||
-			clip === null
-		) {
-			this.#portalTransitionTarget?.destroy();
-			this.#portalTransitionTarget = null;
-			return;
-		}
-		const target = (this.#portalTransitionTarget ??= new WebGL2FlatSceneTarget(
-			this.#gl,
-		)).resizeDimensions(this.#frameWidth, this.#frameHeight);
-
-		try {
-			this.#beginPortalTransitionTarget(target);
-			const view = this.#prepareViewGeometry(PORTAL_TRANSITION_ANCHOR, {
-				camera: PORTAL_TRANSITION_CAMERA,
-				cameraInsideSealedCell: false,
-			});
-			// `animationFramePosition` is already a fractional cursor advanced at render cadence.
-			// The authored 40 fps rate belongs to traversal, not to the display refresh cap.
-			const framePosition = transition.tunnel.animationFramePosition;
-			const partPoses = sampleAnimationPose(clip, framePosition);
-			const portalView = createViewMat4(
-				new Vec3(0.24, -2.7, 0.88),
-				Quat.identity(),
-			);
-			const roll = portalTunnelRollRadians(
-				transition.generation,
-				transition.tunnel.axialRollFramePosition,
-			);
-			const portalCameraWorld = multiplyMat4(
-				portalView,
-				createRotationMat4(
-					new Quat(Math.cos(roll / 2), 0, 0, Math.sin(roll / 2)),
-				),
-			);
-			const objects = this.#prepareIsolatedSetupObjects(
-				visual.template,
-				partPoses,
-				portalCameraWorld,
-				new Vec3(1, 1, 1),
-				view,
-				"portal-transition",
-				PORTAL_TRANSITION_SCOPE,
-				showRetailHiddenGeometry,
-			);
-			const portalViewInput: PreparedView = {
-				...view,
-				dynamicOpaque: [],
-				landblockOffsets: new Map([[view.anchorLandblockId, [0, 0, 0]]]),
-				// Portal space is a presentation-only authored setup, never a dynamic-entity view.
-				entityOverlays: [],
-				entityOverlaySettings: SHARED_FRAME_SETTINGS.entityOverlays,
-				healthBars: SHARED_FRAME_SETTINGS.healthBars,
-				objectBuckets: bucketObjectSubmissions(objects),
-				particles: [],
-				skyParticles: [],
-				terrain: [],
-				entityAnalyticShadows: null,
-			};
-			const portalShading: SceneShading = {
-				clearColor: BLACK_SCENE_CLEAR_COLOR,
-				authoredLightResponse: 0,
-				ambientOcclusion: { kind: "disabled" },
-				anchorOrigin: { x: 0, z: 0 },
-				dynamicLights: [],
-				fog: null,
-				sky: null,
-				staticLights: () => EMPTY_LANDBLOCK_LIGHTS,
-				weatherEnabled: false,
-				lighting: resolveSceneLightingByRole(PORTAL_TRANSITION_LIGHTING, null),
-			};
-			const phases = this.#createObjectSubmissionPhases(portalViewInput);
-			const runs = this.#prepareViewObjectRuns(phases);
-			this.#drawOpaqueObjects(
-				portalViewInput,
-				runs.opaque,
-				portalShading,
-				null,
-			);
-			this.#drawBlendedObjects(
-				portalViewInput,
-				runs.blended,
-				portalShading,
-				null,
-			);
-		} finally {
-			// The presenter samples the scene target next; restore its framebuffer and viewport even
-			// when an authored material fails loudly during this transition-only pass.
-			this.#gl.bindFramebuffer(
-				this.#gl.DRAW_FRAMEBUFFER,
-				sceneTarget.framebuffer,
-			);
-			this.#gl.viewport(
-				0,
-				0,
-				sceneTarget.extent.width,
-				sceneTarget.extent.height,
-			);
-		}
-	}
-
-	/** Clear a tunnel target with transparent color so only authored pixels cover the world. */
-	#beginPortalTransitionTarget(target: WebGL2FlatSceneTargetSet): void {
-		const gl = this.#gl;
-		gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, target.framebuffer);
-		gl.viewport(0, 0, target.extent.width, target.extent.height);
-		gl.colorMask(true, true, true, true);
-		gl.enable(gl.DEPTH_TEST);
-		gl.depthFunc(gl.LEQUAL);
-		gl.depthMask(true);
-		gl.disable(gl.BLEND);
-		gl.disable(gl.CULL_FACE);
-		gl.disable(gl.SCISSOR_TEST);
-		gl.disable(gl.STENCIL_TEST);
-		gl.clearColor(0, 0, 0, 0);
-		gl.clearDepth(1);
-		gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-	}
-
-	/**
-	 * Reuse this frame's scene target, allocating it on the first frame that needs one.
-	 *
-	 * Both schedules render into the same target: the flat one because it always has, and the
-	 * portal one because its composite must land somewhere samplable before presentation grades
-	 * it. The default framebuffer cannot be sampled, so an offscreen target is what makes a
-	 * whole-frame transform possible at all.
-	 */
-	#acquireFlatSceneTarget(): WebGL2FlatSceneTargetSet {
-		const owner = (this.#flatSceneTarget ??= new WebGL2FlatSceneTarget(
-			this.#gl,
-		));
-		return owner.resizeDimensions(this.#frameWidth, this.#frameHeight);
-	}
-
-	/** Resolve the x-ray selection independently of ordinary camera/portal visibility. */
-	#prepareEntitySelection(showRetailHiddenGeometry: boolean): void {
-		const target = this.#frameSelectionTarget;
-		if (target === null) return;
-		const depth =
-			target.shape.kind === "rigid"
-				? this.#dynamicDepths.prepareSelection(
-						target.nodeId,
-						showRetailHiddenGeometry,
-					)
-				: null;
-		const pass = (this.#entitySelectionPass ??= new WebGL2EntitySelectionPass(
-			this.#gl,
-			{
-				getGeometry: (key) =>
-					this.#resources.getGeometry(this.#world.resolveGeometry(key)),
-				getPose: (nodeId) => this.#dynamicPosePages.get(nodeId),
-			},
-		));
-		const geometry = pass.prepare(target, depth);
-		this.#preparedSelection = geometry === null ? null : { pass, geometry };
-		if (geometry?.kind === "rigid") {
-			this.#poseUploadParts.set(target.nodeId, geometry.parts);
-			this.#selectedDynamicNodeIds.add(target.nodeId);
-		}
-	}
-
-	#drawEntitySelectionMask(
-		view: PreparedViewGeometry,
-	): WebGL2EntitySelectionMask | null {
-		const target = this.#frameSelectionTarget;
-		if (target === null) {
-			this.#frameSelectionMetrics.entitySelection.skippedReason = "no-target";
-			return null;
-		}
-		const selection = this.#preparedSelection;
-		if (selection === null) {
-			this.#frameSelectionMetrics.entitySelection.skippedReason =
-				"hidden-or-empty";
-			return null;
-		}
-		const rendered = selection.pass.render({
-			anchorCoordinates: view.anchorCoordinates,
-			clipFromAnchor: view.clipFromAnchor,
-			selection: selection.geometry,
-			height: this.#frameHeight,
-			width: this.#frameWidth,
-		});
-		const metrics = this.#frameSelectionMetrics.entitySelection;
-		metrics.compositeDrawCount += 1;
-		metrics.maskDrawCount += rendered.work.maskDrawCount;
-		metrics.selectedSphereProxyCount += rendered.work.selectedSphereProxyCount;
-		metrics.selectedPartCount += rendered.work.selectedPartCount;
-		metrics.selectedTriangleCount += rendered.work.selectedTriangleCount;
-		metrics.skippedReason = null;
-		return rendered.mask;
-	}
-
-	/**
-	 * Write one finished scene target to the default framebuffer.
-	 *
-	 * Both physical schedules present the complete world here, so grading and transition composition
-	 * see every world fragment exactly once. Unplaced combat feedback draws afterward as a HUD
-	 * overlay and bypasses those transforms.
-	 */
-	#presentFlatScene(
-		target: WebGL2FlatSceneTargetSet,
-		view: PreparedViewGeometry | null,
-	): void {
-		this.#frameProfiler?.setGpuSystem("presentation");
-		const selectionMask =
-			view === null ? null : this.#drawEntitySelectionMask(view);
-		const transition = this.#transitionPresentationInput();
-		(this.#flatScenePresentation ??= new WebGL2FlatScenePresentation(
-			this.#gl,
-			this.#portalWarpDriveTuning,
-		)).present(
-			target,
-			this.#frameColorGrade,
-			transition,
-			this.#frameEntitySelectionOutline,
-			this.#renderScale,
-			selectionMask,
-			this.#frameClockSeconds,
-		);
-		const activeTransition = this.#activeTransition;
-		if (
-			activeTransition === null ||
-			activeTransition.kind !== "origin-to-tunnel"
-		) {
-			this.#transitionSnapshot?.clear();
-			this.#transitionSnapshotGeneration = null;
-		}
-		if (
-			activeTransition === null ||
-			activeTransition.kind === "destination-only-awaiting-handoff"
-		) {
-			this.#portalTransitionTarget?.destroy();
-			this.#portalTransitionTarget = null;
-		}
-		// Presentation changes program and texture bindings outside the device-state mirror.
-		this.#beginObjectPhase();
-		this.#frameProfiler?.setGpuSystem("other");
-	}
-
-	/** Capture or retire transition-only resources at frame entry, before the scene target is drawn. */
-	#prepareTransitionSnapshot(transition: FrameInput["portalTransition"]): void {
-		if (
-			transition === undefined ||
-			transition.kind === "destination-only-awaiting-handoff"
-		) {
-			this.#transitionSnapshot?.clear();
-			this.#transitionSnapshotGeneration = null;
-			return;
-		}
-		validatePortalTransitionPresentationPlan(transition);
-		if (this.#transitionSnapshotGeneration !== transition.generation) {
-			this.#transitionSnapshot?.clear();
-			this.#transitionSnapshotGeneration = transition.generation;
-		}
-		if (transition.kind !== "origin-to-tunnel") {
-			this.#transitionSnapshot?.clear();
-			return;
-		}
-		const source = this.#flatSceneTarget?.getCurrentTarget();
-		if (source === null || source === undefined) return;
-		const existing = this.#transitionSnapshot?.getCurrentTarget();
-		if (existing !== null && existing !== undefined) {
-			// The outgoing image is the last completed frame, not the incoming frame currently
-			// being drawn. Keep the first capture stable for the whole transition generation. Its
-			// native extent is intentional: the fullscreen compositor samples normalized UVs, so a
-			// resize can preserve this useful warp source without an intermediate reallocation.
-			return;
-		}
-		(this.#transitionSnapshot ??= new WebGL2TransitionSnapshot(
-			this.#gl,
-		)).capture(source.framebuffer, source.extent);
-	}
-
-	/** Convert renderer-owned snapshot state into the final presenter input. */
-	#transitionPresentationInput(): FlatScenePresentationInput {
-		const transition = this.#activeTransition;
-		const snapshot = this.#transitionSnapshot?.getCurrentTarget();
-		const tunnel = this.#portalTransitionTarget?.getCurrentTarget();
-		return resolvePortalTransitionComposition(transition ?? undefined, {
-			origin: snapshot?.texture ?? null,
-			tunnel: tunnel?.color ?? null,
-		});
-	}
-
-	/** Bind and clear one complete flat-scene target before any scene submission. */
-	#beginFlatOpaqueScene(
-		target: WebGL2FlatSceneTargetSet,
-		clearColor: readonly [number, number, number, number],
-	): void {
-		const gl = this.#gl;
-		gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, target.framebuffer);
-		gl.viewport(0, 0, target.extent.width, target.extent.height);
-		gl.colorMask(true, true, true, true);
-		// Opaque visibility must not depend on state left by presentation or HUD overlays.
-		gl.enable(gl.DEPTH_TEST);
-		gl.depthFunc(gl.LEQUAL);
-		gl.depthMask(true);
-		gl.disable(gl.BLEND);
-		gl.disable(gl.CULL_FACE);
-		gl.disable(gl.SCISSOR_TEST);
-		gl.disable(gl.STENCIL_TEST);
-		gl.clearColor(...clearColor);
-		gl.clearDepth(1);
-		gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-	}
-
-	#getSaoPass(): WebGL2SaoPass {
-		if (this.#saoPass) return this.#saoPass;
-		const pass = new WebGL2SaoPass(this.#gl);
-		pass.setCoverageVisualizationEnabled(this.#saoCoverageVisualizationEnabled);
-		this.#saoPass = pass;
-		return pass;
-	}
-
-	/** Account for the exact full-resolution workload of one successful SAO invocation. */
-	#recordAmbientOcclusionWork(pixelCount: number): void {
-		const metrics = this.#frameSelectionMetrics.ambientOcclusion;
-		metrics.applicationCount += 1;
-		metrics.pixelCount += pixelCount;
-	}
-
-	#drawTerrain(
-		view: PreparedView,
-		shading: SceneShading,
-		portalPipeline: WebGL2PortalScopeAtlasPipeline | null,
-	): void {
-		const [passResources] = view.terrain;
-		if (!passResources) {
-			portalPipeline?.routeTerrainPass(
-				0,
-				this.#nearTerrainProgram.uniforms.clipTransform,
-			);
-			return;
-		}
-		this.#frameProfiler?.setGpuSystem("terrain");
-		const farCutoff = farTerrainCutoffLandblocks(shading.fog);
-		this.#frameSelectionMetrics.farTerrainCutoffLandblocks = farCutoff;
-		let nearCount = 0;
-		let directionalCount = 0;
-		let farCount = 0;
-		for (const terrain of view.terrain) {
-			assertSharedTerrainRegion(
-				passResources.program,
-				terrain.program,
-				terrain.drawUnit.kind === "landblock"
-					? terrain.drawUnit.landblockId
-					: "ocean-backdrop",
-			);
-			if (this.#isFarTerrain(terrain, view, farCutoff)) farCount += 1;
-			else {
-				nearCount += 1;
-				if (this.#hasTerrainDirectionalShadow(terrain, view)) {
-					directionalCount += 1;
-				}
-			}
-		}
-		const gl = this.#gl;
-		gl.enable(gl.DEPTH_TEST);
-		// Opaque objects have already written depth; strict LESS keeps objects winning exact ties
-		// against offset terrain depth just as LEQUAL did when terrain drew first.
-		gl.depthFunc(gl.LESS);
-		gl.depthMask(true);
-		gl.disable(gl.BLEND);
-		gl.enable(gl.CULL_FACE);
-		gl.cullFace(gl.BACK);
-		gl.enable(gl.POLYGON_OFFSET_FILL);
-		gl.polygonOffset(TERRAIN_DEPTH_OFFSET.factor, TERRAIN_DEPTH_OFFSET.units);
-		try {
-			let routedTerrainPass = false;
-			if (nearCount > 0) {
-				for (const directional of [false, true]) {
-					const count = directional
-						? directionalCount
-						: nearCount - directionalCount;
-					if (count === 0) continue;
-					const nearProgram = this.#beginNearTerrainGroup(
-						view,
-						shading,
-						passResources,
-						portalPipeline,
-						routedTerrainPass ? null : view.terrain.length,
-						directional,
-					);
-					routedTerrainPass = true;
-					this.#drawNearTerrainGroup(
-						view,
-						shading,
-						farCutoff,
-						nearProgram,
-						directional,
-					);
-				}
-			}
-			if (farCount > 0) {
-				this.#beginFarTerrainGroup(
-					view,
-					shading,
-					passResources,
-					portalPipeline,
-					routedTerrainPass ? null : view.terrain.length,
-				);
-				this.#drawFarTerrainGroup(view, farCutoff);
-			}
-		} finally {
-			gl.depthFunc(gl.LEQUAL);
-			gl.disable(gl.CULL_FACE);
-			gl.disable(gl.POLYGON_OFFSET_FILL);
-			// Terrain mutates raw WebGL program, VAO, texture, and cull-face bindings outside #deviceState.
-			this.#deviceState.invalidate();
-			this.#frameProfiler?.setGpuSystem("other");
-		}
-	}
-
-	#beginTerrainGroup(
-		view: PreparedView,
-		shading: SceneShading,
-		program: WebGLProgram,
-		uniforms: TerrainGroupUniforms,
-		portalPipeline: WebGL2PortalScopeAtlasPipeline | null,
-		routeSubmissionCount: number | null,
-	): void {
-		const gl = this.#gl;
-		gl.useProgram(program);
-		gl.uniform4f(uniforms.clipTransform, 1, 1, 0, 0);
-		if (portalPipeline) {
-			if (routeSubmissionCount === null) {
-				portalPipeline.routeOutdoorOpaqueSubmission(uniforms.clipTransform);
-			} else {
-				portalPipeline.routeTerrainPass(
-					routeSubmissionCount,
-					uniforms.clipTransform,
-				);
-			}
-		}
-		gl.uniformMatrix4fv(
-			uniforms.projection,
-			false,
-			mat4ToFloat32Array(view.projection, this.#matrixScratch),
-		);
-		gl.uniform3f(
-			uniforms.cameraPosition,
-			view.cameraPosition.x,
-			view.cameraPosition.y,
-			view.cameraPosition.z,
-		);
-		gl.uniformMatrix4fv(
-			uniforms.view,
-			false,
-			mat4ToFloat32Array(view.view, this.#matrixScratch),
-		);
-		gl.uniformMatrix4fv(
-			uniforms.localToLandblock,
-			false,
-			mat4ToFloat32Array(WebGL2Renderer.#identityMatrix),
-		);
-		bindWebGL2DistanceFog(gl, uniforms, shading.fog);
-		bindWebGL2SceneLighting(gl, uniforms, shading.lighting.terrain);
-	}
-
-	#beginNearTerrainGroup(
-		view: PreparedView,
-		shading: SceneShading,
-		passResources: TerrainFrameInput,
-		portalPipeline: WebGL2PortalScopeAtlasPipeline | null,
-		routeSubmissionCount: number | null,
-		directional: boolean,
-	): WebGL2NearTerrainProgram {
-		const mapped = this.#activeOutdoorPssmFrame !== null;
-		const selected = mapped
-			? directional
-				? this.#outdoorPssmReceiverPrograms.hybridTerrain()
-				: this.#outdoorPssmReceiverPrograms.terrain()
-			: directional
-				? this.#outdoorPssmReceiverPrograms.directionalTerrain()
-				: this.#nearTerrainProgram;
-		const { program, uniforms } = selected;
-		this.#beginTerrainGroup(
-			view,
+			objectRuns.blended,
 			shading,
-			program,
-			uniforms,
-			portalPipeline,
-			routeSubmissionCount,
-		);
-		const gl = this.#gl;
-		gl.uniform1f(
-			uniforms.detailFadeNear,
-			SHARED_FRONTEND_TUNING.rendering.terrainDetailFade.near,
-		);
-		gl.uniform1f(
-			uniforms.detailFadeFar,
-			SHARED_FRONTEND_TUNING.rendering.terrainDetailFade.far,
-		);
-		gl.uniform1f(
-			uniforms.terrainPointLightIntensityScale,
-			SHARED_FRONTEND_TUNING.rendering.terrainPointLightIntensityScale,
-		);
-		bindWebGL2DynamicLights(
-			gl,
-			uniforms,
-			shading.dynamicLights,
-			shading.anchorOrigin,
-			this.#dynamicLightScratch,
-		);
-		const outdoorPssm = this.#activeOutdoorPssmFrame;
-		if (outdoorPssm) {
-			const pssmUniforms = selected.outdoorPssmUniforms;
-			if (!pssmUniforms) {
-				throw new Error("Active outdoor PSSM selected plain terrain program.");
-			}
-			bindWebGL2OutdoorPssmUniforms(
-				gl,
-				pssmUniforms,
-				outdoorPssm,
-				this.#outdoorPssmUniformScratch,
-			);
-			gl.activeTexture(gl.TEXTURE0 + OUTDOOR_PSSM_TEXTURE_UNIT);
-			gl.bindTexture(gl.TEXTURE_2D_ARRAY, outdoorPssm.targets.depth);
-			gl.bindSampler(OUTDOOR_PSSM_TEXTURE_UNIT, null);
-			gl.activeTexture(gl.TEXTURE0);
-		}
-		this.#beginTerrainLightMasks(selected);
-		this.#beginTerrainPassResources(passResources, selected);
-		return selected;
-	}
-
-	#beginFarTerrainGroup(
-		view: PreparedView,
-		shading: SceneShading,
-		passResources: TerrainFrameInput,
-		portalPipeline: WebGL2PortalScopeAtlasPipeline | null,
-		routeSubmissionCount: number | null,
-	): void {
-		const { program, uniforms } = this.#farTerrainProgram;
-		this.#beginTerrainGroup(
-			view,
-			shading,
-			program,
-			uniforms,
-			portalPipeline,
-			routeSubmissionCount,
-		);
-		this.#gl.uniform3fv(
-			uniforms.palette,
-			passResources.program.textures.colors.palette.colors,
-		);
-		this.#frameSelectionMetrics.farTerrainPaletteUploads += 1;
-	}
-
-	#drawNearTerrainGroup(
-		view: PreparedView,
-		shading: SceneShading,
-		farCutoff: number | null,
-		program: WebGL2NearTerrainProgram,
-		directional: boolean,
-	): void {
-		let previousStaticLightsEmpty = false;
-		for (const terrain of view.terrain) {
-			if (this.#isFarTerrain(terrain, view, farCutoff)) continue;
-			if (this.#hasTerrainDirectionalShadow(terrain, view) !== directional)
-				continue;
-			const landblockOffset = createLandblockOffset(
-				terrain.drawUnit.coordinates,
-				view.anchorCoordinates,
-				this.#offsetScratch,
-			);
-			this.#bindTerrainSurfaceField(terrain);
-			const landblockLights =
-				terrain.drawUnit.kind === "landblock"
-					? shading.staticLights(terrain.drawUnit.landblockId)
-					: EMPTY_LANDBLOCK_LIGHTS;
-			const hasActiveStaticLights =
-				shading.authoredLightResponse > 0 && landblockLights.lights.length > 0;
-			if (hasActiveStaticLights || !previousStaticLightsEmpty) {
-				bindWebGL2StaticLights(
-					this.#gl,
-					program.uniforms,
-					landblockLights.lights,
-					shading.anchorOrigin,
-					shading.authoredLightResponse,
-					this.#dynamicLightScratch,
-				);
-				this.#frameSelectionMetrics.staticLightBinds += 1;
-			}
-			if (hasActiveStaticLights) {
-				this.#uploadTerrainLightMask(landblockLights);
-			}
-			previousStaticLightsEmpty = !hasActiveStaticLights;
-			if (directional) {
-				this.#applyTerrainDirectionalShadow(program, terrain, view);
-			}
-			this.#drawTerrainGeometry(
-				terrain.program.geometry,
-				program.uniforms.landblockOffset,
-				landblockOffset,
-			);
-		}
-	}
-
-	#hasTerrainDirectionalShadow(
-		terrain: TerrainFrameInput,
-		view: PreparedView,
-	): boolean {
-		return (
-			terrain.drawUnit.kind === "landblock" &&
-			(view.entityAnalyticShadows?.outdoorByLandblockId.get(
-				terrain.drawUnit.landblockId,
-			)?.count ?? 0) > 0
-		);
-	}
-
-	#drawFarTerrainGroup(view: PreparedView, farCutoff: number | null): void {
-		for (const terrain of view.terrain) {
-			if (!this.#isFarTerrain(terrain, view, farCutoff)) continue;
-			const landblockOffset = createLandblockOffset(
-				terrain.drawUnit.coordinates,
-				view.anchorCoordinates,
-				this.#offsetScratch,
-			);
-			this.#drawTerrainGeometry(
-				terrain.program.geometry,
-				this.#farTerrainProgram.uniforms.landblockOffset,
-				landblockOffset,
-			);
-			this.#frameSelectionMetrics.farTerrainDraws += 1;
-		}
-	}
-
-	#isFarTerrain(
-		terrain: TerrainFrameInput,
-		view: PreparedView,
-		farCutoff: number | null,
-	): boolean {
-		const outdoorDirectional =
-			terrain.drawUnit.kind === "landblock"
-				? view.entityAnalyticShadows?.outdoorByLandblockId.get(
-						terrain.drawUnit.landblockId,
-					)
-				: undefined;
-		if (outdoorDirectional && outdoorDirectional.count > 0) return false;
-		if (
-			this.#activeOutdoorPssmFrame &&
-			terrainLandblockIntersectsShadowDistance(
-				terrain.drawUnit.coordinates,
-				view.anchorCoordinates,
-				view.cameraPosition,
-				this.#activeOutdoorPssmFrame.settings.maximumDistance,
-			)
-		) {
-			return false;
-		}
-		return (
-			farCutoff !== null &&
-			landblockChebyshevDistance(
-				terrain.drawUnit.coordinates,
-				view.anchorCoordinates,
-			) >= farCutoff
-		);
-	}
-
-	/** Bind one terrain landblock's directional analytic records before its existing draw. */
-	#applyTerrainDirectionalShadow(
-		program: WebGL2NearTerrainProgram,
-		terrain: TerrainFrameInput,
-		view: PreparedView,
-	): void {
-		const uniforms = program.outdoorDirectionalShadowUniforms;
-		const active = view.entityAnalyticShadows;
-		if (terrain.drawUnit.kind !== "landblock")
-			throw new Error("Ocean backdrop cannot receive authored entity shadows.");
-		const selection = active?.outdoorByLandblockId.get(
-			terrain.drawUnit.landblockId,
-		);
-		if (!uniforms) {
-			if (active?.outdoorEnabled && selection !== undefined) {
-				throw new Error(
-					"Active directional-shadow draw selected an ordinary terrain program.",
-				);
-			}
-			return;
-		}
-		if (!active?.outdoorEnabled || selection === undefined) {
-			throw new Error(
-				"Directional-shadow program selected without an active landblock record set.",
-			);
-		}
-		bindWebGL2OutdoorDirectionalShadowUniforms(
-			this.#gl,
-			uniforms,
-			selection,
-			active.outdoorSettings,
-		);
-	}
-
-	/**
-	 * Bind every region-constant terrain texture once for the whole pass.
-	 *
-	 * `composition`, `colors`, `blendMasks`, `roadMasks`, and `detail` are all keyed on
-	 * `activeRegionKey`, which takes no landblock input, and exactly one `ActiveRegionSource` is
-	 * live per content source. They are therefore identical for every landblock in the pass, and
-	 * rebinding them per landblock was pure waste. `assertSharedTerrainRegion` keeps that true.
-	 *
-	 * Bound per pass rather than once at program build because other passes own these texture
-	 * units between terrain passes.
-	 */
-	#beginTerrainPassResources(
-		input: TerrainFrameInput,
-		program: WebGL2NearTerrainProgram,
-	): void {
-		const { textures } = input.program;
-		const composition = this.#resources.getTexture2D(input.program.composition);
-		const colors = this.#resources.getTextureArray(textures.colors.resource);
-		const blendMasks = this.#resources.getTextureArray(
-			textures.blendMasks.resource,
-		);
-		const roadMasks = this.#resources.getTextureArray(
-			textures.roadMasks.resource,
-		);
-		const detail = this.#resources.getTexture2D(textures.detail);
-		const gl = this.#gl;
-		this.#bindTexture2D(
-			1,
-			composition,
-			program.uniforms.composition,
-			"exact",
-			TextureWrapMode.Clamp,
-		);
-		this.#bindTextureArray(
-			2,
-			colors,
-			program.uniforms.colors,
-			"filterable",
-			TextureWrapMode.Repeat,
-		);
-		// Both mask arrays are addressed with cell-local UVs that reach exactly 0 and 1 at a cell
-		// boundary, and each cell's mask is independent of its neighbor's. Repeat wrapping would
-		// make the boundary texel blend against the opposite edge of the same mask, bleeding an
-		// unrelated corner's alpha into a half-texel band along every cell edge.
-		this.#bindTextureArray(
-			3,
-			blendMasks,
-			program.uniforms.blendMasks,
-			"filterable",
-			TextureWrapMode.Clamp,
-		);
-		this.#bindTextureArray(
-			4,
-			roadMasks,
-			program.uniforms.roadMasks,
-			"filterable",
-			TextureWrapMode.Clamp,
-		);
-		this.#bindTexture2D(
-			5,
-			detail,
-			program.uniforms.detail,
-			"filterable",
-			TextureWrapMode.Repeat,
-		);
-		gl.activeTexture(gl.TEXTURE0);
-		this.#textureSamplers.bind(0, {
-			mipLevels: 1,
-			policy: this.#frameTextureFiltering,
-			samplingClass: "exact",
-			wrap: TextureWrapMode.Clamp,
-		});
-		gl.uniform1i(program.uniforms.surfaceField, 0);
-	}
-
-	/**
-	 * Bind the one genuinely per-landblock terrain texture on already-configured unit 0.
-	 *
-	 * Everything else the terrain shader samples, including unit 0's sampler and uniform, is
-	 * region-constant and already bound for the pass by `#beginTerrainPassResources`.
-	 */
-	#bindTerrainSurfaceField(input: TerrainFrameInput): void {
-		const surfaceField = this.#resources.getTexture2D(
-			input.program.surfaceField,
-		);
-		this.#gl.bindTexture(this.#gl.TEXTURE_2D, surfaceField.texture);
-	}
-
-	/**
-	 * Bind the shared mask texture for the terrain pass.
-	 *
-	 * Uses an `exact` sampler because integer textures are not filterable. Bound once per pass so
-	 * each landblock pays only its table upload, and only when it has lights to name.
-	 */
-	#beginTerrainLightMasks(program: WebGL2NearTerrainProgram): void {
-		const gl = this.#gl;
-		gl.activeTexture(gl.TEXTURE0 + TERRAIN_LIGHT_MASK_TEXTURE_UNIT);
-		gl.bindTexture(gl.TEXTURE_2D, this.#terrainLightMask.texture);
-		this.#textureSamplers.bind(TERRAIN_LIGHT_MASK_TEXTURE_UNIT, {
-			mipLevels: 1,
-			policy: this.#frameTextureFiltering,
-			samplingClass: "exact",
-			wrap: TextureWrapMode.Clamp,
-		});
-		gl.uniform1i(
-			program.uniforms.staticLightMask,
-			TERRAIN_LIGHT_MASK_TEXTURE_UNIT,
-		);
-		gl.activeTexture(gl.TEXTURE0);
-	}
-
-	/**
-	 * Upload one landblock's mask table, unless it has no lights for the mask to name.
-	 *
-	 * An unlit landblock leaves whatever the previous one uploaded in place. That cannot leak
-	 * light: the masked loop bounds every index by the live light count, which is zero here, so it
-	 * exits before reading any light slot. Skipping the upload is what keeps tiling free on the
-	 * majority of landblocks, only 629 of 5346 of which carry an authored light at all.
-	 */
-	#uploadTerrainLightMask(landblockLights: LandblockLights): void {
-		if (landblockLights.lights.length === 0) return;
-		const gl = this.#gl;
-		gl.activeTexture(gl.TEXTURE0 + TERRAIN_LIGHT_MASK_TEXTURE_UNIT);
-		uploadWebGL2TerrainLightMask(gl, landblockLights.cellMasks);
-		gl.activeTexture(gl.TEXTURE0);
-		this.#frameSelectionMetrics.terrainLightMaskUploads += 1;
-	}
-
-	#bindTexture2D(
-		unit: number,
-		resource: WebGL2Texture2DBinding,
-		uniform: WebGLUniformLocation,
-		samplingClass: TextureSamplingClass,
-		wrap: TextureWrapMode,
-	): void {
-		const gl = this.#gl;
-		gl.activeTexture(gl.TEXTURE0 + unit);
-		gl.bindTexture(gl.TEXTURE_2D, resource.texture);
-		this.#textureSamplers.bind(unit, {
-			mipLevels: resource.mipLevels,
-			policy: this.#frameTextureFiltering,
-			samplingClass,
-			wrap,
-		});
-		gl.uniform1i(uniform, unit);
-	}
-
-	#bindTextureArray(
-		unit: number,
-		resource: WebGL2TextureArrayBinding,
-		uniform: WebGLUniformLocation,
-		samplingClass: TextureSamplingClass,
-		wrap: TextureWrapMode,
-	): void {
-		const gl = this.#gl;
-		gl.activeTexture(gl.TEXTURE0 + unit);
-		gl.bindTexture(gl.TEXTURE_2D_ARRAY, resource.texture);
-		this.#textureSamplers.bind(unit, {
-			mipLevels: resource.description.mipLevels,
-			policy: this.#frameTextureFiltering,
-			samplingClass,
-			wrap,
-		});
-		gl.uniform1i(uniform, unit);
-	}
-
-	/** Draw one landblock's whole terrain mesh; a landblock has exactly one. */
-	#drawTerrainGeometry(
-		geometryKey: GeometryResourceKey,
-		landblockOffsetUniform: WebGLUniformLocation,
-		landblockOffset: Vec3,
-	): void {
-		const binding = this.#resources.getGeometry(geometryKey);
-		const gl = this.#gl;
-		gl.uniform3f(
-			landblockOffsetUniform,
-			landblockOffset.x,
-			landblockOffset.y,
-			landblockOffset.z,
-		);
-		gl.bindVertexArray(binding.vertexArray);
-		gl.drawElements(gl.TRIANGLES, binding.indexCount, binding.indexType, 0);
-	}
-
-	/** Partition one prepared physical object population for both opaque and deferred consumers. */
-	#createObjectSubmissionPhases(
-		view: PreparedView,
-	): ObjectSubmissionPhases<ObjectColorSubmission> {
-		const phases = createObjectSubmissionPhasesFromBuckets(
-			view.objectBuckets,
-			(object) => this.#transparentSortFacts(object, view),
-			(object) =>
-				object.drawKind === "merged"
-					? object.transparentCohortKey
-					: object.instances?.kind === "frame-template"
-						? object.instances.transparentCohortKey
-						: null,
-			(object) => this.#transparentCameraDepth(object, view),
-		);
-		this.#frameSelectionMetrics.transparentObjectCandidateCount +=
-			phases.transparent.far.length + phases.transparent.near.length;
-		this.#frameSelectionMetrics.farTransparentObjectCandidateCount +=
-			phases.transparent.far.length;
-		this.#frameSelectionMetrics.nearTransparentObjectCandidateCount +=
-			phases.transparent.near.length;
-		return phases;
-	}
-
-	/**
-	 * Classify one transparent range against the camera, without deriving its camera depth.
-	 *
-	 * Every producer publishes its sort center in landblock space, so placing it in the view's
-	 * anchored frame is one offset add: no per-candidate matrix work survives here.
-	 */
-	#transparentSortFacts(
-		object: ObjectColorSubmission,
-		view: PreparedViewGeometry,
-	): TransparentObjectSortFacts {
-		const facts = object.transparentSort;
-		if (!facts) {
-			throw new Error(
-				"Transparent static-object contribution lacks sort facts.",
-			);
-		}
-		const offset = createLandblockOffset(
-			getLandblockCoordinates(object.landblockId),
-			view.anchorCoordinates,
-			this.#offsetScratch,
-		);
-		const x = facts.center.x + offset.x - view.cameraPosition.x;
-		const y = facts.center.y + offset.y - view.cameraPosition.y;
-		const z = facts.center.z + offset.z - view.cameraPosition.z;
-		return {
-			distanceSquared: x * x + y * y + z * z,
-			stableId: facts.stableId,
-		};
-	}
-
-	/** Project one near candidate's center onto the camera's forward axis for exact ordering. */
-	#transparentCameraDepth(
-		object: ObjectColorSubmission,
-		view: PreparedViewGeometry,
-	): number {
-		const facts = object.transparentSort;
-		if (!facts) {
-			throw new Error(
-				"Transparent static-object contribution lacks sort facts.",
-			);
-		}
-		const offset = createLandblockOffset(
-			getLandblockCoordinates(object.landblockId),
-			view.anchorCoordinates,
-			this.#offsetScratch,
-		);
-		this.#transparentCenterScratch.x = facts.center.x + offset.x;
-		this.#transparentCenterScratch.y = facts.center.y + offset.y;
-		this.#transparentCenterScratch.z = facts.center.z + offset.z;
-		transformPoint3(
-			view.view,
-			this.#transparentCenterScratch,
-			this.#transparentCenterScratch,
-		);
-		// The renderer's right-handed view matrix maps forward to negative view-space Z.
-		return -this.#transparentCenterScratch.z;
-	}
-
-	/** Bind the entity's shared pose/appearance generation independently from its color phase. */
-	#bindDynamicColor(
-		program: WebGL2DynamicObjectProgram | WebGL2FogDynamicObjectProgram,
-		object: PreparedDynamicColor,
-		view: PreparedView,
-	): void {
-		const state = this.#deviceState;
-		const offset = view.landblockOffsets.get(object.landblockId);
-		if (offset === undefined)
-			throw new Error(
-				`Merged color landblock ${object.landblockId} has no frame offset.`,
-			);
-		this.#countUniformWrite(
-			state.applyUniform3f(program.uniforms.landblockOffset, ...offset),
-		);
-		// Rigid part materials are produced with detailRole:null in object-material-ranges.
-		this.#countUniformWrite(
-			state.applyUniform1i(program.uniforms.useDetail, 0),
-		);
-		const pose = this.#dynamicPosePages.get(object.nodeId);
-		state.applyTexture2D(OBJECT_TEXTURE_UNITS.poses, pose.texture, null);
-		state.applyTexture2D(
-			OBJECT_TEXTURE_UNITS.materials,
-			object.appearance.table,
 			null,
 		);
-		this.#countUniformWrite(
-			state.applyUniform1i(program.uniforms.firstPoseRow, pose.firstRow),
+		// After the blended pass: particles are transparent and must not occlude the geometry they
+		// sort against.
+		this.#overlayPasses.drawParticleBatches(
+			view,
+			view.particles,
+			this.#deviceTargets.frameClockSeconds,
+			1.0,
 		);
-		state.applyVertexArray(object.geometry.vertexArray);
-		state.applyElementArrayBuffer(object.appearance.indexBuffer);
+		this.#overlayPasses.drawEntityOverlays(view, null);
+		this.#overlayPasses.drawSummonLeashes(view);
+		this.#overlayPasses.drawCombatEffects(view, null, null);
+		this.#overlayPasses.drawWorldIndicator(view, null);
+		this.#gl.bindVertexArray(null);
+		this.#diagnostics.profiler?.setCpuPhase("postAndPresentation");
+		this.#deviceTargets.drawPortalTransitionTunnel(
+			target,
+			showRetailHiddenGeometry,
+			this.#sceneCompiler,
+			this.#objectShadowPass,
+		);
+		this.#deviceTargets.presentFlatScene(
+			target,
+			view,
+			this.#overlayPasses,
+			this.#objectShadowPass,
+		);
+		this.#diagnostics.profiler?.setCpuPhase("other");
 	}
 
-	/** Submit one compatible physical span after its entity and pass state have been bound. */
-	#drawDynamicColorSpan(
-		range: PreparedDynamicColor["appearance"]["plan"]["ranges"][number],
-		indexCount: number,
+	#resetFrame(
+		viewCount: number,
+		envCellRenderMode: FrameInput["frameSettings"]["envCellRenderMode"],
 	): void {
-		const gl = this.#gl;
-		const state = this.#deviceState;
-		state.applyCullFace(range.batch.cullFace);
-		const { base, palette } = range.batch.textures;
-		if (base) this.#bindPreparedObjectTexture(OBJECT_TEXTURE_UNITS.base, base);
-		if (palette)
-			this.#bindPreparedObjectTexture(OBJECT_TEXTURE_UNITS.palette, palette);
-		gl.drawElements(
-			gl.TRIANGLES,
-			indexCount,
-			gl.UNSIGNED_INT,
-			range.indexStart * Uint32Array.BYTES_PER_ELEMENT,
-		);
-		this.#frameSelectionMetrics.objectDrawCalls += 1;
-		this.#frameSelectionMetrics.submittedDynamicDrawCount += 1;
+		this.#deviceTargets.beginPortalFrame();
+		this.#sceneCompiler.beginFrame();
+		this.#overlayPasses.clearPreparedSelection();
+		this.#objectShadowPass.beginFrame();
+		this.#diagnostics.resetFrameSelectionMetrics(viewCount, envCellRenderMode);
 	}
 
-	/** Execute preselected physical color spans using the frame's already-uploaded pose pages. */
-	#drawDynamicOpaque(view: PreparedView, shading: SceneShading): void {
-		if (view.dynamicOpaque.length === 0) return;
-		const program = this.#dynamicOpaqueProgram;
-		if (program === null)
-			throw new Error("Merged opaque color was not prepared before execution.");
-
-		this.#frameProfiler?.setGpuSystem("opaqueGeometry");
-		const gl = this.#gl;
-		const state = this.#deviceState;
-
-		this.#beginObjectPhase();
-		gl.enable(gl.DEPTH_TEST);
-		gl.depthFunc(gl.LEQUAL);
-		gl.depthMask(true);
-		state.applyBlend(null);
-		for (const object of view.dynamicOpaque) {
-			state.applyProgram(program.program);
-			if (state.applyViewStamp(view))
-				this.#activateObjectProgram(program, view, shading);
-			this.#applyObjectLighting(program, object, shading);
-			this.#bindDynamicColor(program, object, view);
-			for (const span of object.ranges) {
-				const range = object.appearance.plan.physicalRanges[span.rangeIndex];
-				if (range === undefined)
-					throw new Error("Merged opaque span lost its physical range.");
-				this.#drawDynamicColorSpan(range, span.indexCount);
-			}
-		}
-		this.#frameProfiler?.setGpuSystem("other");
-	}
-
-	#drawOpaqueObjects(
-		view: PreparedView,
-		objects: readonly ObjectColorSubmission[],
-		shading: SceneShading,
-		portalPipeline: WebGL2PortalScopeAtlasPipeline | null,
-	): void {
-		if (objects.length === 0) return;
-		this.#frameProfiler?.setGpuSystem("opaqueGeometry");
-
-		const gl = this.#gl;
-
-		this.#beginObjectPhase();
-		gl.depthMask(true);
-		this.#deviceState.applyBlend(null);
-		for (const object of objects) {
-			if (object.drawKind === "merged")
-				throw new Error("Ordered merged geometry entered the opaque phase.");
-			const receivesIndoorGrounding =
-				object.source === "env-cell-shell" &&
-				view.entityAnalyticShadows?.indoorByScopeKey.has(
-					object.renderScopeKey,
-				) === true;
-			const receivesOutdoorPssm =
-				this.#activeOutdoorPssmFrame !== null && object.receivesOutdoorPssm;
-			const program = object.compatibility.geometry.staticMaterials
-				? this.#requireStaticTableProgram(
-						/* distanceFog */ true,
-						/* portalVisibility */ false,
-						receivesOutdoorPssm,
-					)
-				: receivesIndoorGrounding
-					? this.#entityGroundingPrograms.fogged()
-					: receivesOutdoorPssm
-						? object.drawKind === "instanced"
-							? this.#outdoorPssmReceiverPrograms.foggedInstanced()
-							: this.#outdoorPssmReceiverPrograms.foggedBaked()
-						: object.drawKind === "instanced"
-							? this.#instancedObjectProgram
-							: this.#objectProgram;
-			const programChanged = this.#deviceState.applyProgram(program.program);
-			const viewChanged = this.#deviceState.applyViewStamp(view);
-			if (viewChanged) {
-				this.#activateObjectProgram(program, view, shading);
-			}
-			this.#applyObjectLighting(program, object, shading);
-			this.#applyObjectGrounding(program, object, view);
-			portalPipeline?.routeObjectSubmission(
-				object.renderScopeKey,
-				program.uniforms.clipTransform,
-				programChanged || viewChanged,
-			);
-			this.#drawObjectRange(program, object, view.landblockOffsets);
-		}
-		this.#frameProfiler?.setGpuSystem("other");
-	}
-
-	/** Draw one selected span exactly where the shared transparent/additive ordering placed it. */
-	#drawDynamicBlended(
-		object: PreparedDynamicBlended,
-		view: PreparedView,
-		shading: SceneShading,
-	): void {
-		const { program, range } = object;
-		const state = this.#deviceState;
-		state.applyProgram(program.program);
-		if (state.applyViewStamp(view))
-			this.#activateObjectProgram(program, view, shading);
-		this.#applyObjectLighting(program, object, shading);
-		state.applyBlend(range.batch.blendPolicy);
-		this.#bindDynamicColor(program, object, view);
-		this.#drawDynamicColorSpan(range, object.indexCount);
-		if (object.ordering === "transparent")
-			this.#frameSelectionMetrics.submittedTransparentObjectDrawCount += 1;
-		else this.#frameSelectionMetrics.submittedAdditiveObjectDrawCount += 1;
-	}
-
-	#drawBlendedObjects(
-		view: PreparedView,
-		sortedBlended: readonly ObjectColorSubmission[],
-		shading: SceneShading,
-		portalPipeline: WebGL2PortalScopeAtlasPipeline | null,
-	): void {
-		if (sortedBlended.length === 0) return;
-
-		this.#frameProfiler?.setGpuSystem("transparencyAndEffects");
-		const gl = this.#gl;
-
-		// Primes every object sampler unit, not just the cache, exactly as the opaque pass does.
-		// `invalidate()` alone was not enough: it makes issued binds re-apply, but a material
-		// that *skips* a bind — direct colour skips the palette, solid colour skips both — keeps
-		// whatever the frame last left on that unit. Terrain leaves integer `usampler2D`
-		// textures on units 0 and 1, and the opaque pass returns before priming them when a view
-		// has no opaque candidates, so a view of purely transparent objects reached this loop
-		// with an integer texture bound under a float sampler and every draw failed validation.
-		this.#beginObjectPhase();
-		gl.depthMask(false);
-		let portalPrograms: {
-			readonly baked: WebGL2ObjectProgram;
-			readonly instanced: WebGL2InstancedObjectProgram;
-		} | null = null;
-		for (const object of sortedBlended) {
-			if (object.drawKind === "merged") {
-				this.#drawDynamicBlended(object, view, shading);
-				continue;
-			}
-			const receivesIndoorGrounding =
-				object.source === "env-cell-shell" &&
-				view.entityAnalyticShadows?.indoorByScopeKey.has(
-					object.renderScopeKey,
-				) === true;
-			const receivesOutdoorPssm =
-				this.#activeOutdoorPssmFrame !== null && object.receivesOutdoorPssm;
-			let program: AnyObjectProgram;
-			if (object.compatibility.geometry.staticMaterials) {
-				program = this.#requireStaticTableProgram(
-					/* distanceFog */ false,
-					portalPipeline !== null,
-					receivesOutdoorPssm,
-				);
-			} else if (receivesIndoorGrounding) {
-				program = this.#entityGroundingPrograms.blended(
-					portalPipeline !== null,
-				);
-			} else if (receivesOutdoorPssm) {
-				program =
-					object.drawKind === "instanced"
-						? this.#outdoorPssmReceiverPrograms.blendedInstanced(
-								portalPipeline !== null,
-							)
-						: this.#outdoorPssmReceiverPrograms.blendedBaked(
-								portalPipeline !== null,
-							);
-			} else {
-				if (portalPipeline) {
-					portalPrograms ??= this.#requirePortalBlendedObjectPrograms();
-				}
-				program =
-					object.drawKind === "instanced"
-						? (portalPrograms?.instanced ?? this.#blendedInstancedObjectProgram)
-						: (portalPrograms?.baked ?? this.#blendedObjectProgram);
-			}
-			this.#deviceState.applyProgram(program.program);
-			if (this.#deviceState.applyViewStamp(view)) {
-				this.#activateObjectProgram(program, view, shading);
-			}
-			if (portalPipeline) {
-				const uniforms = program.portalVisibilityUniforms;
-				if (!uniforms) {
-					throw new Error(
-						"Portal deferred object draw selected a program without scope-envelope visibility.",
-					);
-				}
-				portalPipeline.routeDeferredSubmission(object.renderScopeKey, uniforms);
-			}
-			this.#applyObjectLighting(program, object, shading);
-			this.#applyObjectGrounding(program, object, view);
-			this.#deviceState.applyBlend(object.blendPolicy);
-			this.#drawObjectRange(program, object, view.landblockOffsets);
-		}
-		this.#frameProfiler?.setGpuSystem("other");
-	}
-
-	/** Compile the two portal-only material variants on the first replacement-compositor frame. */
-	#requirePortalBlendedObjectPrograms(): {
-		readonly baked: WebGL2ObjectProgram;
-		readonly instanced: WebGL2InstancedObjectProgram;
-	} {
-		this.#portalBlendedObjectProgram ??= createWebGL2ObjectProgram(this.#gl, {
-			distanceFog: false,
-			portalVisibility: true,
-		});
-		this.#portalBlendedInstancedObjectProgram ??= createWebGL2ObjectProgram(
-			this.#gl,
-			{
-				distanceFog: false,
-				portalVisibility: true,
-				transformSource: "attribute",
-			},
-		);
-		return {
-			baked: this.#portalBlendedObjectProgram,
-			instanced: this.#portalBlendedInstancedObjectProgram,
-		};
-	}
-
-	/** Shader variants are renderer-owned; material textures remain geometry-owned. */
-	#requireStaticTableProgram(
-		distanceFog: boolean,
-		portalVisibility: boolean,
-		outdoorPssm: boolean,
-	): WebGL2StaticTableObjectProgram | WebGL2FogStaticTableObjectProgram {
-		const key =
-			Number(distanceFog) |
-			(Number(portalVisibility) << 1) |
-			(Number(outdoorPssm) << 2);
-		let program = this.#staticTablePrograms.get(key);
-		if (!program) {
-			program = createWebGL2ObjectProgram(this.#gl, {
-				distanceFog,
-				portalVisibility,
-				outdoorPssm,
-				transformSource: "uniform",
-				materialSource: "table",
-			});
-			this.#staticTablePrograms.set(key, program);
-		}
-		return program;
-	}
-
-	/** Form every phase's runs and upload their combined instance stream once per view. */
-	#prepareViewObjectRuns(
-		phases: ObjectSubmissionPhases<ObjectColorSubmission>,
-	): {
-		readonly opaque: readonly ObjectColorSubmission[];
-		readonly blended: readonly ObjectColorSubmission[];
-	} {
-		const prepared = this.#prepareFrameInstanceRuns(
-			[
-				phases.opaque,
-				phases.transparent.far,
-				phases.transparent.near,
-				phases.additive,
-			],
-			[
-				{
-					cohort: "ignore",
-					grouping: "grouped",
-				},
-				{
-					cohort: "require",
-					grouping: "adjacent",
-				},
-				{
-					cohort: "require",
-					grouping: "adjacent",
-				},
-				{
-					cohort: "require",
-					grouping: "grouped",
-				},
-			],
-		);
-		const farRunCount = prepared.runCounts[1] ?? 0;
-		const nearRunCount = prepared.runCounts[2] ?? 0;
-		this.#frameSelectionMetrics.transparentFrameRunCount +=
-			farRunCount + nearRunCount;
-		this.#frameSelectionMetrics.farTransparentFrameRunCount += farRunCount;
-		this.#frameSelectionMetrics.nearTransparentFrameRunCount += nearRunCount;
-		const opaqueCount = prepared.phaseObjectCounts[0] ?? 0;
-		return {
-			opaque: prepared.objects.slice(0, opaqueCount),
-			blended: prepared.objects.slice(opaqueCount),
-		};
-	}
-
-	/** Form phase-local compatible runs and upload their complete sequential instance population. */
-	#prepareFrameInstanceRuns(
-		phases: readonly (readonly ObjectColorSubmission[])[],
-		policies: readonly FrameInstancePhasePolicy[],
-	): {
-		readonly objects: readonly ObjectColorSubmission[];
-		readonly runCounts: readonly number[];
-		readonly phaseObjectCounts: readonly number[];
-	} {
-		const orderedInstances: ObjectInstanceData[] = [];
-		const objects: ObjectColorSubmission[] = [];
-		const runCounts: number[] = [];
-		const phaseObjectCounts: number[] = [];
-
-		for (const [phaseIndex, phase] of phases.entries()) {
-			const firstObject = objects.length;
-			const policy = policies[phaseIndex];
-			if (!policy) {
-				throw new Error(
-					`Object instance phase ${phaseIndex} has no grouping policy.`,
-				);
-			}
-			const scheduled = scheduleFrameInstanceRuns(phase, policy);
-			runCounts.push(
-				scheduled.filter(
-					(submission) => submission.kind === "frame-instance-run",
-				).length,
-			);
-			for (const submission of scheduled) {
-				if (submission.kind === "single") {
-					objects.push(submission.value);
-					continue;
-				}
-				const object = submission.values[0];
-				if (object.drawKind === "merged")
-					throw new Error("Merged geometry entered an instance run.");
-				const firstInstance = orderedInstances.length;
-				for (const adjacent of submission.values) {
-					if (
-						adjacent.drawKind === "merged" ||
-						adjacent.instances?.kind !== "frame-template"
-					) {
-						throw new Error(
-							"Object instance run contains prepared range state.",
-						);
-					}
-					orderedInstances.push(adjacent.instances.instance);
-				}
-				const instanceCount = orderedInstances.length - firstInstance;
-				if (instanceCount === 0) continue;
-				objects.push({
-					...object,
-					instances: {
-						firstInstance,
-						instanceCount,
-						kind: "frame-range",
-					},
-				});
-			}
-			phaseObjectCounts.push(objects.length - firstObject);
-		}
-
-		this.#frameInstances.prepareView(orderedInstances);
-
-		if (orderedInstances.length > 0) {
-			this.#frameSelectionMetrics.frameInstanceUploadCount += 1;
-			this.#frameSelectionMetrics.frameInstanceUploadBytes +=
-				orderedInstances.length * OBJECT_INSTANCE_RECORD_BYTES;
-		}
-		return { objects, runCounts, phaseObjectCounts };
-	}
-
-	/**
-	 * Account for one per-draw uniform write.
-	 *
-	 * Issued and suppressed are counted separately rather than derived from each other, because
-	 * their sum is the uniform set a draw would send without filtering, and the ratio between them
-	 * is what the filtering actually saves. A method rather than a closure so the submission path
-	 * allocates nothing per draw.
-	 */
-	#countUniformWrite(issued: boolean): void {
-		const metrics = this.#frameSelectionMetrics;
-		if (issued) metrics.objectUniformUploads += 1;
-		else metrics.objectSuppressedUniformUploads += 1;
-	}
-
-	#drawObjectRange(
-		program: AnyObjectProgram,
-		object: PreparedObjectFrameInput,
-		landblockOffsets: PreparedSceneContributions["landblockOffsets"],
-	): void {
-		if (
-			(object.drawKind === "single") !==
-			(program.transformSource === "uniform")
-		) {
-			throw new Error(
-				`${object.drawKind} draw cannot use ${program.transformSource} object program.`,
-			);
-		}
-		const { compatibility } = object;
-		const gl = this.#gl;
-		const state = this.#deviceState;
-		state.applyCullFace(compatibility.cullFace);
-		if (program.transformSource === "uniform") {
-			this.#countUniformWrite(
-				state.applyUniformMatrix4fv(
-					program.uniforms.localToLandblock,
-					mat4ToFloat32Array(object.localToLandblock, this.#matrixScratch),
-				),
-			);
-		}
-		const landblockOffset = landblockOffsets.get(object.landblockId);
-		if (landblockOffset === undefined) {
-			throw new Error(
-				`Submitted object in landblock ${object.landblockId} has no frame offset.`,
-			);
-		}
-		this.#countUniformWrite(
-			state.applyUniform3f(
-				program.uniforms.landblockOffset,
-				landblockOffset[0],
-				landblockOffset[1],
-				landblockOffset[2],
-			),
-		);
-		const preparedMaterial = compatibility.material;
-		if (preparedMaterial.kind !== "solid-color") {
-			this.#bindPreparedObjectTexture(
-				OBJECT_TEXTURE_UNITS.base,
-				preparedMaterial.base,
-			);
-			if (preparedMaterial.kind !== "direct-color")
-				this.#bindPreparedObjectTexture(
-					OBJECT_TEXTURE_UNITS.palette,
-					preparedMaterial.palette,
-				);
-		}
-		if (program.materialSource === "table") {
-			const table = compatibility.geometry.staticMaterials;
-			if (!table)
-				throw new Error(
-					"Static table program received uniform-material geometry.",
-				);
-			state.applyTexture2D(OBJECT_TEXTURE_UNITS.materials, table.texture, null);
-		} else {
-			this.#countUniformWrite(
-				state.applyUniform1i(
-					program.uniforms.wrapRepeat,
-					compatibility.wrapRepeat ? 1 : 0,
-				),
-			);
-			this.#countUniformWrite(
-				state.applyUniform1i(
-					program.uniforms.palettedClipMap,
-					compatibility.palettedClipMap ? 1 : 0,
-				),
-			);
-			this.#countUniformWrite(
-				state.applyUniform1f(
-					program.uniforms.alphaTest,
-					compatibility.alphaTest,
-				),
-			);
-			this.#countUniformWrite(
-				state.applyUniform4f(
-					program.uniforms.materialColor,
-					...preparedMaterial.color,
-				),
-			);
-			if (preparedMaterial.kind === "solid-color") {
-				this.#countUniformWrite(
-					state.applyUniform1i(program.uniforms.materialKind, 0),
-				);
-			} else {
-				this.#countUniformWrite(
-					state.applyUniform4f(
-						program.uniforms.baseRect,
-						...preparedMaterial.base.rect,
-					),
-				);
-				this.#countUniformWrite(
-					state.applyUniform1i(
-						program.uniforms.materialKind,
-						preparedMaterial.kind === "direct-color"
-							? 1
-							: preparedMaterial.kind === "index8"
-								? 2
-								: 3,
-					),
-				);
-				if (preparedMaterial.kind !== "direct-color") {
-					this.#countUniformWrite(
-						state.applyUniform4f(
-							program.uniforms.paletteRect,
-							...preparedMaterial.palette.rect,
-						),
-					);
-				}
-			}
-			this.#countUniformWrite(
-				state.applyUniform1f(
-					program.uniforms.luminosity,
-					compatibility.luminosity,
-				),
-			);
-		}
-		const { detail } = compatibility;
-		if (detail) {
-			this.#bindPreparedObjectTexture(OBJECT_TEXTURE_UNITS.detail, detail);
-			this.#countUniformWrite(
-				state.applyUniform4f(program.uniforms.detailRect, ...detail.rect),
-			);
-			this.#countUniformWrite(
-				state.applyUniform1f(program.uniforms.detailTiling, detail.tiling),
-			);
-			this.#countUniformWrite(
-				state.applyUniform1i(program.uniforms.useDetail, 1),
-			);
-		} else {
-			this.#countUniformWrite(
-				state.applyUniform1i(program.uniforms.useDetail, 0),
-			);
-		}
-		this.#frameSelectionMetrics.objectDrawCalls += 1;
-		const geometry = compatibility.geometry;
-		state.applyVertexArray(geometry.vertexArray);
-		let submittedInstanceCount = 1;
-		if (object.drawKind === "instanced") {
-			if (!object.instances) {
-				throw new Error("Instanced draw has no resolved instance stream.");
-			}
-			if (object.instances.kind === "frame-template") {
-				throw new Error("Unprepared object instance data reached submission.");
-			}
-			const range = this.#frameInstances.getRange(
-				object.instances.firstInstance,
-				object.instances.instanceCount,
-			);
-			const instances = range.binding;
-			if (range.instanceCount === 0)
-				throw new Error("Instanced draw has an empty instance range.");
-			const configureInvariantAttributes =
-				!this.#configuredObjectInstanceVertexArrays.has(geometry.vertexArray);
-			bindWebGL2ObjectInstanceRange(
-				gl,
-				instances,
-				range.firstInstance,
-				range.instanceCount,
-				configureInvariantAttributes,
-			);
-			if (configureInvariantAttributes) {
-				this.#configuredObjectInstanceVertexArrays.add(geometry.vertexArray);
-			}
-			submittedInstanceCount = range.instanceCount;
-			gl.drawElementsInstanced(
-				gl.TRIANGLES,
-				object.indexCount,
-				geometry.indexType,
-				object.indexStart * geometry.indexElementBytes,
-				submittedInstanceCount,
-			);
-		} else {
-			if (object.instances !== null) {
-				throw new Error("Baked draw unexpectedly resolved an instance stream.");
-			}
-			gl.drawElements(
-				gl.TRIANGLES,
-				object.indexCount,
-				geometry.indexType,
-				object.indexStart * geometry.indexElementBytes,
-			);
-		}
-		const sourceTriangleCount = object.indexCount / 3;
-		if (object.source === "portal-transition") {
-			this.#frameSelectionMetrics.submittedPortalTransitionDrawCount += 1;
-		} else {
-			this.#frameSelectionMetrics.submittedStaticObjectDrawCount += 1;
-			this.#frameSelectionMetrics.submittedStaticObjectTriangleCount +=
-				sourceTriangleCount * submittedInstanceCount;
-		}
-		if (object.source === "env-cell-shell") {
-			this.#frameSelectionMetrics.submittedEnvCellShellDrawCount += 1;
-			this.#frameSelectionMetrics.submittedEnvCellShellTriangleCount +=
-				sourceTriangleCount;
-			if (object.cullFaceOverride !== null) {
-				this.#frameSelectionMetrics.envCellShellCullOverrideCount += 1;
-			}
-		} else if (object.source === "env-cell-resident") {
-			this.#frameSelectionMetrics.submittedEnvCellResidentDrawCount += 1;
-			this.#frameSelectionMetrics.submittedEnvCellResidentTriangleCount +=
-				sourceTriangleCount * submittedInstanceCount;
-		}
-		if (object.drawKind === "single" && object.source !== "portal-transition") {
-			this.#frameSelectionMetrics.submittedBakedStaticObjectDrawCount += 1;
-			this.#frameSelectionMetrics.submittedBakedStaticObjectTriangleCount +=
-				sourceTriangleCount;
-			this.#mergeCensusRequest?.collector.record(
-				object.landblockId,
-				object.localToLandblock,
-				compatibility,
-				program.materialSource,
-			);
-		} else if (
-			object.drawKind === "instanced" &&
-			object.source !== "portal-transition"
-		) {
-			this.#frameSelectionMetrics.submittedInstancedSourceTriangleCount +=
-				sourceTriangleCount;
-		}
-		if (object.ordering === "transparent") {
-			this.#frameSelectionMetrics.submittedTransparentObjectDrawCount += 1;
-			if (object.drawKind === "instanced") {
-				this.#frameSelectionMetrics.submittedTransparentInstanceCount +=
-					submittedInstanceCount;
-			}
-		}
-		if (object.ordering === "additive") {
-			this.#frameSelectionMetrics.submittedAdditiveObjectDrawCount += 1;
-		}
-	}
-
-	#activateObjectProgram(
-		program: LitObjectProgram,
-		view: PreparedView,
-		shading: SceneShading,
-	): void {
-		const gl = this.#gl;
-		this.#frameSelectionMetrics.objectProgramChanges += 1;
-		gl.uniform4f(program.uniforms.clipTransform, 1, 1, 0, 0);
-		gl.uniformMatrix4fv(
-			program.uniforms.projection,
-			false,
-			mat4ToFloat32Array(view.projection, this.#matrixScratch),
-		);
-		gl.uniformMatrix4fv(
-			program.uniforms.view,
-			false,
-			mat4ToFloat32Array(view.view, this.#matrixScratch),
-		);
-		bindWebGL2DynamicLights(
-			gl,
-			program.uniforms,
-			shading.dynamicLights,
-			shading.anchorOrigin,
-			this.#dynamicLightScratch,
-		);
-		const pssmUniforms = program.outdoorPssmUniforms;
-		if (pssmUniforms) {
-			const active = this.#activeOutdoorPssmFrame;
-			if (!active) {
-				throw new Error("Outdoor PSSM receiver program has no active frame.");
-			}
-			bindWebGL2OutdoorPssmUniforms(
-				gl,
-				pssmUniforms,
-				active,
-				this.#outdoorPssmUniformScratch,
-			);
-			this.#deviceState.applyTextureArrayUnit(
-				OUTDOOR_PSSM_TEXTURE_UNIT,
-				active.targets.depth,
-			);
-		}
-		if ("fogUniforms" in program) {
-			gl.uniform3f(
-				program.fogUniforms.cameraPosition,
-				view.cameraPosition.x,
-				view.cameraPosition.y,
-				view.cameraPosition.z,
-			);
-			bindWebGL2DistanceFog(gl, program.fogUniforms, shading.fog);
-		}
-	}
-
-	/**
-	 * Bind the lighting this contribution's retail role requires.
-	 *
-	 * Interior and outdoor contributions interleave within one pass, so lighting is per draw
-	 * rather than per program activation; the state applicator suppresses redundant binds.
-	 */
-	#applyObjectLighting(
-		program: LitObjectProgram,
-		object: Pick<
-			ObjectFrameInput | PreparedDynamicColor,
-			"source" | "landblockId"
-		>,
-		shading: SceneShading,
-	): void {
-		const role = objectLightingRole(object.source);
-		if (this.#deviceState.applyLightingRole(role)) {
-			bindWebGL2SceneLighting(
-				this.#gl,
-				program.uniforms,
-				shading.lighting[role],
-			);
-			this.#frameSelectionMetrics.objectLightingBinds += 1;
-		}
-		// Interior geometry already carries its static lighting in baked vertex colours, and
-		// daylight or lamp-free outdoor landblocks contribute zero static lights; share the empty
-		// `null` scope across all of them so landblock transitions do not re-upload `uStaticLightCount = 0`.
-		const lights =
-			role === "interior-object" ||
-			object.source === "portal-transition" ||
-			shading.authoredLightResponse <= 0
-				? EMPTY_LIGHTS
-				: shading.staticLights(object.landblockId).lights;
-		const scope = lights.length > 0 ? object.landblockId : null;
-		if (!this.#deviceState.applyStaticLightScope(scope)) return;
-		bindWebGL2StaticLights(
-			this.#gl,
-			program.uniforms,
-			lights,
-			shading.anchorOrigin,
-			shading.authoredLightResponse,
-			this.#dynamicLightScratch,
-		);
-		this.#frameSelectionMetrics.staticLightBinds += 1;
-	}
-
-	/** Bind one shell scope's fixed analytic-grounding set through the object uniform cache. */
-	#applyObjectGrounding(
-		program: AnyObjectProgram,
-		object: ObjectFrameInput,
-		view: PreparedView,
-	): void {
-		const uniforms = program.entityGroundingUniforms;
-		const active = view.entityAnalyticShadows;
-		const selection = active?.indoorByScopeKey.get(object.renderScopeKey);
-		if (!uniforms) {
-			if (object.source === "env-cell-shell" && selection !== undefined) {
-				throw new Error(
-					"Active EnvCell grounding draw selected an ordinary object program.",
-				);
-			}
-			return;
-		}
-		if (
-			object.source !== "env-cell-shell" ||
-			active === null ||
-			selection === undefined
-		) {
-			throw new Error(
-				"Indoor grounding program selected without an active EnvCell record set.",
-			);
-		}
-		const attempted = entityGroundingUniformAttemptCount(selection);
-		const issued = applyWebGL2EntityGroundingUniforms(
-			this.#deviceState,
-			uniforms,
-			selection,
-			active.indoorSettings,
-		);
-		this.#frameSelectionMetrics.objectUniformUploads += issued;
-		this.#frameSelectionMetrics.objectSuppressedUniformUploads +=
-			attempted - issued;
-	}
-
-	/**
-	 * Resolve and budget one landblock's authored lights.
-	 *
-	 * The index memoizes the gather across frames, so the per-frame cost is a map read plus a
-	 * budget fit that is a pass-through whenever the set fits, which it almost always does.
-	 */
-	#resolveStaticLights(
-		input: FrameInput,
-		landblockId: LandblockOwnerId,
-		sceneCameraPosition: SceneVec3,
-	): LandblockLights {
-		if (!input.frameSettings.staticLightsEnabled) {
-			return EMPTY_LANDBLOCK_LIGHTS;
-		}
-		if (input.outdoorLights.isEmpty) return EMPTY_LANDBLOCK_LIGHTS;
-		const reaching = input.outdoorLights.resolve(landblockId);
-		if (reaching.lights.length <= MAX_STATIC_LIGHTS) return reaching;
-		const fitted = fitLightsToBudget(
-			reaching.lights,
-			sceneCameraPosition,
-			MAX_STATIC_LIGHTS,
-		);
-		this.#frameSelectionMetrics.droppedLights += fitted.dropped;
-		// The fit reorders by distance from the camera, so the memoized masks no longer name these
-		// slots. Fall back to admitting every light rather than binding a stale table; the shader
-		// still bounds iteration by the live count, so the result is identical and only the tiling
-		// saving is lost. Unreachable on retail content, whose worst landblock carries 51 lights
-		// against a cap of 64.
-		return { lights: fitted.lights, cellMasks: TERRAIN_LIGHT_MASK_ALL };
-	}
-
-	/** Start one object-owned phase with complete bindings for every active sampler. */
-	#beginObjectPhase(): void {
-		this.#deviceState.invalidate();
-		for (const unit of Object.values(OBJECT_TEXTURE_UNITS)) {
-			this.#bindPreparedObjectTexture(unit, this.#objectFallbackBinding);
-		}
-	}
-
-	#bindPreparedObjectTexture(
-		unit: number,
-		binding: PreparedObjectTextureBinding<WebGLTexture, WebGLSampler>,
-	): void {
-		if (this.#deviceState.applyTextureUnit(unit, binding)) {
-			this.#frameSelectionMetrics.objectTextureBinds += 1;
-		}
-	}
-
-	#applyRenderExtent(extent: RenderExtent): void {
-		validateRenderExtent(extent, "WebGL2 frame");
-		const { height, width } = extent;
-		if (
-			width === this.#frameWidth &&
-			height === this.#frameHeight &&
-			this.#canvas.width === width &&
-			this.#canvas.height === height
-		)
-			return;
-
-		const maximumViewport = this.#gl.getParameter(
-			this.#gl.MAX_VIEWPORT_DIMS,
-		) as readonly [number, number];
-		if (width > maximumViewport[0] || height > maximumViewport[1])
-			throw new Error(
-				`Frame extent ${width}x${height} exceeds device viewport limit ${maximumViewport[0]}x${maximumViewport[1]}.`,
-			);
-		this.#frameWidth = width;
-		this.#frameHeight = height;
-		this.#canvas.width = width;
-		this.#canvas.height = height;
-		this.#gl.viewport(0, 0, width, height);
-	}
-}
-
-/** Schedule one phase under its explicit ordering and cohort semantics. */
-function scheduleFrameInstanceRuns(
-	ordered: readonly ObjectColorSubmission[],
-	policy: FrameInstancePhasePolicy,
-): readonly ObjectFrameSubmission<ObjectColorSubmission>[] {
-	const isFrameInstance = (object: ObjectColorSubmission): boolean =>
-		object.drawKind !== "merged" && object.instances?.kind === "frame-template";
-	const isCompatible = (
-		left: ObjectColorSubmission,
-		right: ObjectColorSubmission,
-	): boolean =>
-		left.drawKind !== "merged" &&
-		right.drawKind !== "merged" &&
-		frameTemplateDrawIdentityEquals(left, right) &&
-		(policy.cohort === "ignore" || frameTemplateCohortEquals(left, right));
-	return policy.grouping === "grouped"
-		? formGroupedObjectInstanceRuns(
-				ordered,
-				isFrameInstance,
-				(object) => {
-					if (object.drawKind === "merged")
-						throw new Error(
-							"Merged geometry requested an instance grouping key.",
-						);
-					return objectInstanceBatchKey(object, policy.cohort);
-				},
-				isCompatible,
-			)
-		: formAdjacentObjectInstanceRuns(ordered, isFrameInstance, isCompatible);
-}
-
-/** Check every non-cohort identity required in addition to prepared draw compatibility. */
-function frameTemplateDrawIdentityEquals(
-	left: PreparedObjectFrameInput,
-	right: PreparedObjectFrameInput,
-): boolean {
-	const leftInstances = left.instances;
-	const rightInstances = right.instances;
-	if (
-		leftInstances?.kind !== "frame-template" ||
-		rightInstances?.kind !== "frame-template"
-	) {
-		throw new Error(
-			"Frame-template batch identity requires two frame templates.",
+	#updateRenderTargetMetrics(): void {
+		this.#diagnostics.updateRenderTargetMetrics(
+			this.#deviceTargets,
+			this.#overlayPasses.entitySelectionPass,
 		);
 	}
-	return (
-		// One offset per landblock this frame, so equal landblocks mean equal offsets. This replaces
-		// the component comparison the compatibility value used to carry.
-		left.landblockId === right.landblockId &&
-		areStaticObjectDrawsCompatible(left.compatibility, right.compatibility) &&
-		left.source === right.source &&
-		left.receivesOutdoorPssm === right.receivesOutdoorPssm &&
-		left.renderScopeKey === right.renderScopeKey &&
-		left.geometry === right.geometry &&
-		left.landblockId === right.landblockId &&
-		left.indexStart === right.indexStart &&
-		left.indexCount === right.indexCount
-	);
-}
 
-/** Preserve order-sensitive template identity only for phases that explicitly require it. */
-function frameTemplateCohortEquals(
-	left: PreparedObjectFrameInput,
-	right: PreparedObjectFrameInput,
-): boolean {
-	const leftInstances = left.instances;
-	const rightInstances = right.instances;
-	if (
-		leftInstances?.kind !== "frame-template" ||
-		rightInstances?.kind !== "frame-template"
-	) {
-		throw new Error(
-			"Frame-template cohort identity requires two frame templates.",
+	#finishFrameSelectionMetrics(): void {
+		this.#diagnostics.finishFrameSelectionMetrics(
+			this.#sceneCompiler.visibleStaticLayerCount,
+			this.#sceneCompiler.visibleEnvCellScopeCount,
+			this.#objectShadowPass.frameInstances.getDiagnostics(),
 		);
 	}
-	return (
-		leftInstances.transparentCohortKey === rightInstances.transparentCohortKey
-	);
-}
-
-/** Stable semantic partition used to narrow exact instance compatibility checks. */
-function objectInstanceBatchKey(
-	object: PreparedObjectFrameInput,
-	cohort: FrameInstancePhasePolicy["cohort"],
-): string {
-	const instances = object.instances;
-	if (instances?.kind !== "frame-template") {
-		throw new Error(
-			"Object instance grouping received a non-frame instance input.",
-		);
-	}
-	if (cohort === "ignore") return object.batchKey;
-	return `${object.ordering}\0${object.source}\0${object.receivesOutdoorPssm ? "pssm" : "plain"}\0${object.renderScopeKey}\0${object.landblockId}\0${object.geometry}\0${object.indexStart}\0${object.indexCount}\0${instances.transparentCohortKey}`;
-}
-
-function createObjectFallbackTexture(gl: WebGL2RenderingContext): WebGLTexture {
-	const texture = gl.createTexture();
-	if (!texture) throw new Error("Failed to allocate object fallback texture.");
-	try {
-		gl.bindTexture(gl.TEXTURE_2D, texture);
-		gl.texImage2D(
-			gl.TEXTURE_2D,
-			0,
-			gl.RGBA8,
-			1,
-			1,
-			0,
-			gl.RGBA,
-			gl.UNSIGNED_BYTE,
-			Uint8Array.of(255, 255, 255, 255),
-		);
-		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-		return texture;
-	} catch (error) {
-		gl.deleteTexture(texture);
-		throw error;
-	} finally {
-		gl.bindTexture(gl.TEXTURE_2D, null);
-	}
-}
-
-function portalTransitionPresentationReceipt(
-	transition: PortalTransitionFrame | undefined,
-): PortalTransitionPresentationReceipt | null {
-	if (
-		transition?.kind === "tunnel-only" ||
-		transition?.kind === "destination-only-awaiting-handoff"
-	) {
-		return { kind: transition.kind, generation: transition.generation };
-	}
-	return null;
 }

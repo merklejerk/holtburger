@@ -1285,7 +1285,9 @@ mod tests {
     use holtburger_world::motion::MotionCommand;
     use holtburger_world::player::PlayerCharacterOptions;
     use holtburger_world::state::motion_resolution::test_support::FIXTURE_STAND_COMMAND;
+    use holtburger_world::stats::{Skill, SkillType, TrainingLevel};
     use std::collections::HashMap;
+    use std::time::Duration;
 
     fn build_test_client() -> ClientRuntime {
         builder::build_test_client(ClientState::Connected)
@@ -1795,6 +1797,219 @@ mod tests {
                 1
             );
         }
+    }
+
+    #[tokio::test]
+    async fn stance_switch_preserves_manual_movement_and_republishes_with_new_style() {
+        const TABLE: u32 = 0x0900_0021;
+        const STAND_ANIM: u32 = 0x0300_0001;
+        const RUN_ANIM: u32 = 0x0300_0002;
+        const STANCE_LINK_ANIM: u32 = 0x0300_0003;
+        const STOP_ANIM: u32 = 0x0300_0004;
+        let peace = MotionStance::NonCombat as u32;
+        let sword = MotionStance::SwordCombat as u32;
+        let clip_motion = |anim_id: u32, velocity: Option<Vector3>| MotionData {
+            bitfield: 0,
+            flags: if velocity.is_some() {
+                MotionDataFlags::HAS_VELOCITY
+            } else {
+                MotionDataFlags::empty()
+            },
+            anims: vec![AnimData {
+                anim_id,
+                low_frame: 0,
+                high_frame: -1,
+                framerate: 4.0,
+            }],
+            velocity,
+            omega: None,
+        };
+        let anim = |id: u32| Animation {
+            id,
+            flags: AnimationFlags::empty(),
+            num_parts: 0,
+            num_frames: 4,
+            pos_frames: Vec::new(),
+            part_frames: (0..4)
+                .map(|_| AnimationFrame {
+                    frames: Vec::new(),
+                    hooks: Vec::new(),
+                })
+                .collect(),
+        };
+
+        let mut client = build_test_client();
+        let guid = Guid(0x5000_0002);
+        client
+            .world
+            .seed_local_player_entity(guid, "Runner", WorldPosition::default());
+        client.world.set_motion_sequences(
+            MotionSequenceCatalog::assemble(
+                [MotionTable {
+                    id: TABLE,
+                    default_style: peace,
+                    style_defaults: HashMap::from([
+                        (peace, FIXTURE_STAND_COMMAND),
+                        (sword, FIXTURE_STAND_COMMAND),
+                    ]),
+                    cycles: HashMap::from([
+                        (
+                            MotionTable::cycle_key(peace, FIXTURE_STAND_COMMAND),
+                            clip_motion(STAND_ANIM, None),
+                        ),
+                        (
+                            MotionTable::cycle_key(sword, FIXTURE_STAND_COMMAND),
+                            clip_motion(STAND_ANIM, None),
+                        ),
+                        (
+                            MotionTable::cycle_key(peace, MotionCommand::RUN_FORWARD.raw()),
+                            clip_motion(RUN_ANIM, Some(Vector3::new(0.0, 4.0, 0.0))),
+                        ),
+                        (
+                            MotionTable::cycle_key(sword, MotionCommand::RUN_FORWARD.raw()),
+                            clip_motion(RUN_ANIM, Some(Vector3::new(0.0, 4.0, 0.0))),
+                        ),
+                    ]),
+                    modifiers: HashMap::new(),
+                    links: HashMap::from([
+                        (
+                            MotionTable::cycle_key(peace, FIXTURE_STAND_COMMAND),
+                            HashMap::from([(sword, clip_motion(STANCE_LINK_ANIM, None))]),
+                        ),
+                        (
+                            MotionTable::cycle_key(sword, FIXTURE_STAND_COMMAND),
+                            HashMap::from([(peace, clip_motion(STANCE_LINK_ANIM, None))]),
+                        ),
+                        (
+                            MotionTable::cycle_key(peace, MotionCommand::RUN_FORWARD.raw()),
+                            HashMap::from([(FIXTURE_STAND_COMMAND, clip_motion(STOP_ANIM, None))]),
+                        ),
+                    ]),
+                }],
+                [
+                    anim(STAND_ANIM),
+                    anim(RUN_ANIM),
+                    anim(STANCE_LINK_ANIM),
+                    anim(STOP_ANIM),
+                ],
+                [],
+            )
+            .unwrap(),
+        );
+        client
+            .world
+            .player_entity_mut()
+            .unwrap()
+            .set_did_prop(PropertyDataId::MotionTable, Guid(TABLE));
+        client.world.player.skills.insert(
+            SkillType::Run,
+            Skill {
+                skill_type: SkillType::Run,
+                ranks: 0,
+                init: 300,
+                spent_xp: 0,
+                next_rank_xp: None,
+                base: 300,
+                current: 300,
+                training: TrainingLevel::Trained,
+                trained_cost: 0,
+                specialized_cost: 0,
+                breakdown: Default::default(),
+            },
+        );
+
+        let now = Instant::now();
+        client.movement.enqueue_drive_intent(
+            PlayerDriveIntent::ManualHeld(CharacterDrive::builder().run().forward().build()),
+            now,
+        );
+        client
+            .movement
+            .tick(now, &mut client.world, &mut client.session)
+            .await
+            .unwrap();
+        let initial_tick = client
+            .movement
+            .advance_local_authored_motion(&mut client.world, Duration::from_millis(250))
+            .unwrap()
+            .unwrap();
+        assert!(initial_tick.offset.translation.y > 0.0);
+
+        let mut events = client.client_view_event_tx.subscribe();
+        let stance_switch = MovementEventData {
+            guid,
+            object_instance_sequence: client.world.player.instance_sequence,
+            movement_sequence: 1,
+            server_control_sequence: 1,
+            is_autonomous: false,
+            movement_type: MovementType::Invalid,
+            motion_flags: 0,
+            current_style: MotionStance::SwordCombat.interpreted(),
+            data: MovementTypeData::Invalid(MovementInvalid {
+                state: InterpretedMotionState {
+                    flags: MovementStateFlags::CURRENT_STYLE | MovementStateFlags::FORWARD_COMMAND,
+                    current_style: Some(MotionStance::SwordCombat.interpreted()),
+                    forward_command: Some(InterpretedMotionCommand(
+                        MotionCommand::READY.raw() as u16
+                    )),
+                    ..Default::default()
+                },
+                sticky_object: None,
+            }),
+        };
+        client
+            .handle_message(&encode_message(&GameMessage::UpdateMotion(Box::new(
+                stance_switch,
+            ))))
+            .await
+            .unwrap();
+
+        assert!(client.movement.has_active_manual_drive());
+        assert!(
+            !std::iter::from_fn(|| events.try_recv().ok())
+                .any(|event| matches!(event, ClientViewEvent::LocalMovementDisplaced))
+        );
+
+        let during_switch = client
+            .movement
+            .advance_local_authored_motion(&mut client.world, Duration::from_millis(250))
+            .unwrap()
+            .unwrap();
+        assert!(
+            during_switch.offset.translation.y > 0.0,
+            "grounded manual movement must not stall during a stance switch"
+        );
+        let playback = client.world.motion_runtimes.motion_playback(guid).unwrap();
+        assert_eq!(
+            playback.activity,
+            holtburger_world::motion::OrdinaryMotionActivity::Gesture
+        );
+        assert!(playback.locomotion_command_active);
+        assert_eq!(
+            playback.ordinary.unwrap().clip.animation_id(),
+            STANCE_LINK_ANIM
+        );
+        assert_eq!(playback.locomotion.unwrap().clip.animation_id(), RUN_ANIM);
+
+        let before_seq = client.session.game_action_sequence;
+        client
+            .movement
+            .tick(
+                now + Duration::from_millis(30),
+                &mut client.world,
+                &mut client.session,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            client.world.player.last_server_motion_style,
+            Some(MotionStance::SwordCombat)
+        );
+        assert_eq!(
+            client.session.game_action_sequence,
+            before_seq + 1,
+            "manual movement should republish MoveToState with the new stance"
+        );
     }
 
     fn server_controlled_motion(

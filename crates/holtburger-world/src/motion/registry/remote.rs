@@ -341,16 +341,35 @@ impl BodyMotionRuntime {
                 || table.is_default_cycle(style.raw(), command.raw())
         });
         let ongoing_gesture = self.has_layerable_gesture(table);
+        let incoming_stance_change = commanded
+            .style
+            .is_some_and(|next| self.models_other_style(table, next))
+            && self.permits_stance_transition_from_current_state();
+        let stance_locomotion_follow_up = matches!(
+            self.pending_override,
+            Some(super::PendingMotionOverride::StanceTransition)
+        ) && commanded
+            .forward
+            .is_some_and(|(command, _)| command.is_locomotion_command());
         let preserve_gesture = self.gesture_actions_allow_locomotion()
             && (gesture_command
-                || (gesture_return && (incoming_gesture_actions || ongoing_gesture)));
+                || stance_locomotion_follow_up
+                || (gesture_return
+                    && (incoming_gesture_actions || ongoing_gesture || incoming_stance_change)));
         if self.has_manual_locomotion() || preserve_gesture {
             // A gesture received during takeoff must not sit behind the old locomotion entry.
             // Existing gesture entries and queued gesture actions retain their clocks and hooks.
             if unsupported && preserve_gesture && !ongoing_gesture {
                 self.sequence.remove_transition_prefix();
             }
-            commanded
+            if unsupported && stance_locomotion_follow_up && !self.has_manual_locomotion() {
+                MotionOrder {
+                    style: commanded.style,
+                    ..MotionOrder::default()
+                }
+            } else {
+                commanded
+            }
         } else {
             resolved
         }

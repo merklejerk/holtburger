@@ -74,8 +74,8 @@ pub struct BodyMotionRuntime {
     steady_order: MotionOrder,
     /// Local command admission owns this retained order until completion or a new movement source.
     local_command_owned: bool,
-    /// Accepted substate gesture retained through its authored return transition.
-    pending_gesture: Option<MotionCommand>,
+    /// Active ordinary-track gesture or stance transition that may coexist with locomotion.
+    pending_override: Option<PendingMotionOverride>,
     /// FIFO transient edges awaiting installation after the active action.
     action_queue: VecDeque<EntityMotionAction>,
     /// Action whose exact selector-owned boundary has not completed yet.
@@ -86,6 +86,15 @@ pub struct BodyMotionRuntime {
     local_pose_request: Option<u32>,
     /// Request outcomes produced at admission, selection, and exact sequence boundaries.
     local_feedback: Vec<LocalMotionFeedback>,
+}
+
+/// Active ordinary-track override that may coexist with independent locomotion.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum PendingMotionOverride {
+    /// Accepted substate gesture retained through its entry, hold, and authored return.
+    Substate(MotionCommand),
+    /// Accepted stance transition retained through its non-cyclic draw/sheathe prefix.
+    StanceTransition,
 }
 
 /// Independent selection and cursor; action ownership remains in `BodyMotionRuntime`.
@@ -482,11 +491,11 @@ impl BodyMotionRuntime {
         let mut runtime = Self::new(table);
         runtime.select_order(table, order, false);
         runtime.sequence.remove_transition_prefix();
-        runtime.pending_gesture = runtime
+        runtime.pending_override = runtime
             .state
             .substate
             .is_movement_override_substate()
-            .then_some(runtime.state.substate);
+            .then_some(PendingMotionOverride::Substate(runtime.state.substate));
         runtime
     }
 
@@ -494,7 +503,7 @@ impl BodyMotionRuntime {
     /// Retail HandleEnterWorld drains pending animations with failure; MotionDone also retires
     /// action-owned sticky state.
     fn interrupt_transitions(&mut self) {
-        self.pending_gesture = None;
+        self.pending_override = None;
         self.sequence.remove_transition_prefix();
         if self.action_count() != 0 {
             self.sticky.complete_action();
@@ -513,18 +522,89 @@ impl BodyMotionRuntime {
         }
     }
 
+    /// Whether `style` names another stance with an executable default cycle in `table`.
+    pub(super) fn models_other_style(
+        &self,
+        table: &MotionSequenceTable,
+        style: MotionCommand,
+    ) -> bool {
+        style != self.state.style
+            && table
+                .style_default(style.raw())
+                .is_some_and(|default| table.cycle(style.raw(), default).is_some())
+    }
+
+    /// Whether leaving the current substate may upper-body blend a stance transition.
+    /// Non-locomotion poses (rest postures, social emotes, death, pickup reaches) stay full-body.
+    pub(super) fn permits_stance_transition_from_current_state(&self) -> bool {
+        self.ordinary_is_locomotion
+            || self.state.substate == MotionCommand::FALLING
+            || self.state.substate.movement_override_gesture()
+                == Some(super::MotionGesture::Gesture)
+    }
+
     /// Applies a fresh accepted state before its action batch, without advancing time.
     /// Unlike continuous selection, every accepted Dead command interrupts pending playback.
     pub fn accept_order(&mut self, table: &MotionSequenceTable, order: MotionOrder) {
         self.bind_table(table);
-        self.select_order(table, order, true);
-        if self.state.substate.is_movement_override_substate() {
-            self.pending_gesture = Some(self.state.substate);
-        } else if self.sequence.is_cyclic()
-            || (!table.is_default_cycle(self.state.style.raw(), self.state.substate.raw())
-                && self.state.substate != MotionCommand::READY)
+        let previous_style = self.state.style;
+        let previous_substate = self.state.substate;
+        let eligible_stance_origin = self.permits_stance_transition_from_current_state();
+        // RETAIL DIVERGENCE: retail routes airborne style switches through the style default,
+        // prepending the Falling->Ready landing link before the stance transition. Restoring
+        // retail behavior would play a grounded landing pose in midair before drawing/sheathing.
+        // Census (local assets.hba): all 14 styles in player table 0x09000001 default to Ready,
+        // and all 28 style links across the 14-style humanoid tables have zero explicit velocity
+        // and zero hooks; 22 humanoid CharGen setups compose upper-body poses over Falling.
+        if previous_substate == MotionCommand::FALLING
+            && let Some(style) = order.style
+            && self.models_other_style(table, style)
+            && order.forward.is_none_or(|(command, _)| {
+                command == MotionCommand::READY
+                    || table.is_default_cycle(style.raw(), command.raw())
+            })
+            && let Some(default_substate) = table.style_default(previous_style.raw())
         {
-            self.pending_gesture = None;
+            self.sequence.remove_transition_prefix();
+            self.state.substate = MotionCommand(default_substate);
+        }
+        self.select_order(table, order, true);
+        self.reconcile_override_after_selection(table, previous_style, eligible_stance_origin);
+    }
+
+    fn reconcile_override_after_selection(
+        &mut self,
+        table: &MotionSequenceTable,
+        previous_style: MotionCommand,
+        eligible_stance_origin: bool,
+    ) {
+        if self.state.substate.is_movement_override_substate() {
+            self.pending_override = Some(PendingMotionOverride::Substate(self.state.substate));
+            return;
+        }
+        if self.state.style != previous_style
+            && eligible_stance_origin
+            && !self.sequence.is_cyclic()
+            && self.ordinary_is_locomotion
+        {
+            self.pending_override = Some(PendingMotionOverride::StanceTransition);
+            return;
+        }
+        match self.pending_override {
+            Some(PendingMotionOverride::Substate(_))
+                if self.sequence.is_cyclic()
+                    || (!table
+                        .is_default_cycle(self.state.style.raw(), self.state.substate.raw())
+                        && self.state.substate != MotionCommand::READY) =>
+            {
+                self.pending_override = None;
+            }
+            Some(PendingMotionOverride::StanceTransition)
+                if self.sequence.is_cyclic() || !self.ordinary_is_locomotion =>
+            {
+                self.pending_override = None;
+            }
+            _ => {}
         }
     }
 
@@ -563,7 +643,7 @@ impl BodyMotionRuntime {
             ordinary_resolution: MotionOrderResolution::default(),
             steady_order: MotionOrder::default(),
             local_command_owned: false,
-            pending_gesture: None,
+            pending_override: None,
             action_queue: VecDeque::new(),
             active_action: None,
             rejected_actions: Vec::new(),
@@ -690,14 +770,22 @@ impl BodyMotionRuntime {
         if ordinary.is_none() && locomotion.is_none() {
             return None;
         }
-        let activity = if self.pending_gesture.is_some_and(|command| {
-            command.movement_override_gesture() == Some(super::MotionGesture::Reach)
-        }) {
+        let activity = if matches!(
+            self.pending_override,
+            Some(PendingMotionOverride::Substate(command))
+                if command.movement_override_gesture() == Some(super::MotionGesture::Reach)
+        ) {
             OrdinaryMotionActivity::Reach
-        } else if self.pending_gesture.is_some()
-            || self
-                .active_action
-                .is_some_and(|action| action.command.movement_override_gesture().is_some())
+        } else if matches!(
+            self.pending_override,
+            Some(PendingMotionOverride::Substate(_))
+        ) || self
+            .active_action
+            .is_some_and(|action| action.command.movement_override_gesture().is_some())
+            || (matches!(
+                self.pending_override,
+                Some(PendingMotionOverride::StanceTransition)
+            ) && self.gesture_actions_allow_locomotion())
         {
             OrdinaryMotionActivity::Gesture
         } else if self.state.substate.is_chat_emote()
@@ -819,20 +907,22 @@ impl BodyMotionRuntime {
         Some(multiplier * RETAIL_RUN_FORWARD_BASE_SPEED_MPS)
     }
 
-    /// Recognized gestures and their idle return may coexist with independent locomotion.
-    /// Unmodelled channels and unrelated actions keep their existing server-control policy.
+    /// Recognized gestures, stance transitions, and their idle return may coexist with independent
+    /// locomotion. Unmodelled channels and unrelated actions keep their existing server-control
+    /// policy.
     pub fn permits_gesture_locomotion(&self, table: &MotionSequenceTable) -> bool {
         self.gesture_actions_allow_locomotion()
-            && (self.pending_gesture.is_some()
+            && (self.pending_override.is_some()
                 || self.state.substate.movement_override_gesture().is_some()
                 || table.is_default_cycle(self.state.style.raw(), self.state.substate.raw())
                 || self.state.substate == MotionCommand::READY)
     }
 
-    /// A recognized gesture currently owns playback, rather than only an eligible idle state.
+    /// A recognized gesture or stance transition currently owns playback, rather than only an
+    /// eligible idle state.
     pub fn has_layerable_gesture(&self, table: &MotionSequenceTable) -> bool {
         self.permits_gesture_locomotion(table)
-            && (self.pending_gesture.is_some()
+            && (self.pending_override.is_some()
                 || self.action_count() != 0
                 || self.state.substate.movement_override_gesture().is_some())
     }
@@ -849,7 +939,10 @@ impl BodyMotionRuntime {
 
     /// Whether an accepted substate gesture still owns its entry, hold, or return playback.
     pub fn has_pending_gesture(&self) -> bool {
-        self.pending_gesture.is_some()
+        matches!(
+            self.pending_override,
+            Some(PendingMotionOverride::Substate(_))
+        )
     }
 
     /// Body semantics follow active actions/explicit substates and their authored boundaries.
@@ -857,7 +950,7 @@ impl BodyMotionRuntime {
     fn ordinary_owns_body_semantics(&self) -> bool {
         self.active_action.is_some()
             || !self.action_queue.is_empty()
-            || self.pending_gesture.is_some()
+            || self.pending_override.is_some()
             || !self.ordinary_is_locomotion
             || (self.sequence.has_clips() && !self.sequence.is_cyclic())
     }
@@ -932,6 +1025,8 @@ impl BodyMotionRuntime {
                 MotionCommand::FALLING | MotionCommand::READY
             )
         {
+            let previous_style = self.state.style;
+            let eligible_stance_origin = self.permits_stance_transition_from_current_state();
             self.select_order(
                 table,
                 MotionOrder {
@@ -940,6 +1035,7 @@ impl BodyMotionRuntime {
                 },
                 false,
             );
+            self.reconcile_override_after_selection(table, previous_style, eligible_stance_origin);
         } else if !self.permits_gesture_locomotion(table) && self.ordinary_owns_body_semantics() {
             // Unknown/custom actions keep ordinary authored arbitration.
             return self.drive(table, order, quantum);
@@ -964,15 +1060,19 @@ impl BodyMotionRuntime {
             order,
         );
         let (resolution, fallback_rates) = selected.resolve_local(baseline);
-        if presentation == super::CharacterMotionPresentation::Falling
-            && locomotion.state.style != previous_style
-            && locomotion.state.substate == MotionCommand::FALLING
-        {
-            // RETAIL DIVERGENCE: style selection routes through the default substate. Player
-            // table 0x09000001 contains landing and magic stance links on that route.
-            // Keeping them would play grounded poses in
-            // flight; retain the successfully selected Falling cycle. Same-style takeoff still
-            // traverses its authored transition normally.
+        if locomotion.state.style != previous_style {
+            // RETAIL DIVERGENCE: style selection routes through the default substate, prepending
+            // stop/landing and stance-transition links onto the locomotion sequence and halting
+            // movement until the draw/sheathe finishes. Ordinary playback already owns the stance
+            // transition clips, hooks, and collision pose; drop the duplicate transition prefix on
+            // the independent locomotion track so grounded movement and airborne flight continue
+            // uninterrupted while humanoid setups upper-body blend the transition. Same-style
+            // start, stop, and takeoff transitions still play normally, and rejected style
+            // requests leave locomotion untouched. Census (local assets.hba): all 14 styles in
+            // player table 0x09000001 default to Ready, all 28 style links across the 14-style
+            // humanoid tables have zero explicit velocity/omega, <=0.05 m root sway, and zero
+            // hooks; 22 humanoid CharGen setups compose upper-body poses while 4 Olthoi entries
+            // retain full-body fallback.
             locomotion.sequence.remove_transition_prefix();
         }
         locomotion.command_active = moving;
@@ -1056,7 +1156,7 @@ impl BodyMotionRuntime {
         self.tick = self.sequence.advance(quantum);
         if self.tick.action_completed {
             // A release/reach admitted after this action owns any newer target lease.
-            if self.pending_gesture.is_none() {
+            if !self.has_pending_gesture() {
                 self.sticky.complete_action();
             }
             if let Some(action) = self.active_action.take() {
@@ -1071,8 +1171,13 @@ impl BodyMotionRuntime {
             self.classify_ordinary_motion(table);
             self.start_next_action(table);
         }
-        if self.pending_gesture != Some(self.state.substate) && self.sequence.is_cyclic() {
-            self.pending_gesture = None;
+        if self.sequence.is_cyclic()
+            && !matches!(
+                self.pending_override,
+                Some(PendingMotionOverride::Substate(substate)) if substate == self.state.substate
+            )
+        {
+            self.pending_override = None;
         }
         if self.ordinary_is_locomotion
             && self.sequence.is_cyclic()

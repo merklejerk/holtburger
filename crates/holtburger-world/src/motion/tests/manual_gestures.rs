@@ -13,6 +13,8 @@ const ENTRY_ANIM: u32 = 0x0300_0010;
 const RETURN_ANIM: u32 = 0x0300_0011;
 const HOLD_ANIM: u32 = 0x0300_0012;
 const STOP_ANIM: u32 = 0x0300_0013;
+const STANCE_LINK_ANIM: u32 = 0x0300_0020;
+const START_RUN_ANIM: u32 = 0x0300_0021;
 
 fn gesture_catalog() -> MotionSequenceCatalog {
     build_gesture_catalog(false, REACH)
@@ -1240,4 +1242,430 @@ fn pickup_variants_retain_reach_activity_through_entry_hold_and_return_while_mov
             OrdinaryMotionActivity::Locomotion
         );
     }
+}
+
+fn stance_transition_catalog() -> MotionSequenceCatalog {
+    const SITTING: u32 = RestPosture::Sitting.command().raw();
+    let falling = MotionCommand::FALLING.raw();
+    let styles = [STYLE, COMBAT_STYLE];
+    let mut cycles = HashMap::new();
+    for style in styles {
+        for (command, anim) in [(STAND, STAND_ANIM), (WALK, WALK_ANIM), (falling, HOLD_ANIM)] {
+            cycles.insert(
+                MotionTable::cycle_key(style, command),
+                motion(vec![clip(anim, 4.0)], None, None),
+            );
+        }
+    }
+    cycles.insert(
+        MotionTable::cycle_key(STYLE, SITTING),
+        motion(vec![clip(HOLD_ANIM, 4.0)], None, None),
+    );
+    let mut links = HashMap::new();
+    for style in styles {
+        let other = if style == STYLE { COMBAT_STYLE } else { STYLE };
+        let mut stand_links = HashMap::from([
+            (other, motion(vec![clip(STANCE_LINK_ANIM, 4.0)], None, None)),
+            (WALK, motion(vec![clip(START_RUN_ANIM, 4.0)], None, None)),
+            (falling, motion(vec![clip(ENTRY_ANIM, 4.0)], None, None)),
+        ]);
+        if style == STYLE {
+            stand_links.insert(ACTION, motion(vec![clip(ACTION_ANIM, 4.0)], None, None));
+            stand_links.insert(SITTING, motion(vec![clip(ENTRY_ANIM, 4.0)], None, None));
+        }
+        links.insert(MotionTable::cycle_key(style, STAND), stand_links);
+        links.insert(
+            MotionTable::cycle_key(style, WALK),
+            HashMap::from([(STAND, motion(vec![clip(STOP_ANIM, 4.0)], None, None))]),
+        );
+        links.insert(
+            MotionTable::cycle_key(style, falling),
+            HashMap::from([(STAND, motion(vec![clip(RETURN_ANIM, 4.0)], None, None))]),
+        );
+    }
+    links.insert(
+        MotionTable::cycle_key(STYLE, SITTING),
+        HashMap::from([(STAND, motion(vec![clip(RETURN_ANIM, 4.0)], None, None))]),
+    );
+    MotionSequenceCatalog::assemble(
+        [MotionTable {
+            id: 0x0900_0001,
+            default_style: STYLE,
+            style_defaults: styles.into_iter().map(|style| (style, STAND)).collect(),
+            cycles,
+            modifiers: HashMap::new(),
+            links,
+        }],
+        [
+            animation(STAND_ANIM, 4, 0.0),
+            animation(WALK_ANIM, 4, 1.0),
+            animation(HOLD_ANIM, 4, 0.0),
+            animation(ENTRY_ANIM, 4, 0.0),
+            animation(RETURN_ANIM, 4, 0.0),
+            animation(STOP_ANIM, 4, 0.0),
+            animation(ACTION_ANIM, 4, 0.0),
+            animation(STANCE_LINK_ANIM, 4, 0.0),
+            animation(START_RUN_ANIM, 4, 0.0),
+        ],
+        [],
+    )
+    .unwrap()
+}
+
+#[test]
+fn manual_stance_transition_blends_without_halting_grounded_locomotion() {
+    let catalog = stance_transition_catalog();
+    let table = catalog.table(0x0900_0001).unwrap();
+    let mut runtime = BodyMotionRuntime::new(table);
+
+    let peace_walk = MotionOrder {
+        style: Some(MotionCommand(STYLE)),
+        forward: Some((MotionCommand(WALK), 1.0)),
+        ..MotionOrder::default()
+    };
+    let combat_walk = MotionOrder {
+        style: Some(MotionCommand(COMBAT_STYLE)),
+        forward: Some((MotionCommand(WALK), 1.0)),
+        ..MotionOrder::default()
+    };
+    let combat_ready = MotionOrder {
+        style: Some(MotionCommand(COMBAT_STYLE)),
+        forward: Some((MotionCommand::READY, 1.0)),
+        ..MotionOrder::default()
+    };
+
+    // Establish running in peace beyond the initial start-run link.
+    runtime.drive_manual(
+        table,
+        peace_walk,
+        CharacterMotionPresentation::Grounded,
+        1.0,
+    );
+    runtime.drive_manual(
+        table,
+        peace_walk,
+        CharacterMotionPresentation::Grounded,
+        0.25,
+    );
+    assert_eq!(runtime.tick().offset.translation.y, 1.0);
+
+    // Server stance switch arrives while moving.
+    runtime.accept_order(table, combat_ready);
+    assert!(runtime.permits_gesture_locomotion(table));
+    assert!(runtime.has_layerable_gesture(table));
+
+    // Every tick during the 1.0 s stance transition retains full locomotion displacement and
+    // exposes upper-body gesture blending over active locomotion.
+    for _ in 0..3 {
+        runtime.drive_manual(
+            table,
+            combat_walk,
+            CharacterMotionPresentation::Grounded,
+            0.25,
+        );
+        assert_eq!(runtime.tick().offset.translation.y, 1.0);
+        let playback = runtime.motion_playback().unwrap();
+        assert_eq!(playback.activity, OrdinaryMotionActivity::Gesture);
+        assert!(playback.locomotion_command_active);
+        assert_eq!(
+            playback.ordinary.unwrap().clip.animation_id(),
+            STANCE_LINK_ANIM
+        );
+        assert_eq!(playback.locomotion.unwrap().clip.animation_id(), WALK_ANIM);
+    }
+
+    // Completing the stance transition returns ordinary playback to Locomotion.
+    runtime.drive_manual(
+        table,
+        combat_walk,
+        CharacterMotionPresentation::Grounded,
+        0.5,
+    );
+    assert_eq!(runtime.tick().offset.translation.y, 2.0);
+    let finished = runtime.motion_playback().unwrap();
+    assert_eq!(finished.activity, OrdinaryMotionActivity::Locomotion);
+    assert!(!runtime.has_layerable_gesture(table));
+
+    // Starting to move mid-stance-transition enters the new stance's run transition directly
+    // instead of stalling behind a duplicate stance link on locomotion.
+    let mut from_idle = BodyMotionRuntime::new(table);
+    from_idle.drive_manual(
+        table,
+        MotionOrder {
+            style: Some(MotionCommand(STYLE)),
+            ..MotionOrder::default()
+        },
+        CharacterMotionPresentation::Grounded,
+        0.25,
+    );
+    from_idle.accept_order(table, combat_ready);
+    from_idle.drive_manual(
+        table,
+        MotionOrder {
+            style: Some(MotionCommand(COMBAT_STYLE)),
+            ..MotionOrder::default()
+        },
+        CharacterMotionPresentation::Grounded,
+        0.25,
+    );
+    assert!(
+        !from_idle
+            .motion_playback()
+            .unwrap()
+            .locomotion_command_active
+    );
+    from_idle.drive_manual(
+        table,
+        combat_walk,
+        CharacterMotionPresentation::Grounded,
+        0.25,
+    );
+    let mid_start = from_idle.motion_playback().unwrap();
+    assert_eq!(mid_start.activity, OrdinaryMotionActivity::Gesture);
+    assert!(mid_start.locomotion_command_active);
+    assert_eq!(
+        mid_start.ordinary.unwrap().clip.animation_id(),
+        STANCE_LINK_ANIM
+    );
+    assert_eq!(
+        mid_start.locomotion.unwrap().clip.animation_id(),
+        START_RUN_ANIM
+    );
+
+    // Leaving a resting posture stays full-body Explicit rather than upper-body Gesture.
+    let mut sitting = BodyMotionRuntime::new(table);
+    sitting.accept_order(
+        table,
+        MotionOrder {
+            style: Some(MotionCommand(STYLE)),
+            forward: Some((RestPosture::Sitting.command(), 1.0)),
+            ..MotionOrder::default()
+        },
+    );
+    sitting.drive(
+        table,
+        MotionOrder {
+            style: Some(MotionCommand(STYLE)),
+            forward: Some((RestPosture::Sitting.command(), 1.0)),
+            ..MotionOrder::default()
+        },
+        1.0,
+    );
+    sitting.accept_order(table, combat_ready);
+    assert_eq!(
+        sitting.motion_playback().unwrap().activity,
+        OrdinaryMotionActivity::Explicit
+    );
+    assert!(!sitting.has_layerable_gesture(table));
+
+    // An unrelated combat action queued alongside a stance switch keeps exclusive ownership.
+    let mut attacking = BodyMotionRuntime::new(table);
+    attacking.accept_order(table, combat_ready);
+    assert_eq!(
+        attacking.enqueue_action(action(1)),
+        MotionActionEnqueueOutcome::Queued
+    );
+    assert!(!attacking.permits_gesture_locomotion(table));
+    assert_eq!(
+        attacking.motion_playback().unwrap().activity,
+        OrdinaryMotionActivity::Explicit
+    );
+}
+
+#[test]
+fn stance_transition_survives_airborne_takeoff_and_skips_landing_exit() {
+    let catalog = stance_transition_catalog();
+    let table = catalog.table(0x0900_0001).unwrap();
+    let combat_ready = MotionOrder {
+        style: Some(MotionCommand(COMBAT_STYLE)),
+        forward: Some((MotionCommand::READY, 1.0)),
+        ..MotionOrder::default()
+    };
+
+    // Jumping mid-stance-transition preserves the stance transition on ordinary playback while
+    // same-style takeoff plays normally on locomotion.
+    let mut jumping = BodyMotionRuntime::new(table);
+    jumping.accept_order(table, combat_ready);
+    jumping.drive_manual(
+        table,
+        MotionOrder {
+            style: Some(MotionCommand(COMBAT_STYLE)),
+            ..MotionOrder::default()
+        },
+        CharacterMotionPresentation::Falling,
+        0.25,
+    );
+    let playback = jumping.motion_playback().unwrap();
+    assert_eq!(playback.activity, OrdinaryMotionActivity::Gesture);
+    assert_eq!(
+        playback.ordinary.unwrap().clip.animation_id(),
+        STANCE_LINK_ANIM
+    );
+    assert_eq!(playback.locomotion.unwrap().clip.animation_id(), ENTRY_ANIM);
+
+    // Switching stance while already airborne skips the Falling->Ready landing link.
+    let mut midair = BodyMotionRuntime::new(table);
+    midair.drive_manual(
+        table,
+        MotionOrder {
+            style: Some(MotionCommand(STYLE)),
+            ..MotionOrder::default()
+        },
+        CharacterMotionPresentation::Falling,
+        1.0,
+    );
+    assert_eq!(midair.state().substate, MotionCommand::FALLING);
+    midair.accept_order(table, combat_ready);
+    midair.drive_manual(
+        table,
+        MotionOrder {
+            style: Some(MotionCommand(COMBAT_STYLE)),
+            ..MotionOrder::default()
+        },
+        CharacterMotionPresentation::Falling,
+        0.25,
+    );
+    let midair_playback = midair.motion_playback().unwrap();
+    assert_eq!(midair_playback.activity, OrdinaryMotionActivity::Gesture);
+    assert_eq!(
+        midair_playback.ordinary.unwrap().clip.animation_id(),
+        STANCE_LINK_ANIM
+    );
+    assert_eq!(
+        midair_playback.locomotion.unwrap().clip.animation_id(),
+        HOLD_ANIM
+    );
+}
+
+#[test]
+fn remote_stance_transition_composes_with_observed_locomotion_and_airtime() {
+    let catalog = stance_transition_catalog();
+    let table = catalog.table(0x0900_0001).unwrap();
+    let guid = Guid(1);
+
+    let stance_input = |style: u32, forward: u32, contact: ContactState| RemoteMotionInput {
+        snapshot: EntityMotionSnapshot {
+            current_style: Some(
+                holtburger_protocol::messages::movement::MotionStance::from_repr(style).unwrap(),
+            ),
+            forward_command: Some(InterpretedMotionCommand(forward as u16)),
+            ..EntityMotionSnapshot::default()
+        },
+        pose: holtburger_common::position::WorldPosition::default(),
+        contact: MotionContact::RequiresSupport(contact),
+        target: None,
+        frame_policy: RemoteFramePolicy::Command,
+        omega: holtburger_common::Vector3::zero(),
+    };
+
+    // Grounded remote player switches stance, then sends autonomous MoveToState locomotion 30 ms later.
+    let mut registry = MotionRuntimeRegistry::new();
+    registry.accept_remote(
+        table,
+        guid,
+        stance_input(COMBAT_STYLE, STAND, ContactState::Grounded),
+        [],
+        None,
+    );
+    registry.accept_remote(
+        table,
+        guid,
+        stance_input(COMBAT_STYLE, WALK, ContactState::Grounded),
+        [],
+        None,
+    );
+    registry.drive_remote(
+        table,
+        guid,
+        stance_input(COMBAT_STYLE, WALK, ContactState::Grounded),
+        0.25,
+    );
+    registry.present_locomotion(
+        table,
+        guid,
+        MotionOrder {
+            style: Some(MotionCommand(COMBAT_STYLE)),
+            forward: Some((MotionCommand(WALK), 1.0)),
+            ..MotionOrder::default()
+        },
+        0.25,
+    );
+    let playback = registry.motion_playback(guid).unwrap();
+    assert_eq!(playback.activity, OrdinaryMotionActivity::Gesture);
+    assert!(playback.locomotion_command_active);
+    assert_eq!(
+        playback.ordinary.unwrap().clip.animation_id(),
+        STANCE_LINK_ANIM
+    );
+    assert_eq!(playback.locomotion.unwrap().clip.animation_id(), WALK_ANIM);
+
+    // Completing the stance transition and its appended run-start link returns remote ordinary
+    // activity to Locomotion.
+    registry.drive_remote(
+        table,
+        guid,
+        stance_input(COMBAT_STYLE, WALK, ContactState::Grounded),
+        2.0,
+    );
+    assert_eq!(
+        registry.motion_playback(guid).unwrap().activity,
+        OrdinaryMotionActivity::Locomotion
+    );
+
+    // Airborne remote player switches stance without playing a landing clip or losing the draw.
+    let mut airborne = MotionRuntimeRegistry::new();
+    airborne.drive_remote(
+        table,
+        guid,
+        stance_input(STYLE, STAND, ContactState::Airborne),
+        1.0,
+    );
+    airborne.accept_remote(
+        table,
+        guid,
+        stance_input(COMBAT_STYLE, STAND, ContactState::Airborne),
+        [],
+        None,
+    );
+    airborne.accept_remote(
+        table,
+        guid,
+        stance_input(COMBAT_STYLE, WALK, ContactState::Airborne),
+        [],
+        None,
+    );
+    airborne.drive_remote(
+        table,
+        guid,
+        stance_input(COMBAT_STYLE, WALK, ContactState::Airborne),
+        0.25,
+    );
+    let midair = airborne.motion_playback(guid).unwrap();
+    assert_eq!(midair.activity, OrdinaryMotionActivity::Gesture);
+    assert_eq!(
+        midair.ordinary.unwrap().clip.animation_id(),
+        STANCE_LINK_ANIM
+    );
+    // Completing the stance transition finishes without queuing grounded start-run links, then
+    // the next airborne tick restores Falling.
+    airborne.drive_remote(
+        table,
+        guid,
+        stance_input(COMBAT_STYLE, WALK, ContactState::Airborne),
+        1.0,
+    );
+    assert_eq!(
+        airborne.motion_playback(guid).unwrap().activity,
+        OrdinaryMotionActivity::Locomotion
+    );
+    airborne.drive_remote(
+        table,
+        guid,
+        stance_input(COMBAT_STYLE, WALK, ContactState::Airborne),
+        0.25,
+    );
+    assert_eq!(
+        airborne.state(guid).unwrap().substate,
+        MotionCommand::FALLING
+    );
 }

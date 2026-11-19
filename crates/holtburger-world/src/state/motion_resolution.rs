@@ -1192,11 +1192,11 @@ impl WorldState {
             return;
         }
         // RETAIL DIVERGENCE: takeoff/landing removes pending animations in retail. Independent
-        // gesture playback keeps accepted gestures alive on these edges for both manual and
-        // remote locomotion. Restoring unconditional removal cancels the cast before the
-        // frontend can compose it. This uses the existing gesture allowlist; visual scope is
-        // the 22 humanoid CharGen entries. Other actions
-        // retain retail interruption.
+        // gesture playback keeps accepted gestures and stance transitions alive on these edges for
+        // both manual and remote locomotion. Restoring unconditional removal cancels casting or
+        // draw/sheathe playback before the frontend can compose it. This uses the existing gesture
+        // and stance-transition allowlist; visual scope is the 22 humanoid CharGen entries. Other
+        // actions retain retail interruption.
         if self.motion_runtimes.get(guid).is_some_and(|runtime| {
             self.motion_sequences
                 .table(runtime.motion_table_id())

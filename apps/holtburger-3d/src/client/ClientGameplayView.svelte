@@ -1,24 +1,9 @@
 <script lang="ts">
-	import type { PerformanceSession } from "../app/performance-session";
-	import type { StatArtworkServices } from "./client-stat-artwork";
-	import { type InputPlatform } from "../lib/input/input-platform";
-
 	import ClientLockFeedback from "./ClientLockFeedback.svelte";
-	import type { ClientLockFeedbackFrame } from "./client-lock-feedback";
 	import { applyUiScale } from "../app/ui-scale";
 	import { logicalClientHudViewport } from "./client-hud-layout";
 	import { presentClientBinding } from "./client-binding-catalog";
 	import { ClientCombineCells } from "./client-combine-cells";
-	import type {
-		ClientChatSuppressionSettings,
-		ClientLockInteractionSettings,
-		ClientNameplateSettings,
-	} from "./client-settings-contract";
-	import type {
-		ClientGameplayOption,
-		ClientGameplayPreferences,
-	} from "./client-gameplay-options-contract";
-	import type { UiThemeSettings } from "../app/ui-theme-selection";
 	import ClientEmoteWheel from "./ClientEmoteWheel.svelte";
 	import type { ClientWaypointReveal } from "./client-navigation-waypoint";
 	import type { MapWaypointTarget } from "../lib/game/map/map-waypoint";
@@ -29,52 +14,24 @@
 		type LoadoutDraft,
 	} from "./client-loadout";
 	import ClientPartyHud from "./ClientPartyHud.svelte";
-	import type { PartyHudDisplay } from "./client-party-hud";
 	import ClientJournalPanel from "./ClientJournalPanel.svelte";
-	import type { ClientContractsState } from "./client-contracts-state";
-	import type { ClientAllegianceState } from "./client-allegiance-state";
-	import type { ClientSquelchState } from "./client-squelch-state";
-	import type { ClientHousingManagementState } from "./client-housing-management-state";
-	import type { HousingSnapshot } from "./client-housing-contract";
-	import type { ClientConnectionObservation } from "./client-lifecycle-session";
 	import ClientSalvageWindow from "./ClientSalvageWindow.svelte";
-	import type { ClientSalvageState } from "./client-salvage-state";
 	import ClientTradeWindow from "./ClientTradeWindow.svelte";
 	import ClientBarberWindow from "./ClientBarberWindow.svelte";
-	import type { ClientBarberState } from "./client-barber-state";
-	import type { ClientTradeState } from "./client-trade-state";
-	import type { ClientHouseCrystalState } from "./client-house-crystal-state";
 	import ClientHouseCrystalWindow from "./ClientHouseCrystalWindow.svelte";
 	import ClientVendorWindow from "./ClientVendorWindow.svelte";
-	import type { ClientVendorState } from "./client-vendor-state";
-	import type { ItemDragSession } from "./client-item-drag";
 	import ClientWorldContainerWindow from "./ClientWorldContainerWindow.svelte";
 	import ClientInspectionWindow from "./ClientInspectionWindow.svelte";
-	import type { ClientInspectionItemSelection } from "./client-entity-selection";
 	import ClientBookWindow from "./ClientBookWindow.svelte";
-	import type { ClientBookReaderState } from "./client-book-reader";
-	import type { ClientWorldContainerPanelState } from "./client-world-container-panel-state";
 	import { ClientSpellDrag } from "./client-spell-drag";
 	import type { ClientItemDrag } from "./client-item-drag";
 	import { bindSpellCell, swapSpellCells } from "./client-spell-bar-state";
-	import type { ClientSpellBarState } from "./client-spell-bar-state";
-	import {
-		CLIENT_PANEL_SHORTCUT_ACTIONS,
-		type ClientInputConfiguration,
-		type InputDigitIndex,
-	} from "../lib/input/input-contract";
+	import { CLIENT_PANEL_SHORTCUT_ACTIONS } from "../lib/input/input-contract";
 
 	import ClientSpellBar from "./ClientSpellBar.svelte";
 	import ClientCombatBar from "./ClientCombatBar.svelte";
-	import type { ClientViewportTargetPicker } from "./client-pointer-selection-controller";
-	import type {
-		ClientItemInteractions,
-		ItemInteractionState,
-	} from "./client-item-interactions";
-	import {
-		selectedPlayerTarget,
-		type ClientSelectedEntity,
-	} from "./client-selected-entity";
+	import type { ItemInteractionState } from "./client-item-interactions";
+	import { selectedPlayerTarget } from "./client-selected-entity";
 	import { useAppInputPolicy } from "../lib/input/app-input-policy-context";
 
 	import { useClientInput } from "./client-input-context";
@@ -83,16 +40,6 @@
 	import Minimap from "../app/Minimap.svelte";
 	import ClientMinimapEnvironment from "./ClientMinimapEnvironment.svelte";
 	import type {
-		ClientClockFormat,
-		ClientEnvironmentOverrides,
-	} from "./client-environment-settings";
-	import type {
-		ClientEnvironmentReadout,
-		ClientWeatherPreset,
-	} from "./client-environment";
-	import type { FrameRates } from "../app/frame-rate-sampler";
-	import type {
-		MinimapFrame,
 		MinimapState,
 		MinimapGeometry,
 		MinimapFooterExtent,
@@ -100,42 +47,29 @@
 	import ClientVitalWarningOverlay from "./ClientVitalWarningOverlay.svelte";
 	import ClientCharacterHud from "./ClientCharacterHud.svelte";
 	import ClientCharacterSheetPanel from "./ClientCharacterSheetPanel.svelte";
-	import type { ClientCharacterSheetState } from "./client-character-sheet-state";
 	import ClientStatusTray from "./ClientStatusTray.svelte";
 	import ClientEnchantmentsPanel from "./ClientEnchantmentsPanel.svelte";
 	import { presentEnchantmentTray } from "./client-enchantments-view";
 	import ClientJumpPowerBar from "./ClientJumpPowerBar.svelte";
 	import ClientRuntimeConsole from "./ClientRuntimeConsole.svelte";
 	import ClientChat from "./ClientChat.svelte";
-	import type { ClientChatComposer } from "./client-chat-composer.svelte";
-	import type { ChatComposeResolution } from "./client-chat-compose";
-	import type { ClientChatLine } from "./client-chat-policy";
 	import ClientActionBars from "./ClientActionBars.svelte";
 	import { provideClientHudGeometry } from "./client-hud-geometry-context";
-	import type { ClientActionBar } from "./client-action-bar-state";
-	import type { ClientFriendsState } from "./client-friends-state";
 	import ClientSocialPanel from "./ClientSocialPanel.svelte";
-	import type { ClientPartyState } from "./client-party-state";
 	import ClientNearbyPanel from "./ClientNearbyPanel.svelte";
-	import type { ClientNearby } from "./client-nearby";
-	import type { ClientSpellServices } from "./client-spells";
 	import ClientInventoryPanel from "./ClientInventoryPanel.svelte";
 	import {
 		isSplittableInventoryItem,
 		type InventorySplitStart,
 	} from "./client-inventory-split";
-	import type { ClientInventoryState } from "./client-inventory-state";
 	import ClientDebugPanel from "./ClientDebugPanel.svelte";
 	import ClientLogopolisWindow from "./ClientLogopolisWindow.svelte";
 	import ClientLocksWindow from "./ClientLocksWindow.svelte";
-	import type { ClientLocksState } from "./client-locks-state";
 	import ClientHudWindow from "./ClientHudWindow.svelte";
 	import ClientWorldPanel from "./ClientWorldPanel.svelte";
-	import type { WorldMapSource } from "../lib/game/world-map/types";
 	import ClientFpsCounter from "./ClientFpsCounter.svelte";
 	import ClientHudIcon from "./ClientHudIcon.svelte";
 	import ClientHudPanel from "./ClientHudPanel.svelte";
-	import type { ClientSelectedEntityDisplay } from "./client-selected-entity-tracking";
 	import ClientSelectedEntityHud from "./ClientSelectedEntityHud.svelte";
 	import ClientShortcutDock, {
 		createClientShortcuts,
@@ -144,543 +78,58 @@
 	} from "./ClientShortcutDock.svelte";
 	import ClientToastOverlay from "./ClientToastOverlay.svelte";
 	import ClientCombatTargetIndicator from "./ClientCombatTargetIndicator.svelte";
-	import type { ClientCombatTargetFrame } from "./client-target-indicator";
 	import ClientTargetIndicator from "./ClientTargetIndicator.svelte";
-	import type { ClientTargetIndicatorFrame } from "./client-target-indicator";
-	import type { ClientInspectionState } from "./client-inspection";
-	import type {
-		RecallDestination,
-		ClientAttackProfile,
-		ClientMapPosition,
-		ClientCombatMode,
-		ClientCombatStatus,
-		ClientAppearanceOption,
-		ClientAppearanceOptions,
-		ClientVital,
-	} from "./client-host-contract";
-	import type {
-		ClientCharacterSettings,
-		ClientAudioSettings,
-		ClientGraphicsSettings,
-		ClientUiSettings,
-	} from "./client-settings-contract";
 	import ClientSettingsPanel, {
 		type SettingsTab,
 	} from "./ClientSettingsPanel.svelte";
-	import type { TextureFilteringCapabilities } from "../lib/game/renderer/texture-filtering-policy";
-	import type { ClientToast } from "./client-toast-center";
 	import { CLIENT_NEARBY_TUNING, CLIENT_TUNING } from "./client-tuning";
 	import {
 		anchorClientHudPlacement,
 		createClientHudLayout,
 		resolveClientMinimapPlacement,
 		type ClientHudLayout,
-		type ClientHudPlacement,
 		type ClientHudViewport,
 	} from "./client-hud-layout";
-	import type { ClientChatChannelFilters } from "./client-settings-contract";
-	import type { ClientChatFilterTag } from "./client-chat-policy";
-	import type { ClientGameplayPresentationDiagnostics } from "./client-gameplay-presentation";
-	import type { ClientObjectPreviewService } from "./client-object-preview-service";
-	import type { ClientViewportCameraController } from "./client-viewport-pointer-gesture";
-
-	import {
-		ClientViewportMouseController,
-		type ClientMouseMovementInput,
-	} from "./client-viewport-mouse-controller";
+	import { ClientViewportMouseController } from "./client-viewport-mouse-controller";
+	import type {
+		ClientGameplayCharacterSurface,
+		ClientGameplayCombatMagicSurface,
+		ClientGameplayInventorySurface,
+		ClientGameplaySettingsSurface,
+		ClientGameplayShellSurface,
+		ClientGameplaySocialSurface,
+		ClientGameplayWorldSurface,
+	} from "./client-gameplay-surfaces";
 
 	import ClientSystemMenu from "./ClientSystemMenu.svelte";
 
 	interface Props {
-		/** Cold access to the mode-owned capture lifecycle. */
-		readonly readPerformanceSession: () => PerformanceSession | null;
-		/** Startup platform used by input reset policy and key labels. */
-		readonly platform: InputPlatform;
-		/** Local chat admission preferences, independent of server character options. */
-		readonly chatSuppression: ClientChatSuppressionSettings;
-		/** Local persisted policy for key automation and chooser presentation. */
-		readonly lockInteractions: ClientLockInteractionSettings;
-		/** Persist local lock policy through the settings owner. */
-		readonly onLockInteractionsChange: (
-			settings: ClientLockInteractionSettings,
-		) => void;
-		readonly onChatSuppressionChange: (
-			settings: ClientChatSuppressionSettings,
-		) => void;
-		/** Current character Gameplay controls, independent of local preference storage. */
-		readonly gameplayPreferences: ClientGameplayPreferences | null;
-		readonly gameplayEnabled: boolean;
-		readonly onGameplayOptionChange: (
-			option: ClientGameplayOption,
-			enabled: boolean,
-		) => Promise<void>;
-		/** Authority-admitted application session actions, independent of panel selection. */
-		readonly canReturnToMenu: boolean;
-		/** Full disconnect has independent admission during world entry and portals. */
-		readonly canDisconnect: boolean;
-		/** Graceful character logout returns to the roster. */
-		readonly onReturnToMainMenu: () => void;
-		/** Full server-session retirement. */
-		readonly onDisconnect: () => void;
-		/** Set the current local destination without submitting chat. */
-		readonly onSetWaypoint: (target: MapWaypointTarget) => void;
-		/** Session-lifetime party presentation owner. */
-		readonly party: ClientPartyState | null;
-		/** Session-owned cold visibility fact; vitals remain imperative. */
-		readonly partyHudPresent: boolean;
-		readonly readPartyHudDisplay: () => PartyHudDisplay | null;
-		readonly onPartyHudDemand: (enabled: boolean) => void;
-		readonly friends: ClientFriendsState | null;
-		readonly contracts: ClientContractsState | null;
-		readonly squelch: ClientSquelchState | null;
-		readonly allegiance: ClientAllegianceState | null;
-		/** User-scoped fixed HUD geometry, independent of open-panel state. */
-		readonly hudLayout: ClientHudLayout;
-		readonly onHudPlacementChange: (
-			surface: keyof ClientHudLayout,
-			placement: ClientHudPlacement,
-		) => void;
-		readonly onHudReset: (layout: ClientHudLayout) => void;
-		readonly spellBarShape: "single" | "double";
-		readonly onSpellBarShapeChange: (shape: "single" | "double") => void;
-		readonly minimapViewDiameters: MinimapState["viewDiameters"];
-		readonly onMinimapViewDiametersChange: (
-			value: MinimapState["viewDiameters"],
-		) => void;
-		/** User-wide channel visibility and its settings edit operation. */
-		readonly chatChannelFilters: ClientChatChannelFilters;
-		readonly onChatChannelFiltersChange: (
-			value: ClientChatChannelFilters,
-		) => void;
-		readonly chatFilters: readonly ClientChatFilterTag[];
-		/** User-wide chat timestamp visibility and its settings edit operation. */
-		readonly chatTimestamps: boolean;
-		readonly onChatTimestampsChange: (value: boolean) => void;
-		readonly onChatFiltersChange: (
-			value: readonly ClientChatFilterTag[],
-		) => void;
-		/** User-scoped divider height inside creature inspections. */
-		readonly inspectionPreviewHeight: number;
-		/** User-scoped audio mix and mute preferences. */
-		readonly audio: ClientAudioSettings;
-		readonly onAudioChange: (audio: ClientAudioSettings) => void;
-		/** User graphics snapshot and focused edit operation. */
-		readonly graphics: ClientGraphicsSettings;
-		/** Shared selection owner and settings commit used by both appearance surfaces. */
-		readonly theme: UiThemeSettings;
-		readonly ui: ClientUiSettings;
-		/** Cold environment controls; the readout pulls exclusively from the server source. */
-		readonly clockFormat: ClientClockFormat;
-		readonly environmentOverrides: ClientEnvironmentOverrides;
-		readonly weatherPresets: readonly ClientWeatherPreset[];
-		readonly environmentIssue: string | null;
-		readonly readServerEnvironment: () => ClientEnvironmentReadout | null;
-		readonly onClockFormatChange: (format: ClientClockFormat) => void;
-		readonly onEnvironmentOverridesChange: (
-			overrides: ClientEnvironmentOverrides,
-		) => void;
-		readonly input: ClientInputConfiguration;
-		readonly textureFilteringCapabilities: TextureFilteringCapabilities | null;
-		readonly onGraphicsChange: (graphics: ClientGraphicsSettings) => void;
-		readonly nameplates: ClientNameplateSettings;
-		readonly onNameplatesChange: (nameplates: ClientNameplateSettings) => void;
-		readonly onUiChange: (ui: ClientUiSettings) => void;
-		/** App-owned semantic mouse movement dispatch. */
-		readonly mouseMovement: ClientMouseMovementInput;
-		readonly onInputChange: (input: ClientInputConfiguration) => void;
-		readonly onInspectionPreviewHeightChange: (height: number) => void;
-		/** App-owned layout mode also gates gameplay shortcuts. */
-		readonly hudMode: "runtime" | "layout";
-		/** Reveal conditional HUD previews without editing chrome. */
-		readonly uiShowcase?: boolean;
-		readonly onHudModeChange: (mode: "runtime" | "layout") => void;
-		/** Session-local bindings shared with game dispatch. */
-		readonly spellBar: ClientSpellBarState;
-		readonly onSpellBarChange: (value: ClientSpellBarState) => void;
-		/** Commit a complete tab swap and publish its app-owned confirmation. */
-		readonly onSwapSpellTabs: (
-			source: InputDigitIndex,
-			target: InputDigitIndex,
-		) => void;
-		/** App-owned casting availability, independent of membership. */
-		readonly spellBarEnabled: boolean;
-		readonly onSelectSpellTab: (tab: InputDigitIndex) => void;
-		readonly onActivateSpellCell: (slot: number) => void;
-		readonly onActivateCasterSpell: () => void;
-		/** Null while no authoritative character profile is ready. */
-		readonly actionBars: readonly ClientActionBar[] | null;
-		readonly onActionBarsChange: (bars: readonly ClientActionBar[]) => void;
-		/** Server-confirmed stance for the dock, independent of open panels. */
-		readonly combatMode: ClientCombatMode;
-		readonly combatStatus: ClientCombatStatus;
-		readonly combatControls: ClientCharacterSettings["combatControls"];
-		/** Accepted setting interactions used to replay combat-HUD feedback. */
-		readonly combatProfileSelectionRevision: number;
-		readonly onCombatProfileSelect: (profile: ClientAttackProfile) => void;
-		/** Cancel attack intent without changing stance or selection. */
-		readonly onStopCombat: () => void;
-		/** Shared normal casting action used by the spell browser. */
-		readonly onCastSpell: (spellId: number) => void;
-		/** Gameplay lifecycle admits stance commands. */
-		readonly combatEnabled: boolean;
-		/** Lifecycle and reveal admission, independent of modal ownership. */
-		readonly emotesEnabled: boolean;
-		/** Same stance action used by the keyboard binding. */
-		readonly onToggleCombat: () => void;
-		/** Resolve world inventory destinations without changing selection. */
-		onPickInventoryTarget: ClientViewportTargetPicker;
-		/** Ordinary inventory refusal feedback. */
-		onInventoryNotice: (message: string) => void;
-		/** Session eligibility; target identity remains selection-owned. */
-		readonly readCanSetCorpsePermission: () => boolean;
-		/** Captured name and requested grant/revoke operation, with no optimistic status. */
-		readonly onCorpsePermission: (playerName: string, granted: boolean) => void;
-		/** Surface social dispatch failures even when the Social panel is closed. */
-		readonly onSocialNotice: (message: string) => void;
-		/** Shell-owned confirmation after the minimap clipboard write succeeds. */
-		readonly onCoordinatesCopied: () => void;
-		readonly cameraController: ClientViewportCameraController | null;
-		readonly debugEnabled: boolean;
-		readonly readMinimapFrame: () => MinimapFrame;
-		/** Session-owned catalog; closed windows do not stop detection. */
-		readonly nearby: ClientNearby | null;
-		/** Shared admission for explicit entity references from chat and the nearby catalog. */
-		readonly onSelectKnownEntity: (guid: number) => boolean;
-		/** Current item reference admission for the retained inspection window. */
-		readonly inspectionItemSelection: ClientInspectionItemSelection | null;
-		/** Clear session-owned navigation intent without changing selection. */
-		readonly onClearWaypoint: () => void;
-		/** Static host capability, owned by the mounted transport lifetime. */
-		readonly worldMapSource: WorldMapSource | null;
-		/** Cold identity for character-scoped map search selection. */
-		readonly characterGuid: number | null;
-		readonly housing: HousingSnapshot;
-		readonly housingManagement: ClientHousingManagementState | null;
-		readonly onRefreshHousing: () => Promise<void>;
-		readonly onSearchHousing: (houseType: number) => Promise<void>;
-		/** Shared core admission and app-owned request feedback. */
-		readonly canTeleportFromMap: boolean;
-		/** Core-filtered recall attempts, independent of privileged map teleport. */
-		readonly recallDestinations: readonly RecallDestination[];
-		/** Dispatch the selected standard recall through the app shell. */
-		readonly onRecall: (destination: RecallDestination) => Promise<void>;
-		readonly onTeleportToMapPosition: (
-			position: ClientMapPosition,
-		) => Promise<void>;
-		readonly readDiagnostics: () => ClientGameplayPresentationDiagnostics | null;
-		/** Client-owned selected facts with optional presentation details. */
-		readonly readSelectedEntity: () => ClientSelectedEntity | null;
-		readonly readFrameRates: () => FrameRates | null;
-		/** Lazily retained spell artwork, independent of floating-panel mounts. */
-		readonly spells: ClientSpellServices | null;
-		/** Session-owned character facts and quotes, independent of this panel mount. */
-		readonly characterSheet: ClientCharacterSheetState | null;
-		/** Mode-neutral stat artwork comes from the active static-content source. */
-		readonly statArtwork: StatArtworkServices;
-		/** World-resolved active effects with a browser-local countdown anchor. */
-		readonly enchantments:
-			import("./client-lifecycle-session").ClientTimedEnchantments | null;
-		/** Session-owned inventory state, independent of floating-panel mounts. */
-		readonly inventory: ClientInventoryState | null;
-		/** Direct authority for cross-panel item gestures. */
-		readonly itemSession: ItemDragSession | null;
-		/** Session-owned vendor draft and catalog presentation. */
-		readonly vendor: ClientVendorState | null;
-		/** Session-local crystal interaction; effective-home knowledge is separate. */
-		readonly houseCrystal: ClientHouseCrystalState | null;
-		/** Explicit local easter egg launch request. */
-		readonly logopolisLaunchRevision: number;
-		/** Character-owned salvage draft and local confirmation policy. */
-		readonly salvage: ClientSalvageState | null;
-		readonly locks: ClientLocksState | null;
-		/** Server-granted appearance editor; local drafts never enter world state. */
-		readonly barber: ClientBarberState | null;
-		/** Session-owned P2P gestures and confirmed offer presentation. */
-		readonly trade: ClientTradeState | null;
-		/** Presentation owner for confirmed external storage, independent of system-panel selection. */
-		readonly worldContainer: ClientWorldContainerPanelState | null;
-		/** Shared use/combining owner for all mounted entry points. */
-		readonly itemInteractions: ClientItemInteractions | null;
-		readonly onSelectContentsItem: (
-			guid: number,
-			mode: "toggle" | "select",
-		) => void;
-		readonly readSelectedEntityDisplay: () => ClientSelectedEntityDisplay;
-		/** Use the currently selected entity through the session-owned interaction controller. */
-		readonly onInteractEntity: () => void;
-		/** Latest captured examination request, independent of current selection. */
-		readonly inspection: ClientInspectionState;
-		readonly bookReader: ClientBookReaderState;
-		readonly onCloseBook: () => void;
-		readonly onRetryBook: () => void;
-		readonly objectPreviewService: ClientObjectPreviewService;
-		readonly onExamineEntity: () => void;
-		/** Inspect the explicit identity without changing gameplay selection. */
-		readonly onExamineItem: (guid: number) => void;
-		/** Open a local spell subject without submitting an appraisal. */
-		readonly onExamineSpell: (spellId: number) => void;
-		readonly onCloseInspection: () => void;
-		readonly readCombatTargetFrame: () => ClientCombatTargetFrame | null;
-		readonly spellCastTarget: number | null;
-		/** Pull transient target feedback independently of helper visibility. */
-		readonly readLockFeedbackFrames: () => readonly ClientLockFeedbackFrame[];
-		readonly hasActiveLockFeedback: () => boolean;
-		readonly lockFeedbackWakeRevision: number;
-		readonly readTargetIndicatorFrame: () => ClientTargetIndicatorFrame | null;
-		readonly selectedEntityGuid: number | null;
-		readonly hoveredEntityGuid: number | null;
-		/** Runtime-confirmed local player response override. */
-		readonly entityCollisionDisabled: boolean;
-		readonly onEntityCollisionDisabledChange: (disabled: boolean) => void;
-		/** Explicit local override of authored useability for diagnostic requests. */
-		readonly unrestrictedUse: boolean;
-		readonly onUnrestrictedUseChange: (enabled: boolean) => void;
-		readonly showRetailHiddenGeometry: boolean;
-		readonly onShowRetailHiddenGeometryChange: (visible: boolean) => void;
-		readonly playerName: string | null;
-		readonly worldName: string | null;
-		/** Current session account shown when hovering the server label. */
-		readonly accountName: string | null;
-		/** Imperative transport display reader, independent of world presentation. */
-		readonly readConnection: () => ClientConnectionObservation | null;
-		readonly vitals: readonly ClientVital[];
-		/** Lifecycle-owned permission to present critical-vital warnings. */
-		readonly vitalWarningsEnabled: boolean;
-		readonly appearanceOptions: ClientAppearanceOptions | null;
-		readonly onAppearanceOptionChange: (
-			option: ClientAppearanceOption,
-			enabled: boolean,
-		) => Promise<void>;
-		readonly jumpChargeActive: boolean;
-		readonly readJumpExtent: () => number;
-		/** Configured power controls displayed as keycaps below POWER. */
-		readonly jumpPowerKeys: readonly [string, string];
-		readonly toast: ClientToast | null;
-		readonly preciseJumpActive: boolean;
-		readonly onPreciseJumpAim: (clientX: number, clientY: number) => void;
-		readonly onPreciseJumpPowerAdjust: (steps: number) => void;
-		/** Set an absolute normalized power from the HUD bar. */
-		readonly onPreciseJumpPowerSet: (power: number) => void;
-		readonly onPreciseJumpActivate: () => void;
-		/** Accepted selection click, with activation requested only on the second click. */
-		readonly onViewportSelect: (
-			clientX: number,
-			clientY: number,
-			interact: boolean,
-		) => void;
-		readonly onViewportExamine: (clientX: number, clientY: number) => void;
-		readonly onViewportHover: (clientX: number, clientY: number) => void;
-		/** Clear world hover and invalidate in-flight acquisition on surface exit. */
-		readonly onViewportHoverClear: () => void;
-		readonly onMaintainEntitySelection: () => void;
-		/** Party roster acquisition requires known local entity facts. */
-		readonly onSelectPartyMember: (guid: number) => void;
-		readonly onSelectEntity: (guid: number | null) => void;
-		readonly chatMessages: readonly ClientChatLine[];
-		readonly chatComposer: ClientChatComposer;
-		/** App-session input recall entries, independent of received chat lines. */
-		readonly sentChatHistory: readonly string[];
-		readonly onSendChat: (
-			message: string,
-			resolution: ChatComposeResolution,
-		) => Promise<void>;
-		/** Report a chat submission failure through the retained chat history. */
-		readonly onSendChatError: (message: string) => void;
-		/** Chat interaction failures use the app-owned toast system. */
-		readonly onChatNotice: (message: string) => void;
-		/** Persistent world surface borrowed from the app shell. */
-		readonly canvasElement: HTMLCanvasElement;
-		/** Common DOM boundary containing both the canvas and HUD for drag/drop hit testing. */
-		readonly interactionRoot: HTMLElement;
+		readonly shell: ClientGameplayShellSurface;
+		readonly settings: ClientGameplaySettingsSurface;
+		readonly character: ClientGameplayCharacterSurface;
+		readonly inventory: ClientGameplayInventorySurface;
+		readonly combatMagic: ClientGameplayCombatMagicSurface;
+		readonly world: ClientGameplayWorldSurface;
+		readonly social: ClientGameplaySocialSurface;
 	}
 
 	let systemMenu: ClientSystemMenu | undefined;
 	let {
-		lockInteractions,
-		onLockInteractionsChange,
-		chatSuppression,
-		onChatSuppressionChange,
-		canReturnToMenu,
-		canDisconnect,
-		onReturnToMainMenu,
-		onDisconnect,
-		onSetWaypoint,
-		hudLayout,
-		party,
-		partyHudPresent,
-		readPartyHudDisplay,
-		onPartyHudDemand,
-		friends,
-		contracts,
-		squelch,
-		allegiance,
-		onHudPlacementChange,
-		onHudReset,
-		spellBarShape,
-		onSpellBarShapeChange,
-		minimapViewDiameters,
-		onMinimapViewDiametersChange,
-		chatChannelFilters,
-		onChatChannelFiltersChange,
-		chatFilters,
-		chatTimestamps,
-		onChatTimestampsChange,
-		onChatFiltersChange,
-		inspectionPreviewHeight,
-		onInspectionPreviewHeightChange,
-		audio,
-		onAudioChange,
-		graphics,
-		theme,
-		ui,
-		clockFormat,
-		environmentOverrides,
-		weatherPresets,
-		environmentIssue,
-		readServerEnvironment,
-		onClockFormatChange,
-		onEnvironmentOverridesChange,
-		input,
-		textureFilteringCapabilities,
-		onGraphicsChange,
-		nameplates,
-		onNameplatesChange,
-		onUiChange,
-		onInputChange,
-		mouseMovement,
-		hudMode,
-		uiShowcase = false,
-		onHudModeChange,
-		spellBar,
-		onSpellBarChange,
-		onSwapSpellTabs,
-		spellBarEnabled,
-		onSelectSpellTab,
-		onActivateSpellCell,
-		onActivateCasterSpell,
-		actionBars,
-		onActionBarsChange,
-		combatMode,
-		combatStatus,
-		combatControls,
-		combatProfileSelectionRevision,
-		onCombatProfileSelect,
-		onStopCombat,
-		onCastSpell,
-		combatEnabled,
-		emotesEnabled,
-		onToggleCombat,
-		cameraController,
-		debugEnabled,
-		readMinimapFrame,
-		nearby,
-		onSelectKnownEntity,
-		inspectionItemSelection,
-		onClearWaypoint,
-		worldMapSource,
-		characterGuid,
-		housing,
-		housingManagement,
-		onRefreshHousing,
-		onSearchHousing,
-		canTeleportFromMap,
-		recallDestinations,
-		onRecall,
-		onTeleportToMapPosition,
-		readPerformanceSession,
-		readDiagnostics,
-		readSelectedEntity,
-		readFrameRates,
-		readSelectedEntityDisplay,
-		spells,
-		characterSheet,
-		statArtwork,
-		enchantments,
+		shell,
+		settings,
+		character,
 		inventory,
-		itemSession,
-		worldContainer,
-		vendor,
-		houseCrystal,
-		logopolisLaunchRevision,
-		locks,
-		salvage,
-		barber,
-		trade,
-		itemInteractions,
-		onSelectContentsItem,
-		onPickInventoryTarget,
-		onInventoryNotice,
-		readCanSetCorpsePermission,
-		onCorpsePermission,
-		onSocialNotice,
-		onCoordinatesCopied,
-		onInteractEntity,
-		inspection,
-		bookReader,
-		onCloseBook,
-		onRetryBook,
-		objectPreviewService,
-		onExamineEntity,
-		onExamineItem,
-		onExamineSpell,
-		onCloseInspection,
-		readTargetIndicatorFrame,
-		readCombatTargetFrame,
-		spellCastTarget,
-		readLockFeedbackFrames,
-		hasActiveLockFeedback,
-		lockFeedbackWakeRevision,
-		selectedEntityGuid,
-		hoveredEntityGuid,
-		entityCollisionDisabled,
-		onEntityCollisionDisabledChange,
-		unrestrictedUse,
-		onUnrestrictedUseChange,
-		showRetailHiddenGeometry,
-		onShowRetailHiddenGeometryChange,
-		playerName,
-		worldName,
-		accountName,
-		vitals,
-		vitalWarningsEnabled,
-		readConnection,
-		gameplayPreferences,
-		gameplayEnabled,
-		onGameplayOptionChange,
-		appearanceOptions,
-		onAppearanceOptionChange,
-		jumpChargeActive,
-		readJumpExtent,
-		jumpPowerKeys,
-		toast,
-		preciseJumpActive,
-		onPreciseJumpAim,
-		onPreciseJumpPowerAdjust,
-		onPreciseJumpPowerSet,
-		onPreciseJumpActivate,
-		onViewportSelect,
-		onViewportExamine,
-		onViewportHover,
-		onViewportHoverClear,
-		onMaintainEntitySelection,
-		onSelectEntity,
-		onSelectPartyMember,
-		chatMessages,
-		chatComposer,
-		sentChatHistory,
-		onSendChat,
-		onSendChatError,
-		onChatNotice,
-		canvasElement,
-		interactionRoot,
-		platform,
+		combatMagic,
+		world,
+		social,
 	}: Props = $props();
 	provideClientHudGeometry();
 	const { viewport: inputGate, keyboard } = useAppInputPolicy();
 	const clientInput = useClientInput();
-	const displayPlatform = $derived(platform);
 	/** Preview visibility is independent of layout editing controls. */
-	const previewHud = $derived(hudMode === "layout" || uiShowcase);
+	const previewHud = $derived(
+		shell.hudMode === "layout" || (shell.uiShowcase ?? false),
+	);
 
 	/** The wheel owns a disposable physical-key lifetime while its activation key is held. */
 	let emoteWheel = $state<{ readonly release: () => void } | null>(null);
@@ -692,29 +141,37 @@
 	onDestroy(closeEmotes);
 	$effect(() => {
 		// Lifecycle/configuration edges retire the transient interaction; opening itself is untracked.
-		chatComposer.generation;
-		emotesEnabled;
-		hudMode;
+		social.chatComposer.generation;
+		social.emotesEnabled;
+		shell.hudMode;
 		untrack(() => {
 			closeEmotes();
 		});
 	});
 	function openEmotes(press: KeyboardEvent): void {
-		if (!emotesEnabled || hudMode !== "runtime" || chatComposer.emotes === null)
+		if (
+			!social.emotesEnabled ||
+			shell.hudMode !== "runtime" ||
+			social.chatComposer.emotes === null
+		)
 			return;
 		closeEmotes();
 		emoteWheel = { release: keyboard.bindKeyRelease(press, closeEmotes) };
 	}
 	function executeEmote(token: string): void {
-		void onSendChat(`*${token}*`, {
-			kind: "send",
-			label: "Emote · Local",
-			buttonLabel: "Emote",
-			buttonIcon: "speech",
-			request: { kind: "soul-emote", token },
-		}).catch((error) =>
-			onSendChatError(error instanceof Error ? error.message : String(error)),
-		);
+		void social
+			.onSendChat(`*${token}*`, {
+				kind: "send",
+				label: "Emote · Local",
+				buttonLabel: "Emote",
+				buttonIcon: "speech",
+				request: { kind: "soul-emote", token },
+			})
+			.catch((error) =>
+				social.onSendChatError(
+					error instanceof Error ? error.message : String(error),
+				),
+			);
 	}
 	/** Pointer surface changes are cold; world geometry still uses the existing hover picker. */
 	let combineSurface = $state<number | "world" | null>(null);
@@ -738,13 +195,13 @@
 	);
 	$effect(() => {
 		if (combining)
-			itemInteractions?.consider(
-				combineSurface === "world" ? hoveredEntityGuid : combineSurface,
+			inventory.itemInteractions?.consider(
+				combineSurface === "world" ? world.hoveredEntityGuid : combineSurface,
 			);
 	});
 
 	$effect(() => {
-		const owner = itemInteractions;
+		const owner = inventory.itemInteractions;
 		itemInteraction = owner?.snapshot() ?? { kind: "idle" };
 		return owner?.subscribe((state) => {
 			itemInteraction = state;
@@ -754,16 +211,20 @@
 	/** Opening snapshots are cold drafts, independent of subsequent entity updates. */
 	let loadoutCapture = $state<LoadoutDraft | null>(null);
 	function openLoadoutBuilder() {
-		if (itemSession === null || actionBars === null) return;
-		const capture = captureLoadout(itemSession.entities.read());
+		if (inventory.itemSession === null || inventory.actionBars === null) return;
+		const capture = captureLoadout(inventory.itemSession.entities.read());
 		if (capture.kind === "unavailable") {
-			onInventoryNotice(capture.reason);
+			inventory.onInventoryNotice(capture.reason);
 			return;
 		}
-		loadoutCapture = { ...capture, icon: chooseLoadoutIcon(actionBars) };
+		loadoutCapture = {
+			...capture,
+			icon: chooseLoadoutIcon(inventory.actionBars),
+		};
 	}
 	$effect(() => {
-		if (!combatEnabled || itemSession === null) loadoutCapture = null;
+		if (!combatMagic.combatEnabled || inventory.itemSession === null)
+			loadoutCapture = null;
 	});
 	let spellDrag: ClientSpellDrag | null = null;
 	onMount(() =>
@@ -771,28 +232,31 @@
 			() =>
 				spellDrag?.cancel() ||
 				itemDrag?.cancel() ||
-				itemInteractions?.cancel() ||
+				inventory.itemInteractions?.cancel() ||
 				false,
 		),
 	);
 	$effect(() => {
-		const root = interactionRoot;
+		const root = shell.interactionRoot;
 		const owner = new ClientSpellDrag(root, {
-			read: (cell) => spellBar.tabs[cell.tab][cell.slot],
+			read: (cell) => combatMagic.spellBar.tabs[cell.tab][cell.slot],
 			bind: (cell, spell) =>
-				onSpellBarChange(bindSpellCell(spellBar, cell, spell)),
-			transfer: (source, target) =>
-				onSpellBarChange(
-					target === null
-						? bindSpellCell(spellBar, source, null)
-						: swapSpellCells(spellBar, source, target),
+				combatMagic.onSpellBarChange(
+					bindSpellCell(combatMagic.spellBar, cell, spell),
 				),
-			swapTabs: onSwapSpellTabs,
+			transfer: (source, target) =>
+				combatMagic.onSpellBarChange(
+					target === null
+						? bindSpellCell(combatMagic.spellBar, source, null)
+						: swapSpellCells(combatMagic.spellBar, source, target),
+				),
+			swapTabs: combatMagic.onSwapSpellTabs,
 			begin: () => {
 				itemDrag?.cancel();
-				itemInteractions?.cancel();
+				inventory.itemInteractions?.cancel();
 			},
-			available: () => spellBarEnabled || hudMode === "layout",
+			available: () =>
+				combatMagic.spellBarEnabled || shell.hudMode === "layout",
 		});
 		spellDrag = owner;
 		return () => {
@@ -802,15 +266,15 @@
 	});
 	$effect(() => {
 		// Cold identity/visibility changes cancel before a hidden tab or retired source can commit.
-		spellBar;
-		spellBarEnabled;
-		hudMode;
-		spells;
+		combatMagic.spellBar;
+		combatMagic.spellBarEnabled;
+		shell.hudMode;
+		combatMagic.spells;
 		spellDrag?.cancel();
 	});
 	$effect(() => {
 		// Scale invalidates both pointer coordinate spaces; spell edits only retire spell gestures.
-		ui.uiScale;
+		settings.ui.uiScale;
 		itemDrag?.cancel();
 		spellDrag?.cancel();
 	});
@@ -828,7 +292,7 @@
 	/** Launcher attention samples current matches at the nearby panel's bounded display cadence. */
 	let nearbyAlertActive = $state(false);
 	$effect(() => {
-		const owner = nearby;
+		const owner = world.nearby;
 		const pull = () => {
 			nearbyAlertActive = owner !== null && owner.trackedGuids().size > 0;
 		};
@@ -839,9 +303,9 @@
 	});
 	const nearbyShortcut = $derived(
 		presentClientBinding(
-			input,
+			settings.input,
 			{ kind: "client", action: "toggleNearby" },
-			displayPlatform,
+			shell.platform,
 		),
 	);
 	let chatEditor = $state<ClientChat>();
@@ -850,16 +314,17 @@
 	let waypointReveal = $state.raw<ClientWaypointReveal | null>(null);
 	$effect(() => {
 		// A new character or map source starts a new presentation lifetime.
-		void characterGuid;
-		void worldMapSource;
+		void character.characterGuid;
+		void world.worldMapSource;
 		waypointReveal = null;
 	});
 	/** Explicit activations also promote an already visible World window. */
 	let waypointFocusRevision = $state(0);
 	/** Open, promote, and reveal through the existing single-panel presentation policy. */
 	export function revealWaypoint(target: MapWaypointTarget): void {
-		if (characterGuid === null || worldMapSource === null) return;
-		waypointReveal = { characterGuid, target };
+		if (character.characterGuid === null || world.worldMapSource === null)
+			return;
+		waypointReveal = { characterGuid: character.characterGuid, target };
 		waypointFocusRevision++;
 		activePanel = "world";
 	}
@@ -874,9 +339,13 @@
 	let consoleOpen = $state(false);
 	/** UI panel commands remain available while world controls are suspended. */
 	function handleSystemPanelKeydown(event: KeyboardEvent): boolean {
-		if (event.defaultPrevented || event.isComposing || hudMode !== "runtime")
+		if (
+			event.defaultPrevented ||
+			event.isComposing ||
+			shell.hudMode !== "runtime"
+		)
 			return false;
-		if (nearby !== null && clientInput.shortcut("toggleNearby", event)) {
+		if (world.nearby !== null && clientInput.shortcut("toggleNearby", event)) {
 			event.preventDefault();
 			if (!event.repeat) nearbyOpen = !nearbyOpen;
 			return true;
@@ -892,7 +361,7 @@
 	onMount(() =>
 		keyboard.bindShortcuts((event) => {
 			if (
-				hudMode === "runtime" &&
+				shell.hudMode === "runtime" &&
 				!event.isComposing &&
 				clientInput.shortcut("toggleConsole", event)
 			) {
@@ -901,7 +370,7 @@
 				return;
 			}
 			if (handleSystemPanelKeydown(event)) return;
-			if (event.key === "Escape" && hudMode === "runtime") {
+			if (event.key === "Escape" && shell.hudMode === "runtime") {
 				// The router has already offered Escape to editors and cancellation contexts.
 				systemMenu?.show();
 				event.preventDefault();
@@ -914,7 +383,7 @@
 		revision: number;
 	} | null>(null);
 	const enchantmentTray = $derived(
-		presentEnchantmentTray(enchantments?.resolved ?? null),
+		presentEnchantmentTray(character.enchantments?.resolved ?? null),
 	);
 	function openEnchantments(kind: "beneficial" | "harmful"): void {
 		enchantmentsOpen = true;
@@ -926,26 +395,31 @@
 	let settingsTab = $state<SettingsTab>("graphics");
 	/** One selected-HUD request retained only until the inventory panel accepts it. */
 	let requestedInventorySplit = $state<InventorySplitStart | null>(null);
-	$effect(() => onPartyHudDemand(partyHudPresent));
-	onDestroy(() => onPartyHudDemand(false));
+	$effect(() => social.onPartyHudDemand(social.partyHudPresent));
+	onDestroy(() => social.onPartyHudDemand(false));
 
 	let worldElement = $state<HTMLElement | null>(null);
 	let uiElement = $state<HTMLElement | null>(null);
 	$effect(() => {
-		if (worldElement === null || itemInteractions === null) return;
-		const cells = new ClientCombineCells(worldElement, itemInteractions);
+		if (worldElement === null || inventory.itemInteractions === null) return;
+		const cells = new ClientCombineCells(
+			worldElement,
+			inventory.itemInteractions,
+		);
 		return () => cells.destroy();
 	});
 	// Mount snapshot only; the scaled DOM observer owns subsequent viewport updates.
 	let viewport = $state<ClientHudViewport>(
-		untrack(() => logicalClientHudViewport(initialViewport, ui.uiScale)),
+		untrack(() =>
+			logicalClientHudViewport(initialViewport, settings.ui.uiScale),
+		),
 	);
 	// The launch capability is immutable; snapshotting it avoids resetting edited HUD layout.
-	const shortcuts = untrack(() => createClientShortcuts(debugEnabled));
+	const shortcuts = untrack(() => createClientShortcuts(shell.debugEnabled));
 	let resetActionBars = $state<(() => boolean) | null>(null);
 	function resetHudPlacements(): void {
 		if (resetActionBars === null || !resetActionBars()) return;
-		onHudReset(
+		settings.onHudReset(
 			createClientHudLayout(CLIENT_UI_DEFAULTS, viewport, shortcuts.length),
 		);
 	}
@@ -962,7 +436,7 @@
 	});
 	const resolvedMapPlacement = $derived(
 		resolveClientMinimapPlacement(
-			hudLayout.minimap,
+			settings.hudLayout.minimap,
 			minimapViewport,
 			CLIENT_UI_DEFAULTS.minimap.minSize,
 			minimapFooterExtent.width,
@@ -972,7 +446,7 @@
 		left: resolvedMapPlacement.left,
 		top: resolvedMapPlacement.top,
 		size: resolvedMapPlacement.width,
-		viewDiameters: minimapViewDiameters,
+		viewDiameters: settings.minimapViewDiameters,
 	});
 	let viewportMouse: ClientViewportMouseController | null = null;
 	let pointerX = 0;
@@ -984,69 +458,78 @@
 
 	/** App-owned target classification shared by selected-player shortcuts. */
 	function selectedPlayer() {
-		return selectedPlayerTarget(readSelectedEntity(), characterGuid);
+		return selectedPlayerTarget(
+			world.readSelectedEntity(),
+			character.characterGuid,
+		);
 	}
 	function inviteTarget(): number | null {
 		const target = selectedPlayer();
-		return target !== null && party?.canInvite(target.guid)
+		return target !== null && social.party?.canInvite(target.guid)
 			? target.guid
 			: null;
 	}
 	function swearTarget(): number | null {
 		const target = selectedPlayer();
-		return target !== null && allegiance?.canSwear(target.guid)
+		return target !== null && social.allegiance?.canSwear(target.guid)
 			? target.guid
 			: null;
 	}
 	function friendTarget() {
 		const target = selectedPlayer();
-		return target !== null && friends?.canAdd(target.guid, target.name)
+		return target !== null && social.friends?.canAdd(target.guid, target.name)
 			? target
 			: null;
 	}
 	function ignoreTarget() {
 		const target = selectedPlayer();
 		return target !== null &&
-			squelch?.canIgnoreAccount(target.guid, target.name)
+			social.squelch?.canIgnoreAccount(target.guid, target.name)
 			? target
 			: null;
 	}
 	function addSelectedFriend(): void {
 		const target = friendTarget();
 		if (target !== null)
-			void friends?.request({ kind: "add", name: target.name }, onSocialNotice);
+			void social.friends?.request(
+				{ kind: "add", name: target.name },
+				social.onSocialNotice,
+			);
 	}
 	function ignoreSelectedAccount(): void {
 		const target = ignoreTarget();
 		if (target !== null)
-			void squelch?.request(
+			void social.squelch?.request(
 				{ kind: "add", name: target.name, scope: "account" },
-				onSocialNotice,
+				social.onSocialNotice,
 			);
 	}
 	function canAutoMergeSelectedContainer(): boolean {
 		return (
-			selectedEntityGuid !== null &&
-			inventory?.canAutoMergeContainer(selectedEntityGuid) === true
+			world.selectedEntityGuid !== null &&
+			inventory.inventory?.canAutoMergeContainer(world.selectedEntityGuid) ===
+				true
 		);
 	}
 	function autoMergeSelectedContainer(): void {
-		if (selectedEntityGuid !== null)
-			inventory?.requestAutoMergeContainer(selectedEntityGuid);
+		if (world.selectedEntityGuid !== null)
+			inventory.inventory?.requestAutoMergeContainer(world.selectedEntityGuid);
 	}
 
 	function canSplitSelectedEntity(): boolean {
 		return (
-			selectedEntityGuid !== null &&
-			inventory !== null &&
-			isSplittableInventoryItem(inventory.readItem(selectedEntityGuid))
+			world.selectedEntityGuid !== null &&
+			inventory.inventory !== null &&
+			isSplittableInventoryItem(
+				inventory.inventory.readItem(world.selectedEntityGuid),
+			)
 		);
 	}
 
 	/** Shared entry for the selected-item menu and gameplay keyboard dispatch. */
 	export function splitSelectedEntity(source: HTMLElement): void {
-		if (!canSplitSelectedEntity() || selectedEntityGuid === null) return;
-		requestedInventorySplit = { item: selectedEntityGuid, source };
+		if (!canSplitSelectedEntity() || world.selectedEntityGuid === null) return;
+		requestedInventorySplit = { item: world.selectedEntityGuid, source };
 		activePanel = "inventory";
 	}
 
@@ -1055,28 +538,28 @@
 	});
 
 	// Isolate the cancellation dependency from unrelated input preference replacements.
-	const mouseMovementEnabled = $derived(input.mouseMovement);
+	const mouseMovementEnabled = $derived(settings.input.mouseMovement);
 	$effect(() => {
 		mouseMovementEnabled;
 		untrack(cancelMouseInput);
 	});
 
 	$effect(() => {
-		const precise = preciseJumpActive;
+		const precise = character.preciseJumpActive;
 		untrack(() => {
 			cancelMouseInput();
 			if (precise && inputGate.allowed && hasPointerPosition)
-				onPreciseJumpAim(pointerX, pointerY);
+				character.onPreciseJumpAim(pointerX, pointerY);
 		});
 	});
 
 	$effect(() => {
-		if (cameraController !== null) return;
+		if (world.cameraController !== null) return;
 		untrack(cancelMouseInput);
 	});
 
 	$effect(() => {
-		const canvas = canvasElement;
+		const canvas = shell.canvasElement;
 		canvas.addEventListener("pointerenter", handlePointerEnter);
 		canvas.addEventListener("pointerleave", handlePointerLeave);
 		canvas.addEventListener("pointermove", handlePointerMove);
@@ -1093,42 +576,42 @@
 		};
 	});
 	$effect(() => {
-		canvasElement.toggleAttribute(
+		shell.canvasElement.toggleAttribute(
 			"data-entity-hovered",
-			hoveredEntityGuid !== null,
+			world.hoveredEntityGuid !== null,
 		);
-		return () => canvasElement.removeAttribute("data-entity-hovered");
+		return () => shell.canvasElement.removeAttribute("data-entity-hovered");
 	});
 	$effect(() => {
 		if (combining) {
-			canvasElement.dataset.combining = combineEligibility;
-		} else delete canvasElement.dataset.combining;
+			shell.canvasElement.dataset.combining = combineEligibility;
+		} else delete shell.canvasElement.dataset.combining;
 		return () => {
-			delete canvasElement.dataset.combining;
+			delete shell.canvasElement.dataset.combining;
 		};
 	});
 
 	$effect(() => {
-		if (canvasElement === null) return;
+		if (shell.canvasElement === null) return;
 		const handle = window.setInterval(() => {
-			onMaintainEntitySelection();
+			world.onMaintainEntitySelection();
 			if (
 				!inputGate.allowed ||
 				!pointerInsideCanvas ||
 				!hasPointerPosition ||
 				viewportMouse?.active
 			) {
-				onViewportHoverClear();
+				world.onViewportHoverClear();
 				return;
 			}
-			onViewportHover(pointerX, pointerY);
+			world.onViewportHover(pointerX, pointerY);
 		}, CLIENT_TUNING.entitySelection.sampleIntervalMs);
 		return () => window.clearInterval(handle);
 	});
 
 	$effect(() => {
 		if (uiElement === null) return;
-		ui.uiScale;
+		settings.ui.uiScale;
 		const observer = new ResizeObserver(([entry]) => {
 			if (entry === undefined) return;
 			viewport = {
@@ -1144,7 +627,7 @@
 		const sizeChanged = next.size !== resolvedMapPlacement.width;
 		const preferredSize = sizeChanged
 			? next.size
-			: hudLayout.minimap.preferredWidth;
+			: settings.hudLayout.minimap.preferredWidth;
 		const minimapPlacement = anchorClientHudPlacement(
 			{ left: next.left, top: next.top, width: next.size, height: next.size },
 			minimapViewport,
@@ -1157,28 +640,29 @@
 		surface: Surface,
 		placement: ClientHudLayout[Surface],
 	): void {
-		onHudPlacementChange(surface, placement);
+		settings.onHudPlacementChange(surface, placement);
 	}
 
 	$effect(() => {
-		const canvas = canvasElement;
+		const canvas = shell.canvasElement;
 		if (canvas === null) return;
 		const owner = new ClientViewportMouseController({
 			canvas,
 			gate: inputGate,
-			input: () => input,
-			camera: () => cameraController,
-			precise: () => preciseJumpActive,
+			input: () => settings.input,
+			camera: () => world.cameraController,
+			precise: () => character.preciseJumpActive,
 			yawRadiansPerPixel: CLIENT_TUNING.camera.orbit.yawRadiansPerPixel,
-			movement: mouseMovement,
-			onSelect: onViewportSelect,
-			onExamine: onViewportExamine,
-			onJump: onPreciseJumpActivate,
+			movement: world.mouseMovement,
+			onSelect: world.onViewportSelect,
+			onExamine: world.onViewportExamine,
+			onJump: character.onPreciseJumpActivate,
 			onPosition: (x, y, aiming) => {
 				pointerX = x;
 				pointerY = y;
 				hasPointerPosition = true;
-				if (preciseJumpActive && aiming) onPreciseJumpAim(x, y);
+				if (character.preciseJumpActive && aiming)
+					character.onPreciseJumpAim(x, y);
 			},
 		});
 		viewportMouse = owner;
@@ -1193,7 +677,8 @@
 		pointerX = event.clientX;
 		pointerY = event.clientY;
 		hasPointerPosition = true;
-		if (preciseJumpActive) onPreciseJumpAim(event.clientX, event.clientY);
+		if (character.preciseJumpActive)
+			character.onPreciseJumpAim(event.clientX, event.clientY);
 	}
 
 	function handlePointerEnter(event: PointerEvent): void {
@@ -1205,7 +690,7 @@
 
 	function handlePointerLeave(): void {
 		pointerInsideCanvas = false;
-		onViewportHoverClear();
+		world.onViewportHoverClear();
 	}
 
 	/** Cancel pointer ownership on keyboard/editor handoff or settings replacement. */
@@ -1214,15 +699,15 @@
 	}
 
 	function handleWheel(event: WheelEvent): void {
-		if (!inputGate.allowed || cameraController === null) return;
+		if (!inputGate.allowed || world.cameraController === null) return;
 		event.preventDefault();
-		if (preciseJumpActive && event.shiftKey) {
-			onPreciseJumpPowerAdjust(
+		if (character.preciseJumpActive && event.shiftKey) {
+			character.onPreciseJumpPowerAdjust(
 				-Math.sign(event.deltaY === 0 ? event.deltaX : event.deltaY),
 			);
 			return;
 		}
-		cameraController.zoom(event.deltaY * 0.01);
+		world.cameraController.zoom(event.deltaY * 0.01);
 	}
 
 	/** Explorer-wide context-click policy for entity-bearing HUD cells and the viewport. */
@@ -1242,11 +727,11 @@
 		if (!Number.isSafeInteger(guid) || guid < 0)
 			throw new Error(`Invalid item cell GUID ${encodedGuid ?? "missing"}`);
 		event.preventDefault();
-		onExamineItem(guid);
+		world.onExamineItem(guid);
 	}
 	let logopolisVisible = $state(false);
 	$effect(() => {
-		if (logopolisLaunchRevision > 0) logopolisVisible = true;
+		if (shell.logopolisLaunchRevision > 0) logopolisVisible = true;
 	});
 </script>
 
@@ -1263,63 +748,72 @@
 			event.target instanceof Element &&
 			event.target.closest(".layout-handle")
 		)
-			itemInteractions?.cancel();
+			inventory.itemInteractions?.cancel();
 	}}
 	aria-label="Holtburger client world"
 >
-	{#if consoleOpen && hudMode === "runtime"}
+	{#if consoleOpen && shell.hudMode === "runtime"}
 		<ClientRuntimeConsole
 			onClose={() => (consoleOpen = false)}
 			onToggle={() => (consoleOpen = !consoleOpen)}
 		/>
 	{/if}
-	{#key characterGuid}
+	{#key character.characterGuid}
 		<ClientVitalWarningOverlay
-			{vitals}
-			enabled={vitalWarningsEnabled}
-			thresholds={ui.vitalWarningThresholds}
+			vitals={character.vitals}
+			enabled={character.vitalWarningsEnabled}
+			thresholds={settings.ui.vitalWarningThresholds}
 		/>
 	{/key}
 	<ClientCombatTargetIndicator
-		readFrame={readCombatTargetFrame}
-		active={combatStatus.desired !== null || spellCastTarget !== null}
+		readFrame={combatMagic.readCombatTargetFrame}
+		active={combatMagic.combatStatus.desired !== null ||
+			combatMagic.spellCastTarget !== null}
 	/>
 	<ClientLockFeedback
-		readFrames={readLockFeedbackFrames}
-		isActive={hasActiveLockFeedback}
-		wakeRevision={lockFeedbackWakeRevision}
+		readFrames={combatMagic.readLockFeedbackFrames}
+		isActive={combatMagic.hasActiveLockFeedback}
+		wakeRevision={combatMagic.lockFeedbackWakeRevision}
 	/>
 	<ClientTargetIndicator
-		readFrame={readTargetIndicatorFrame}
-		selectedGuid={selectedEntityGuid}
+		readFrame={world.readTargetIndicatorFrame}
+		selectedGuid={world.selectedEntityGuid}
 	/>
 	<div
 		class="gameplay-controls"
 		bind:this={uiElement}
-		use:applyUiScale={ui.uiScale}
+		use:applyUiScale={settings.ui.uiScale}
 	>
 		<ClientSystemMenu
 			bind:this={systemMenu}
-			canReturn={canReturnToMenu}
-			{canDisconnect}
-			{onReturnToMainMenu}
-			{onDisconnect}
+			canReturn={shell.canReturnToMenu}
+			canDisconnect={shell.canDisconnect}
+			onReturnToMainMenu={shell.onReturnToMainMenu}
+			onDisconnect={shell.onDisconnect}
 		/>
 		<button
 			type="button"
 			class="client-ui-lock ui-hud-button ui-icon-button"
-			aria-label={hudMode === "runtime" ? "Unlock UI layout" : "Lock UI layout"}
-			aria-pressed={hudMode === "layout"}
-			title={hudMode === "runtime" ? "Unlock UI layout" : "Lock UI layout"}
+			aria-label={shell.hudMode === "runtime"
+				? "Unlock UI layout"
+				: "Lock UI layout"}
+			aria-pressed={shell.hudMode === "layout"}
+			title={shell.hudMode === "runtime"
+				? "Unlock UI layout"
+				: "Lock UI layout"}
 			onclick={() =>
-				onHudModeChange(hudMode === "runtime" ? "layout" : "runtime")}
+				shell.onHudModeChange(
+					shell.hudMode === "runtime" ? "layout" : "runtime",
+				)}
 		>
-			<ClientHudIcon name={hudMode === "runtime" ? "locked" : "unlocked"} />
+			<ClientHudIcon
+				name={shell.hudMode === "runtime" ? "locked" : "unlocked"}
+			/>
 		</button>
 
 		<Minimap
-			readFrame={readMinimapFrame}
-			{onClearWaypoint}
+			readFrame={world.readMinimapFrame}
+			onClearWaypoint={world.onClearWaypoint}
 			viewState={minimap}
 			minSize={CLIENT_UI_DEFAULTS.minimap.minSize}
 			resizeBounds={{
@@ -1327,9 +821,9 @@
 				footerWidth: minimapFooterExtent.width,
 			}}
 			resizable={CLIENT_UI_DEFAULTS.minimap.resizable}
-			editable={hudMode === "layout"}
+			editable={shell.hudMode === "layout"}
 			onGeometryChange={updateMinimapGeometry}
-			onViewDiametersChange={onMinimapViewDiametersChange}
+			onViewDiametersChange={settings.onMinimapViewDiametersChange}
 			onFooterExtentChange={(extent) => {
 				if (
 					extent.width !== minimapFooterExtent.width ||
@@ -1337,8 +831,8 @@
 				)
 					minimapFooterExtent = extent;
 			}}
-			{onSelectEntity}
-			{onCoordinatesCopied}
+			onSelectEntity={world.onSelectEntity}
+			onCoordinatesCopied={world.onCoordinatesCopied}
 		>
 			{#snippet actions()}
 				<button
@@ -1348,42 +842,43 @@
 					aria-label="Nearby entities and alerts"
 					title={`Nearby entities and alerts (${nearbyShortcut.description})`}
 					aria-pressed={nearbyOpen}
-					disabled={nearby === null}
+					disabled={world.nearby === null}
 					onclick={() => (nearbyOpen = !nearbyOpen)}
 					><ClientHudIcon name="nearby" /></button
 				>
 			{/snippet}
 			{#snippet coordinateDetails()}<ClientMinimapEnvironment
-					readEnvironment={readServerEnvironment}
-					{clockFormat}
+					readEnvironment={settings.readServerEnvironment}
+					clockFormat={settings.clockFormat}
 				/>{/snippet}
 		</Minimap>
-		{#if actionBars !== null && inventory !== null && itemSession !== null && worldElement !== null && itemInteractions !== null}
-			{#key inventory}
+		{#if inventory.actionBars !== null && inventory.inventory !== null && inventory.itemSession !== null && worldElement !== null && inventory.itemInteractions !== null}
+			{#key inventory.inventory}
 				<ClientActionBars
-					{input}
-					{displayPlatform}
-					bars={actionBars}
-					onBarsChange={onActionBarsChange}
+					input={settings.input}
+					displayPlatform={shell.platform}
+					bars={inventory.actionBars}
+					onBarsChange={inventory.onActionBarsChange}
 					onResetOwner={(reset) => (resetActionBars = reset)}
-					session={itemSession}
-					{worldContainer}
-					{vendor}
-					{houseCrystal}
-					{salvage}
-					{trade}
+					session={inventory.itemSession}
+					worldContainer={inventory.worldContainer}
+					vendor={inventory.vendor}
+					houseCrystal={inventory.houseCrystal}
+					salvage={inventory.salvage}
+					trade={inventory.trade}
 					onDragOwner={(owner) => (itemDrag = owner)}
-					{onPickInventoryTarget}
-					{onInventoryNotice}
-					interactions={itemInteractions}
-					onSelectDragItem={(guid) => onSelectContentsItem(guid, "select")}
-					root={interactionRoot}
-					{inventory}
+					onPickInventoryTarget={inventory.onPickInventoryTarget}
+					onInventoryNotice={inventory.onInventoryNotice}
+					interactions={inventory.itemInteractions}
+					onSelectDragItem={(guid) =>
+						inventory.onSelectContentsItem(guid, "select")}
+					root={shell.interactionRoot}
+					inventory={inventory.inventory}
 					{viewport}
-					editable={hudMode === "layout"}
+					editable={shell.hudMode === "layout"}
 				/>
 				<ClientLoadoutBuilder
-					{inventory}
+					inventory={inventory.inventory}
 					capture={loadoutCapture}
 					owner={itemDrag}
 					{viewport}
@@ -1392,55 +887,55 @@
 			{/key}
 		{/if}
 
-		{#if actionBars !== null && spells !== null && (spellBarEnabled || (previewHud && combatMode !== "melee" && combatMode !== "missile"))}
+		{#if inventory.actionBars !== null && combatMagic.spells !== null && (combatMagic.spellBarEnabled || (previewHud && combatMagic.combatMode !== "melee" && combatMagic.combatMode !== "missile"))}
 			<ClientSpellBar
-				{input}
-				{displayPlatform}
-				{spells}
-				{inventory}
-				{itemInteractions}
-				configuration={spellBar}
-				enabled={spellBarEnabled}
-				placement={hudLayout.spellBar}
-				shape={spellBarShape}
-				editable={hudMode === "layout"}
+				input={settings.input}
+				displayPlatform={shell.platform}
+				spells={combatMagic.spells}
+				inventory={inventory.inventory}
+				itemInteractions={inventory.itemInteractions}
+				configuration={combatMagic.spellBar}
+				enabled={combatMagic.spellBarEnabled}
+				placement={settings.hudLayout.spellBar}
+				shape={settings.spellBarShape}
+				editable={shell.hudMode === "layout"}
 				{viewport}
 				onPlacementChange={(placement) =>
 					changeHudPlacement("spellBar", placement)}
-				onShapeChange={onSpellBarShapeChange}
-				onSelectTab={onSelectSpellTab}
-				onActivateCell={onActivateSpellCell}
-				onActivateCaster={onActivateCasterSpell}
-				{onExamineSpell}
+				onShapeChange={settings.onSpellBarShapeChange}
+				onSelectTab={combatMagic.onSelectSpellTab}
+				onActivateCell={combatMagic.onActivateSpellCell}
+				onActivateCaster={combatMagic.onActivateCasterSpell}
+				onExamineSpell={world.onExamineSpell}
 			/>
 		{/if}
-		{#if combatMode === "melee" || combatMode === "missile"}
+		{#if combatMagic.combatMode === "melee" || combatMagic.combatMode === "missile"}
 			<ClientCombatBar
-				{characterSheet}
-				showHelpLabels={ui.showHelpLabels}
-				{inventory}
-				{input}
-				{displayPlatform}
-				placement={hudLayout.combatBar}
-				editable={hudMode === "layout"}
+				characterSheet={character.characterSheet}
+				showHelpLabels={settings.ui.showHelpLabels}
+				inventory={inventory.inventory}
+				input={settings.input}
+				displayPlatform={shell.platform}
+				placement={settings.hudLayout.combatBar}
+				editable={shell.hudMode === "layout"}
 				{viewport}
-				status={combatStatus}
-				selectionRevision={combatProfileSelectionRevision}
-				profile={combatMode === "melee"
-					? { kind: "melee", ...combatControls.melee }
-					: { kind: "missile", ...combatControls.missile }}
-				enabled={combatEnabled && hudMode === "runtime"}
+				status={combatMagic.combatStatus}
+				selectionRevision={combatMagic.combatProfileSelectionRevision}
+				profile={combatMagic.combatMode === "melee"
+					? { kind: "melee", ...combatMagic.combatControls.melee }
+					: { kind: "missile", ...combatMagic.combatControls.missile }}
+				enabled={combatMagic.combatEnabled && shell.hudMode === "runtime"}
 				onPlacementChange={(placement) =>
 					changeHudPlacement("combatBar", placement)}
-				onProfileSelect={onCombatProfileSelect}
-				{onStopCombat}
+				onProfileSelect={combatMagic.onCombatProfileSelect}
+				onStopCombat={combatMagic.onStopCombat}
 			/>
 		{/if}
 
 		<ClientHudPanel
 			label="Character HUD"
-			placement={hudLayout.character}
-			editable={hudMode === "layout"}
+			placement={settings.hudLayout.character}
+			editable={shell.hudMode === "layout"}
 			minWidth={CLIENT_UI_DEFAULTS.character.minSize.width}
 			minHeight={CLIENT_UI_DEFAULTS.character.minSize.height}
 			contentHeight={characterContentHeight}
@@ -1452,21 +947,21 @@
 		>
 			<ClientCharacterHud
 				onContentHeightChange={(height) => (characterContentHeight = height)}
-				{playerName}
-				{worldName}
-				{accountName}
-				{vitals}
-				{readConnection}
-				{characterSheet}
+				playerName={character.playerName}
+				worldName={character.worldName}
+				accountName={character.accountName}
+				vitals={character.vitals}
+				readConnection={character.readConnection}
+				characterSheet={character.characterSheet}
 			/>
 		</ClientHudPanel>
-		{#if partyHudPresent || previewHud}
+		{#if social.partyHudPresent || previewHud}
 			<ClientPartyHud
-				{readPartyHudDisplay}
-				onSelectEntity={onSelectPartyMember}
-				preview={!partyHudPresent}
-				placement={hudLayout.partyHud}
-				editable={hudMode === "layout"}
+				readPartyHudDisplay={social.readPartyHudDisplay}
+				onSelectEntity={social.onSelectPartyMember}
+				preview={!social.partyHudPresent}
+				placement={settings.hudLayout.partyHud}
+				editable={shell.hudMode === "layout"}
 				resizable={CLIENT_UI_DEFAULTS.partyHud.resizable}
 				{viewport}
 				onPlacementChange={(placement) =>
@@ -1476,10 +971,10 @@
 
 		<ClientStatusTray
 			preview={previewHud}
-			placement={hudLayout.statusTray}
-			editable={hudMode === "layout"}
+			placement={settings.hudLayout.statusTray}
+			editable={shell.hudMode === "layout"}
 			{viewport}
-			{inventory}
+			inventory={inventory.inventory}
 			enchantments={enchantmentTray}
 			onOpenEnchantments={openEnchantments}
 			onOpenInventory={() => (activePanel = "inventory")}
@@ -1487,11 +982,11 @@
 				changeHudPlacement("statusTray", placement)}
 		/>
 
-		{#if jumpChargeActive || preciseJumpActive || previewHud}
+		{#if character.jumpChargeActive || character.preciseJumpActive || previewHud}
 			<ClientHudPanel
 				label="Jump power"
-				placement={hudLayout.jumpPower}
-				editable={hudMode === "layout"}
+				placement={settings.hudLayout.jumpPower}
+				editable={shell.hudMode === "layout"}
 				minWidth={CLIENT_UI_DEFAULTS.jumpPower.minSize.width}
 				minHeight={CLIENT_UI_DEFAULTS.jumpPower.minSize.height}
 				resizable={CLIENT_UI_DEFAULTS.jumpPower.resizable}
@@ -1501,22 +996,23 @@
 					changeHudPlacement("jumpPower", placement)}
 			>
 				<ClientJumpPowerBar
-					active={jumpChargeActive || preciseJumpActive}
+					active={character.jumpChargeActive || character.preciseJumpActive}
 					previewExtent={previewHud ? HUD_PREVIEW_JUMP_EXTENT : null}
-					precise={preciseJumpActive}
-					readExtent={readJumpExtent}
-					powerKeys={jumpPowerKeys}
-					powerControl={hudMode === "runtime" && preciseJumpActive
-						? { setPower: onPreciseJumpPowerSet }
+					precise={character.preciseJumpActive}
+					readExtent={character.readJumpExtent}
+					powerKeys={character.jumpPowerKeys}
+					powerControl={shell.hudMode === "runtime" &&
+					character.preciseJumpActive
+						? { setPower: character.onPreciseJumpPowerSet }
 						: null}
 				/>
 			</ClientHudPanel>
 		{/if}
-		{#if toast !== null || combining || previewHud}
+		{#if shell.toast !== null || combining || previewHud}
 			<ClientHudPanel
 				label="Notifications"
-				placement={hudLayout.toast}
-				editable={hudMode === "layout"}
+				placement={settings.hudLayout.toast}
+				editable={shell.hudMode === "layout"}
 				minWidth={CLIENT_UI_DEFAULTS.toast.minSize.width}
 				minHeight={CLIENT_UI_DEFAULTS.toast.minSize.height}
 				resizable={CLIENT_UI_DEFAULTS.toast.resizable}
@@ -1526,7 +1022,7 @@
 					changeHudPlacement("toast", placement)}
 			>
 				<ClientToastOverlay
-					{toast}
+					toast={shell.toast}
 					persistentMessage={itemInteraction.kind === "acquiring"
 						? {
 								kind: "status",
@@ -1540,8 +1036,8 @@
 		{/if}
 		<ClientHudPanel
 			label="Chat"
-			placement={hudLayout.chat}
-			editable={hudMode === "layout"}
+			placement={settings.hudLayout.chat}
+			editable={shell.hudMode === "layout"}
 			minWidth={CLIENT_UI_DEFAULTS.chat.minSize.width}
 			minHeight={CLIENT_UI_DEFAULTS.chat.minSize.height}
 			resizable={CLIENT_UI_DEFAULTS.chat.resizable}
@@ -1549,32 +1045,32 @@
 			{viewport}
 			onPlacementChange={(placement) => changeHudPlacement("chat", placement)}
 		>
-			{#key chatComposer.generation}
+			{#key social.chatComposer.generation}
 				<ClientChat
 					bind:this={chatEditor}
-					composer={chatComposer}
-					{onSetWaypoint}
-					messages={chatMessages}
-					{clockFormat}
-					sentHistory={sentChatHistory}
-					onSend={onSendChat}
-					onSendError={onSendChatError}
-					onSelectEntity={onSelectKnownEntity}
-					onNotice={onChatNotice}
-					channelFilters={chatChannelFilters}
-					onChannelFiltersChange={onChatChannelFiltersChange}
-					enabledTags={chatFilters}
-					showTimestamps={chatTimestamps}
-					onShowTimestampsChange={onChatTimestampsChange}
-					onEnabledTagsChange={onChatFiltersChange}
+					composer={social.chatComposer}
+					onSetWaypoint={world.onSetWaypoint}
+					messages={social.chatMessages}
+					clockFormat={settings.clockFormat}
+					sentHistory={social.sentChatHistory}
+					onSend={social.onSendChat}
+					onSendError={social.onSendChatError}
+					onSelectEntity={world.onSelectKnownEntity}
+					onNotice={social.onChatNotice}
+					channelFilters={settings.chatChannelFilters}
+					onChannelFiltersChange={settings.onChatChannelFiltersChange}
+					enabledTags={settings.chatFilters}
+					showTimestamps={settings.chatTimestamps}
+					onShowTimestampsChange={settings.onChatTimestampsChange}
+					onEnabledTagsChange={settings.onChatFiltersChange}
 				/>
 			{/key}
 		</ClientHudPanel>
-		{#if ui.showFps}
+		{#if settings.ui.showFps}
 			<ClientHudPanel
 				label="Frame rate"
-				placement={hudLayout.frameRate}
-				editable={hudMode === "layout"}
+				placement={settings.hudLayout.frameRate}
+				editable={shell.hudMode === "layout"}
 				minWidth={CLIENT_UI_DEFAULTS.frameRate.minSize.width}
 				minHeight={CLIENT_UI_DEFAULTS.frameRate.minSize.height}
 				resizable={CLIENT_UI_DEFAULTS.frameRate.resizable}
@@ -1583,14 +1079,14 @@
 				onPlacementChange={(placement) =>
 					changeHudPlacement("frameRate", placement)}
 			>
-				<ClientFpsCounter {readFrameRates} />
+				<ClientFpsCounter readFrameRates={shell.readFrameRates} />
 			</ClientHudPanel>
 		{/if}
-		{#if selectedEntityGuid !== null || previewHud}
+		{#if world.selectedEntityGuid !== null || previewHud}
 			<ClientHudPanel
 				label="Selected entity"
-				placement={hudLayout.selectedEntity}
-				editable={hudMode === "layout"}
+				placement={settings.hudLayout.selectedEntity}
+				editable={shell.hudMode === "layout"}
 				minWidth={CLIENT_UI_DEFAULTS.selectedEntity.minSize.width}
 				minHeight={CLIENT_UI_DEFAULTS.selectedEntity.minSize.height}
 				resizable={CLIENT_UI_DEFAULTS.selectedEntity.resizable}
@@ -1603,26 +1099,27 @@
 					tell={{
 						available: () =>
 							chatEditor !== undefined &&
-							chatComposer.selection.kind === "target",
+							social.chatComposer.selection.kind === "target",
 						activate: () => {
 							void chatEditor?.tellSelected();
 						},
 					}}
-					{input}
-					{displayPlatform}
-					selectedGuid={selectedEntityGuid}
+					input={settings.input}
+					displayPlatform={shell.platform}
+					selectedGuid={world.selectedEntityGuid}
 					readCanCorpsePermission={() =>
-						readCanSetCorpsePermission() && selectedPlayer() !== null}
+						social.readCanSetCorpsePermission() && selectedPlayer() !== null}
 					onCorpsePermission={(granted) => {
 						const target = selectedPlayer();
-						if (target !== null && readCanSetCorpsePermission())
-							onCorpsePermission(target.name, granted);
+						if (target !== null && social.readCanSetCorpsePermission())
+							social.onCorpsePermission(target.name, granted);
 					}}
 					readCanSalvage={() =>
-						selectedEntityGuid !== null &&
-						salvage?.canQueue(selectedEntityGuid) === true}
+						world.selectedEntityGuid !== null &&
+						inventory.salvage?.canQueue(world.selectedEntityGuid) === true}
 					onSalvage={() => {
-						if (selectedEntityGuid !== null) salvage?.add(selectedEntityGuid);
+						if (world.selectedEntityGuid !== null)
+							inventory.salvage?.add(world.selectedEntityGuid);
 					}}
 					readCanSplit={canSplitSelectedEntity}
 					readCanAutoMerge={canAutoMergeSelectedContainer}
@@ -1635,24 +1132,25 @@
 					onSwear={() => {
 						const guid = swearTarget();
 						if (guid !== null)
-							void allegiance?.request({ kind: "swear", guid });
+							void social.allegiance?.request({ kind: "swear", guid });
 					}}
 					readCanInvite={() => inviteTarget() !== null}
 					onInvite={() => {
 						const target = inviteTarget();
-						if (target !== null) party?.request({ kind: "invite", target });
+						if (target !== null)
+							social.party?.request({ kind: "invite", target });
 					}}
 					readSelectedDisplay={() => {
-						const display = readSelectedEntityDisplay();
+						const display = world.readSelectedEntityDisplay();
 						return itemInteraction.kind === "acquiring" &&
-							selectedEntityGuid !== null
+							world.selectedEntityGuid !== null
 							? { ...display, canInteract: true, interactionLabel: "Interact" }
 							: display;
 					}}
-					onInteract={onInteractEntity}
-					onExamine={onExamineEntity}
-					examinePending={inspection.kind === "pending" &&
-						inspection.guid === selectedEntityGuid}
+					onInteract={world.onInteractEntity}
+					onExamine={world.onExamineEntity}
+					examinePending={world.inspection.kind === "pending" &&
+						world.inspection.guid === world.selectedEntityGuid}
 					onSplit={splitSelectedEntity}
 				/>
 			</ClientHudPanel>
@@ -1665,9 +1163,9 @@
 				activation: (event) => {
 					if (
 						event.repeat ||
-						!emotesEnabled ||
-						hudMode !== "runtime" ||
-						chatComposer.emotes === null ||
+						!social.emotesEnabled ||
+						shell.hudMode !== "runtime" ||
+						social.chatComposer.emotes === null ||
 						!clientInput.shortcut("openEmotes", event)
 					)
 						return false;
@@ -1677,10 +1175,10 @@
 				keydown: () => {},
 			}}
 		></div>
-		{#if emoteWheel !== null && chatComposer.emotes !== null}
+		{#if emoteWheel !== null && social.chatComposer.emotes !== null}
 			<ClientEmoteWheel
-				catalog={chatComposer.emotes}
-				recent={chatComposer.recentEmotes}
+				catalog={social.chatComposer.emotes}
+				recent={social.chatComposer.recentEmotes}
 				onClose={() => {
 					closeEmotes();
 				}}
@@ -1689,167 +1187,171 @@
 		{/if}
 
 		<ClientShortcutDock
-			session={itemSession}
-			{inventory}
-			placement={hudLayout.shortcuts}
-			editable={hudMode === "layout"}
+			session={inventory.itemSession}
+			inventory={inventory.inventory}
+			placement={settings.hudLayout.shortcuts}
+			editable={shell.hudMode === "layout"}
 			{viewport}
 			onPlacementChange={(placement) =>
 				changeHudPlacement("shortcuts", placement)}
-			{input}
-			{displayPlatform}
-			{combatMode}
-			{combatEnabled}
-			{onToggleCombat}
+			input={settings.input}
+			displayPlatform={shell.platform}
+			combatMode={combatMagic.combatMode}
+			combatEnabled={combatMagic.combatEnabled}
+			onToggleCombat={combatMagic.onToggleCombat}
 			{shortcuts}
 			{activePanel}
 			onToggle={toggleSystemPanel}
 		/>
-		{#if worldContainer !== null && itemInteractions !== null}
-			{#key worldContainer}
+		{#if inventory.worldContainer !== null && inventory.itemInteractions !== null}
+			{#key inventory.worldContainer}
 				<ClientWorldContainerWindow
-					model={worldContainer}
-					interactions={itemInteractions}
-					selectedGuid={selectedEntityGuid}
-					onSelectItem={(guid) => onSelectContentsItem(guid, "select")}
-					placement={hudLayout.worldContainer}
+					model={inventory.worldContainer}
+					interactions={inventory.itemInteractions}
+					selectedGuid={world.selectedEntityGuid}
+					onSelectItem={(guid) =>
+						inventory.onSelectContentsItem(guid, "select")}
+					placement={settings.hudLayout.worldContainer}
 					{viewport}
 					onPlacementChange={(placement) =>
 						changeHudPlacement("worldContainer", placement)}
 				/>
 			{/key}
 		{/if}
-		{#if locks !== null && inventory !== null}
-			{#key locks}
+		{#if inventory.locks !== null && inventory.inventory !== null}
+			{#key inventory.locks}
 				<ClientLocksWindow
-					model={locks}
-					{inventory}
-					placement={hudLayout.locks}
+					model={inventory.locks}
+					inventory={inventory.inventory}
+					placement={settings.hudLayout.locks}
 					{viewport}
 					onPlacementChange={(placement) =>
 						changeHudPlacement("locks", placement)}
-					{onExamineItem}
+					onExamineItem={world.onExamineItem}
 				/>
 			{/key}
 		{/if}
-		{#if salvage !== null && inventory !== null}
-			{#key salvage}
+		{#if inventory.salvage !== null && inventory.inventory !== null}
+			{#key inventory.salvage}
 				<ClientSalvageWindow
-					model={salvage}
-					{inventory}
-					placement={hudLayout.salvage}
+					model={inventory.salvage}
+					inventory={inventory.inventory}
+					placement={settings.hudLayout.salvage}
 					{viewport}
 					onPlacementChange={(placement) =>
 						changeHudPlacement("salvage", placement)}
-					selectedGuid={selectedEntityGuid}
-					onSelectItem={onSelectEntity}
-					{onExamineItem}
+					selectedGuid={world.selectedEntityGuid}
+					onSelectItem={world.onSelectEntity}
+					onExamineItem={world.onExamineItem}
 				/>
 			{/key}
 		{/if}
-		{#if barber !== null}
-			{#key barber}<ClientBarberWindow
-					model={barber}
-					placement={hudLayout.barber}
+		{#if inventory.barber !== null}
+			{#key inventory.barber}<ClientBarberWindow
+					model={inventory.barber}
+					placement={settings.hudLayout.barber}
 					{viewport}
 					onPlacementChange={(placement) =>
 						changeHudPlacement("barber", placement)}
 				/>{/key}
 		{/if}
-		{#if trade !== null}
-			{#key trade}
+		{#if inventory.trade !== null}
+			{#key inventory.trade}
 				<ClientTradeWindow
-					inputSettings={input}
-					{displayPlatform}
-					model={trade}
-					selectedGuid={selectedEntityGuid}
-					placement={hudLayout.trade}
+					inputSettings={settings.input}
+					displayPlatform={shell.platform}
+					model={inventory.trade}
+					selectedGuid={world.selectedEntityGuid}
+					placement={settings.hudLayout.trade}
 					{viewport}
 					onPlacementChange={(placement) =>
 						changeHudPlacement("trade", placement)}
-					onSelectItem={(guid) => onSelectContentsItem(guid, "select")}
-					{onExamineItem}
+					onSelectItem={(guid) =>
+						inventory.onSelectContentsItem(guid, "select")}
+					onExamineItem={world.onExamineItem}
 				/>
 			{/key}
 		{/if}
-		{#if vendor !== null}
-			{#key vendor}
+		{#if inventory.vendor !== null}
+			{#key inventory.vendor}
 				<ClientVendorWindow
-					inputSettings={input}
-					{displayPlatform}
-					model={vendor}
-					placement={hudLayout.vendor}
+					inputSettings={settings.input}
+					displayPlatform={shell.platform}
+					model={inventory.vendor}
+					placement={settings.hudLayout.vendor}
 					{viewport}
 					onPlacementChange={(placement) =>
 						changeHudPlacement("vendor", placement)}
-					{onExamineItem}
+					onExamineItem={world.onExamineItem}
 				/>
 			{/key}
 		{/if}
-		{#if houseCrystal !== null}
-			{#key houseCrystal}
+		{#if inventory.houseCrystal !== null}
+			{#key inventory.houseCrystal}
 				<ClientHouseCrystalWindow
-					model={houseCrystal}
-					placement={hudLayout.houseCrystal}
+					model={inventory.houseCrystal}
+					placement={settings.hudLayout.houseCrystal}
 					{viewport}
 					onPlacementChange={(placement) =>
 						changeHudPlacement("houseCrystal", placement)}
-					{onExamineItem}
+					onExamineItem={world.onExamineItem}
 				/>
 			{/key}
 		{/if}
-		{#if inspection.kind === "ready" || inspection.kind === "spell"}
-			{#key inspection.kind === "spell" ? `spell:${inspection.spellId}` : `object:${inspection.guid}`}
+		{#if world.inspection.kind === "ready" || world.inspection.kind === "spell"}
+			{#key world.inspection.kind === "spell" ? `spell:${world.inspection.spellId}` : `object:${world.inspection.guid}`}
 				<ClientInspectionWindow
-					{itemInteractions}
-					itemSelection={inspectionItemSelection}
-					selectedGuid={selectedEntityGuid}
-					{onSetWaypoint}
-					subject={inspection}
-					{objectPreviewService}
-					{spells}
-					icons={spells?.icons ?? inventory?.icons ?? null}
-					placement={hudLayout.inspection}
+					itemInteractions={inventory.itemInteractions}
+					itemSelection={world.inspectionItemSelection}
+					selectedGuid={world.selectedEntityGuid}
+					onSetWaypoint={world.onSetWaypoint}
+					subject={world.inspection}
+					objectPreviewService={world.objectPreviewService}
+					spells={combatMagic.spells}
+					icons={combatMagic.spells?.icons ??
+						inventory.inventory?.icons ??
+						null}
+					placement={settings.hudLayout.inspection}
 					{viewport}
-					previewHeight={inspectionPreviewHeight}
-					onClose={onCloseInspection}
+					previewHeight={settings.inspectionPreviewHeight}
+					onClose={world.onCloseInspection}
 					onPlacementChange={(placement) =>
 						changeHudPlacement("inspection", placement)}
-					onPreviewHeightChange={onInspectionPreviewHeightChange}
+					onPreviewHeightChange={settings.onInspectionPreviewHeightChange}
 				/>
 			{/key}
 		{/if}
 		<ClientLogopolisWindow
-			launchRevision={logopolisLaunchRevision}
+			launchRevision={shell.logopolisLaunchRevision}
 			visible={logopolisVisible}
-			placement={hudLayout.logopolis}
+			placement={settings.hudLayout.logopolis}
 			{viewport}
 			onClose={() => (logopolisVisible = false)}
 			onPlacementChange={(placement) =>
 				changeHudPlacement("logopolis", placement)}
 		/>
-		{#if bookReader.kind !== "idle"}
-			{#key bookReader.revision}
+		{#if world.bookReader.kind !== "idle"}
+			{#key world.bookReader.revision}
 				<ClientBookWindow
-					{onSetWaypoint}
-					reader={bookReader}
-					placement={hudLayout.book}
+					onSetWaypoint={world.onSetWaypoint}
+					reader={world.bookReader}
+					placement={settings.hudLayout.book}
 					{viewport}
-					onClose={onCloseBook}
-					onRetry={onRetryBook}
+					onClose={world.onCloseBook}
+					onRetry={world.onRetryBook}
 					onPlacementChange={(placement) =>
 						changeHudPlacement("book", placement)}
 				/>
 			{/key}
 		{/if}
 
-		{#if characterSheet !== null && inventory !== null}
-			{#key characterSheet}
+		{#if character.characterSheet !== null && inventory.inventory !== null}
+			{#key character.characterSheet}
 				<ClientHudWindow
 					icon="training"
 					title="Character"
 					visible={activePanel === "characterSheet"}
-					placement={hudLayout.characterSheet}
+					placement={settings.hudLayout.characterSheet}
 					minWidth={CLIENT_UI_DEFAULTS.characterSheet.minSize.width}
 					minHeight={CLIENT_UI_DEFAULTS.characterSheet.minSize.height}
 					{viewport}
@@ -1858,27 +1360,28 @@
 						changeHudPlacement("characterSheet", placement)}
 				>
 					<ClientCharacterSheetPanel
-						{statArtwork}
-						icons={inventory.icons}
-						owner={characterSheet}
+						statArtwork={character.statArtwork}
+						icons={inventory.inventory.icons}
+						owner={character.characterSheet}
 						visible={activePanel === "characterSheet"}
-						{spells}
-						{enchantments}
-						castEnabled={combatEnabled && combatMode === "magic"}
-						{onCastSpell}
+						spells={combatMagic.spells}
+						enchantments={character.enchantments}
+						castEnabled={combatMagic.combatEnabled &&
+							combatMagic.combatMode === "magic"}
+						onCastSpell={combatMagic.onCastSpell}
 					/>
 				</ClientHudWindow>
 			{/key}
 		{/if}
 
-		{#if worldMapSource !== null}
-			{#key worldMapSource}
+		{#if world.worldMapSource !== null}
+			{#key world.worldMapSource}
 				<ClientHudWindow
 					icon="world"
 					title="World"
 					focusRevision={waypointFocusRevision}
 					visible={activePanel === "world"}
-					placement={hudLayout.world}
+					placement={settings.hudLayout.world}
 					minWidth={CLIENT_UI_DEFAULTS.world.minSize.width}
 					minHeight={CLIENT_UI_DEFAULTS.world.minSize.height}
 					{viewport}
@@ -1888,32 +1391,32 @@
 				>
 					<ClientWorldPanel
 						{waypointReveal}
-						{contracts}
-						source={worldMapSource}
-						{characterGuid}
-						{housing}
-						{housingManagement}
-						{onRefreshHousing}
-						{onSearchHousing}
-						{canTeleportFromMap}
-						{onSetWaypoint}
-						{recallDestinations}
-						{onRecall}
-						{onTeleportToMapPosition}
+						contracts={social.contracts}
+						source={world.worldMapSource}
+						characterGuid={character.characterGuid}
+						housing={world.housing}
+						housingManagement={world.housingManagement}
+						onRefreshHousing={world.onRefreshHousing}
+						onSearchHousing={world.onSearchHousing}
+						canTeleportFromMap={world.canTeleportFromMap}
+						onSetWaypoint={world.onSetWaypoint}
+						recallDestinations={world.recallDestinations}
+						onRecall={world.onRecall}
+						onTeleportToMapPosition={world.onTeleportToMapPosition}
 						visible={activePanel === "world"}
-						readFrame={readMinimapFrame}
+						readFrame={world.readMinimapFrame}
 					/>
 				</ClientHudWindow>
 			{/key}
 		{/if}
 
-		{#if party !== null && friends !== null && squelch !== null && allegiance !== null}
-			{#key party}
+		{#if social.party !== null && social.friends !== null && social.squelch !== null && social.allegiance !== null}
+			{#key social.party}
 				<ClientHudWindow
 					icon="party"
 					title="Social"
 					visible={activePanel === "social"}
-					placement={hudLayout.social}
+					placement={settings.hudLayout.social}
 					minWidth={CLIENT_UI_DEFAULTS.social.minSize.width}
 					minHeight={CLIENT_UI_DEFAULTS.social.minSize.height}
 					{viewport}
@@ -1922,24 +1425,24 @@
 						changeHudPlacement("social", placement)}
 				>
 					<ClientSocialPanel
-						owner={party}
-						onSelectEntity={onSelectPartyMember}
-						{friends}
-						{squelch}
-						{allegiance}
+						owner={social.party}
+						onSelectEntity={social.onSelectPartyMember}
+						friends={social.friends}
+						squelch={social.squelch}
+						allegiance={social.allegiance}
 						visible={activePanel === "social"}
 					/>
 				</ClientHudWindow>
 			{/key}
 		{/if}
 
-		{#if contracts !== null}
-			{#key contracts}
+		{#if social.contracts !== null}
+			{#key social.contracts}
 				<ClientHudWindow
 					icon="journal"
 					title="Journal"
 					visible={activePanel === "journal"}
-					placement={hudLayout.journal}
+					placement={settings.hudLayout.journal}
 					minWidth={CLIENT_UI_DEFAULTS.journal.minSize.width}
 					minHeight={CLIENT_UI_DEFAULTS.journal.minSize.height}
 					{viewport}
@@ -1948,21 +1451,21 @@
 						changeHudPlacement("journal", placement)}
 				>
 					<ClientJournalPanel
-						{onSetWaypoint}
-						owner={contracts}
+						onSetWaypoint={world.onSetWaypoint}
+						owner={social.contracts}
 						visible={activePanel === "journal"}
-						onNotice={onSocialNotice}
+						onNotice={social.onSocialNotice}
 					/>
 				</ClientHudWindow>
 			{/key}
 		{/if}
 
-		{#if nearby !== null}{#key nearby}{#key characterGuid}
+		{#if world.nearby !== null}{#key world.nearby}{#key character.characterGuid}
 					<ClientHudWindow
 						icon="nearby"
 						title="Nearby"
 						visible={nearbyOpen}
-						placement={hudLayout.nearby}
+						placement={settings.hudLayout.nearby}
 						minWidth={CLIENT_UI_DEFAULTS.nearby.minSize.width}
 						minHeight={CLIENT_UI_DEFAULTS.nearby.minSize.height}
 						{viewport}
@@ -1971,12 +1474,12 @@
 							changeHudPlacement("nearby", placement)}
 					>
 						<ClientNearbyPanel
-							owner={nearby}
+							owner={world.nearby}
 							visible={nearbyOpen}
-							selectedGuid={selectedEntityGuid}
-							onSelectEntity={onSelectKnownEntity}
-							onExamineEntity={onExamineItem}
-							{onSetWaypoint}
+							selectedGuid={world.selectedEntityGuid}
+							onSelectEntity={world.onSelectKnownEntity}
+							onExamineEntity={world.onExamineItem}
+							onSetWaypoint={world.onSetWaypoint}
 						/>
 					</ClientHudWindow>
 				{/key}{/key}{/if}
@@ -1991,7 +1494,7 @@
 						: panel === "settings"
 							? "Settings"
 							: "Client diagnostics"}
-					placement={hudLayout[panel]}
+					placement={settings.hudLayout[panel]}
 					minWidth={CLIENT_UI_DEFAULTS[panel].minSize.width}
 					minHeight={CLIENT_UI_DEFAULTS[panel].minSize.height}
 					{viewport}
@@ -2000,22 +1503,23 @@
 						changeHudPlacement(panel, placement)}
 				>
 					{#if panel === "inventory"}
-						{#if inventory !== null && itemInteractions !== null}
-							{#key inventory}
+						{#if inventory.inventory !== null && inventory.itemInteractions !== null}
+							{#key inventory.inventory}
 								<ClientInventoryPanel
 									onSaveLoadout={openLoadoutBuilder}
-									{input}
-									{displayPlatform}
-									interactions={itemInteractions}
-									{inventory}
-									{vendor}
-									{trade}
-									{salvage}
-									selectedGuid={selectedEntityGuid}
-									onSelectItem={(guid) => onSelectContentsItem(guid, "toggle")}
+									input={settings.input}
+									displayPlatform={shell.platform}
+									interactions={inventory.itemInteractions}
+									inventory={inventory.inventory}
+									vendor={inventory.vendor}
+									trade={inventory.trade}
+									salvage={inventory.salvage}
+									selectedGuid={world.selectedEntityGuid}
+									onSelectItem={(guid) =>
+										inventory.onSelectContentsItem(guid, "toggle")}
 									requestedSplit={requestedInventorySplit}
-									{appearanceOptions}
-									{onAppearanceOptionChange}
+									appearanceOptions={character.appearanceOptions}
+									onAppearanceOptionChange={character.onAppearanceOptionChange}
 									onRequestedSplitConsumed={(request) => {
 										if (requestedInventorySplit === request)
 											requestedInventorySplit = null;
@@ -2024,51 +1528,51 @@
 							{/key}
 						{/if}
 					{:else if panel === "settings"}
-						{#key characterGuid}
+						{#key character.characterGuid}
 							<ClientSettingsPanel
-								{lockInteractions}
-								{onLockInteractionsChange}
-								{chatSuppression}
-								{onChatSuppressionChange}
-								{gameplayPreferences}
-								{gameplayEnabled}
-								{onGameplayOptionChange}
-								{theme}
-								{displayPlatform}
-								{audio}
-								{onAudioChange}
-								{graphics}
-								{ui}
-								{input}
-								{textureFilteringCapabilities}
+								lockInteractions={settings.lockInteractions}
+								onLockInteractionsChange={settings.onLockInteractionsChange}
+								chatSuppression={settings.chatSuppression}
+								onChatSuppressionChange={settings.onChatSuppressionChange}
+								gameplayPreferences={character.gameplayPreferences}
+								gameplayEnabled={character.gameplayEnabled}
+								onGameplayOptionChange={character.onGameplayOptionChange}
+								theme={settings.theme}
+								displayPlatform={shell.platform}
+								audio={settings.audio}
+								onAudioChange={settings.onAudioChange}
+								graphics={settings.graphics}
+								ui={settings.ui}
+								input={settings.input}
+								textureFilteringCapabilities={settings.textureFilteringCapabilities}
 								selectedTab={settingsTab}
 								onSelectTab={(tab) => (settingsTab = tab)}
-								{onGraphicsChange}
-								{nameplates}
-								{onNameplatesChange}
-								{onUiChange}
-								{clockFormat}
-								{environmentOverrides}
-								{weatherPresets}
-								{environmentIssue}
-								{onClockFormatChange}
-								{onEnvironmentOverridesChange}
-								{onInputChange}
+								onGraphicsChange={settings.onGraphicsChange}
+								nameplates={settings.nameplates}
+								onNameplatesChange={settings.onNameplatesChange}
+								onUiChange={settings.onUiChange}
+								clockFormat={settings.clockFormat}
+								environmentOverrides={settings.environmentOverrides}
+								weatherPresets={settings.weatherPresets}
+								environmentIssue={settings.environmentIssue}
+								onClockFormatChange={settings.onClockFormatChange}
+								onEnvironmentOverridesChange={settings.onEnvironmentOverridesChange}
+								onInputChange={settings.onInputChange}
 								canResetHudPlacements={resetActionBars !== null}
 								onResetHudPlacements={resetHudPlacements}
 							/>
 						{/key}
 					{:else}
 						<ClientDebugPanel
-							{readPerformanceSession}
-							{readDiagnostics}
-							{readSelectedEntity}
-							{entityCollisionDisabled}
-							{onEntityCollisionDisabledChange}
-							{unrestrictedUse}
-							{onUnrestrictedUseChange}
-							{showRetailHiddenGeometry}
-							{onShowRetailHiddenGeometryChange}
+							readPerformanceSession={shell.readPerformanceSession}
+							readDiagnostics={shell.readDiagnostics}
+							readSelectedEntity={world.readSelectedEntity}
+							entityCollisionDisabled={shell.entityCollisionDisabled}
+							onEntityCollisionDisabledChange={shell.onEntityCollisionDisabledChange}
+							unrestrictedUse={shell.unrestrictedUse}
+							onUnrestrictedUseChange={shell.onUnrestrictedUseChange}
+							showRetailHiddenGeometry={shell.showRetailHiddenGeometry}
+							onShowRetailHiddenGeometryChange={shell.onShowRetailHiddenGeometryChange}
 						/>
 					{/if}
 				</ClientHudWindow>
@@ -2078,7 +1582,7 @@
 			<ClientHudWindow
 				icon="buffed"
 				title="Enchantments"
-				placement={hudLayout.enchantments}
+				placement={settings.hudLayout.enchantments}
 				minWidth={CLIENT_UI_DEFAULTS.enchantments.minSize.width}
 				minHeight={CLIENT_UI_DEFAULTS.enchantments.minSize.height}
 				{viewport}
@@ -2088,8 +1592,8 @@
 					changeHudPlacement("enchantments", placement)}
 			>
 				<ClientEnchantmentsPanel
-					{enchantments}
-					{spells}
+					enchantments={character.enchantments}
+					spells={combatMagic.spells}
 					launch={enchantmentLaunch}
 				/>
 			</ClientHudWindow>

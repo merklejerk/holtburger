@@ -199,6 +199,15 @@
 	} from "./client-selected-entity-tracking";
 	import { pulseSpellBarCell } from "./client-spell-bar-feedback";
 	import ClientGameplayView from "./ClientGameplayView.svelte";
+	import type {
+		ClientGameplayCharacterSurface,
+		ClientGameplayCombatMagicSurface,
+		ClientGameplayInventorySurface,
+		ClientGameplaySettingsSurface,
+		ClientGameplayShellSurface,
+		ClientGameplaySocialSurface,
+		ClientGameplayWorldSurface,
+	} from "./client-gameplay-surfaces";
 	import { hostWorldMapSource } from "../lib/assets/world-map-source";
 	import type { MinimapFrame } from "../app/minimap-frame";
 	import type {
@@ -2751,6 +2760,553 @@
 			void retireComposition().catch((error: unknown) => console.error(error));
 		};
 	});
+
+	const gameplayShell: ClientGameplayShellSurface = {
+		platform: startupPlatform,
+		get canvasElement() {
+			if (canvasElement === null) {
+				throw new Error("Gameplay shell requires a mounted canvas element.");
+			}
+			return canvasElement;
+		},
+		get interactionRoot() {
+			if (interactionRoot === null) {
+				throw new Error("Gameplay shell requires a mounted interaction root.");
+			}
+			return interactionRoot;
+		},
+		get hudMode() {
+			return hudMode;
+		},
+		get uiShowcase() {
+			return uiShowcase;
+		},
+		onHudModeChange(mode) {
+			hudMode = mode;
+		},
+		debugEnabled,
+		get canReturnToMenu() {
+			return appState.admission.canReturn;
+		},
+		get canDisconnect() {
+			return appState.admission.canDisconnect;
+		},
+		onReturnToMainMenu() {
+			void returnToMainMenu();
+		},
+		onDisconnect() {
+			void disconnect();
+		},
+		readPerformanceSession,
+		readDiagnostics,
+		readFrameRates,
+		get entityCollisionDisabled() {
+			return entityCollisionDisabled;
+		},
+		onEntityCollisionDisabledChange: setEntityCollisionDisabled,
+		get unrestrictedUse() {
+			return unrestrictedUse;
+		},
+		onUnrestrictedUseChange(enabled) {
+			unrestrictedUse = enabled;
+		},
+		get showRetailHiddenGeometry() {
+			return frameSettings.showRetailHiddenGeometry;
+		},
+		onShowRetailHiddenGeometryChange: setShowRetailHiddenGeometry,
+		get logopolisLaunchRevision() {
+			return logopolisLaunchRevision;
+		},
+		get toast() {
+			return toast;
+		},
+	};
+
+	const gameplaySettings: ClientGameplaySettingsSurface = {
+		get hudLayout() {
+			return userSettings.hudLayout;
+		},
+		onHudPlacementChange: changeHudPlacement,
+		onHudReset: resetHudLayout,
+		get spellBarShape() {
+			return userSettings.spellBarShape;
+		},
+		onSpellBarShapeChange(value) {
+			changeUserSection("spellBarShape", value);
+		},
+		get minimapViewDiameters() {
+			return userSettings.minimapViewDiameters;
+		},
+		onMinimapViewDiametersChange(value) {
+			changeUserSection("minimapViewDiameters", value);
+		},
+		get audio() {
+			return userSettings.audio;
+		},
+		onAudioChange: changeAudio,
+		get graphics() {
+			return userSettings.graphics;
+		},
+		onGraphicsChange: changeGraphics,
+		get textureFilteringCapabilities() {
+			return textureFilteringCapabilities;
+		},
+		theme,
+		get ui() {
+			return userSettings.ui;
+		},
+		onUiChange: changeUi,
+		get nameplates() {
+			return userSettings.nameplates;
+		},
+		onNameplatesChange: changeNameplates,
+		get input() {
+			return userSettings.input;
+		},
+		onInputChange: changeInput,
+		get lockInteractions() {
+			return userSettings.lockInteractions;
+		},
+		onLockInteractionsChange(settings) {
+			changeUserSection("lockInteractions", settings);
+		},
+		get chatSuppression() {
+			return userSettings.chatSuppression;
+		},
+		onChatSuppressionChange(settings) {
+			changeUserSection("chatSuppression", settings);
+		},
+		get chatChannelFilters() {
+			return userSettings.chatChannelFilters;
+		},
+		onChatChannelFiltersChange(value) {
+			changeUserSection("chatChannelFilters", value);
+		},
+		get chatFilters() {
+			return userSettings.chatFilters;
+		},
+		onChatFiltersChange(value) {
+			changeUserSection("chatFilters", value);
+		},
+		get chatTimestamps() {
+			return userSettings.chatTimestamps;
+		},
+		onChatTimestampsChange(value) {
+			changeUserSection("chatTimestamps", value);
+		},
+		get clockFormat() {
+			return userSettings.clockFormat;
+		},
+		onClockFormatChange(format) {
+			changeUserSection("clockFormat", clientClockFormatSchema.parse(format));
+		},
+		get environmentOverrides() {
+			return userSettings.environmentOverrides;
+		},
+		onEnvironmentOverridesChange: changeEnvironmentOverrides,
+		get weatherPresets() {
+			return weatherPresets;
+		},
+		get environmentIssue() {
+			return environmentIssue;
+		},
+		readServerEnvironment() {
+			return gameplayPresentation?.readServerEnvironment() ?? null;
+		},
+		get inspectionPreviewHeight() {
+			return userSettings.inspection.previewHeight;
+		},
+		onInspectionPreviewHeightChange(previewHeight) {
+			changeUserSection("inspection", { previewHeight });
+		},
+	};
+
+	const gameplayCharacter: ClientGameplayCharacterSurface = {
+		get characterGuid() {
+			return characterSettings.kind === "absent"
+				? null
+				: characterSettings.characterGuid;
+		},
+		get playerName() {
+			return playerName;
+		},
+		get worldName() {
+			return worldName;
+		},
+		get accountName() {
+			return accountName;
+		},
+		readConnection() {
+			return session?.connectionSample() ?? null;
+		},
+		get vitals() {
+			return vitals;
+		},
+		get vitalWarningsEnabled() {
+			return lifecycle.kind === "in-world";
+		},
+		get characterSheet() {
+			return session?.characterSheet ?? null;
+		},
+		statArtwork,
+		get enchantments() {
+			return enchantments;
+		},
+		get appearanceOptions() {
+			return appearanceOptions;
+		},
+		onAppearanceOptionChange: setAppearanceOption,
+		get gameplayPreferences() {
+			return gameplayPreferences;
+		},
+		get gameplayEnabled() {
+			return lifecycle.kind === "in-world";
+		},
+		onGameplayOptionChange: setGameplayOption,
+		get jumpChargeActive() {
+			return activeJumpBeginSequence !== null;
+		},
+		readJumpExtent() {
+			return preciseJumpActive
+				? (preciseJumpSession?.power() ??
+						CLIENT_TUNING.preciseJump.initialPower)
+				: (inputController?.chargeExtent() ?? 0);
+		},
+		get jumpPowerKeys() {
+			return jumpPowerKeys;
+		},
+		get preciseJumpActive() {
+			return preciseJumpActive;
+		},
+		onPreciseJumpAim: aimPreciseJump,
+		onPreciseJumpPowerAdjust(steps) {
+			preciseJumpSession?.adjustPower(steps);
+		},
+		onPreciseJumpPowerSet(power) {
+			preciseJumpSession?.setPower(power);
+		},
+		onPreciseJumpActivate: activatePreciseJump,
+	};
+
+	const gameplayInventory: ClientGameplayInventorySurface = {
+		get inventory() {
+			return inventory;
+		},
+		get itemSession() {
+			return session;
+		},
+		get itemInteractions() {
+			return itemInteractions;
+		},
+		get actionBars() {
+			return characterSettings.kind === "ready"
+				? characterSettings.settings.actionBars
+				: null;
+		},
+		onActionBarsChange(bars) {
+			if (characterSettings.kind === "ready")
+				changeCharacterSettings("actionBars", bars);
+		},
+		get worldContainer() {
+			return worldContainer;
+		},
+		get vendor() {
+			return vendor;
+		},
+		get houseCrystal() {
+			return houseCrystal;
+		},
+		get salvage() {
+			return salvage;
+		},
+		get locks() {
+			return locks;
+		},
+		get barber() {
+			return barber;
+		},
+		get trade() {
+			return trade;
+		},
+		onSelectContentsItem(guid, mode) {
+			entitySelection?.selectContentsItem(guid, mode);
+		},
+		onPickInventoryTarget(x, y, destination) {
+			if (pointerSelection === null)
+				destination.commit({
+					kind: "unavailable",
+					reason: "World picking is unavailable.",
+				});
+			else pointerSelection.acquireTarget(x, y, destination);
+		},
+		onInventoryNotice(message) {
+			toastCenter.publish({ message, tone: "status" });
+		},
+	};
+
+	const gameplayCombatMagic: ClientGameplayCombatMagicSurface = {
+		get combatMode() {
+			return combatMode;
+		},
+		get combatStatus() {
+			return combatStatus;
+		},
+		get combatControls() {
+			return combatControls;
+		},
+		get combatProfileSelectionRevision() {
+			return combatProfileSelectionRevision;
+		},
+		onCombatProfileSelect: selectCombatProfile,
+		onStopCombat: stopCombat,
+		get combatEnabled() {
+			return lifecycle.kind === "in-world";
+		},
+		onToggleCombat() {
+			void toggleCombatMode();
+		},
+		get spells() {
+			return spells;
+		},
+		get spellBar() {
+			return spellBar;
+		},
+		onSpellBarChange: changeSpellBar,
+		onSwapSpellTabs: swapSpellBarTabs,
+		get spellBarEnabled() {
+			return spellBarEnabled;
+		},
+		onSelectSpellTab: selectSpellTab,
+		onActivateSpellCell: activateSpellCell,
+		onActivateCasterSpell: activateCasterSpell,
+		onCastSpell(spellId) {
+			void castSpell(spellId);
+		},
+		get spellCastTarget() {
+			return spellCastTarget;
+		},
+		readCombatTargetFrame,
+		readLockFeedbackFrames,
+		hasActiveLockFeedback,
+		get lockFeedbackWakeRevision() {
+			return lockFeedbackWakeRevision;
+		},
+	};
+
+	const gameplayWorld: ClientGameplayWorldSurface = {
+		get cameraController() {
+			return lifecycle.kind === "in-world" ? cameraController : null;
+		},
+		mouseMovement,
+		readMinimapFrame,
+		onCoordinatesCopied() {
+			toastCenter.publish({
+				message: "Coordinates copied to clipboard.",
+				tone: "status",
+			});
+		},
+		onSetWaypoint(target) {
+			navigationWaypoint.set(target, notifyWaypoint);
+		},
+		onClearWaypoint() {
+			navigationWaypoint.clear();
+		},
+		get nearby() {
+			return nearby;
+		},
+		get selectedEntityGuid() {
+			return selectedEntityGuid;
+		},
+		get hoveredEntityGuid() {
+			return hoveredEntityGuid;
+		},
+		readSelectedEntity,
+		readSelectedEntityDisplay,
+		readTargetIndicatorFrame,
+		onViewportSelect(clientX, clientY, interact) {
+			if (!interact) viewportTargetSequenceConsumed = false;
+			else if (viewportTargetSequenceConsumed) return;
+			const state = itemInteractions?.snapshot();
+			if (state?.kind === "acquiring") {
+				viewportTargetSequenceConsumed = true;
+				const current = itemInteractions;
+				pointerSelection?.acquireTarget(clientX, clientY, {
+					isCurrent: () => {
+						const latest = current?.snapshot();
+						return (
+							latest?.kind === "acquiring" &&
+							latest.generation === state.generation
+						);
+					},
+					commit: (result) => {
+						if (result.kind === "unavailable")
+							toastCenter.publish({ message: result.reason, tone: "status" });
+						else
+							current?.target(
+								result.kind === "entity" ? result.guid : null,
+								state.generation,
+							);
+					},
+				});
+			} else if (interact) {
+				pointerSelection?.acquireViewportPoint(clientX, clientY, (guid) =>
+					itemInteractions?.interactIfPossible(guid, unrestrictedUse),
+				);
+			} else pointerSelection?.acquireViewportPoint(clientX, clientY);
+		},
+		onViewportExamine(clientX, clientY) {
+			const pointer = pointerSelection;
+			if (pointer === null) return;
+			pointer.acquireTarget(clientX, clientY, {
+				isCurrent: () => pointerSelection === pointer,
+				commit: (result) => {
+					if (result.kind === "entity")
+						void inspectionOwner?.examine(result.guid);
+					else if (result.kind === "unavailable")
+						toastCenter.publish({ message: result.reason, tone: "warning" });
+				},
+			});
+		},
+		onViewportHover(clientX, clientY) {
+			pointerSelection?.acquireViewportHover(clientX, clientY);
+		},
+		onViewportHoverClear() {
+			pointerSelection?.clearViewportHover();
+		},
+		onMaintainEntitySelection() {
+			entitySelection?.maintainSelection();
+		},
+		onSelectEntity(guid) {
+			entitySelection?.select(guid);
+		},
+		onSelectKnownEntity(guid) {
+			return entitySelection?.selectKnownEntity(guid) === true;
+		},
+		onInteractEntity() {
+			itemInteractions?.interactSelected(unrestrictedUse);
+		},
+		get inspection() {
+			return inspection;
+		},
+		get inspectionItemSelection() {
+			return entitySelection;
+		},
+		objectPreviewService,
+		onExamineEntity: examineSelectedEntity,
+		onExamineItem: examineItem,
+		onExamineSpell(spellId) {
+			inspectionOwner?.examineSpell(spellId);
+		},
+		onCloseInspection() {
+			inspectionOwner?.close();
+		},
+		get bookReader() {
+			return bookReader;
+		},
+		onCloseBook() {
+			bookReaderOwner?.close();
+		},
+		onRetryBook() {
+			bookReaderOwner?.retry();
+		},
+		get worldMapSource() {
+			return worldMapSource;
+		},
+		get housing() {
+			return housing;
+		},
+		get housingManagement() {
+			return housingManagement;
+		},
+		async onRefreshHousing() {
+			if (session === null) return;
+			try {
+				await session.refreshHousing();
+			} catch (error) {
+				toastCenter.publish({ message: formatError(error), tone: "warning" });
+			}
+		},
+		async onSearchHousing(houseType) {
+			if (session === null) return;
+			try {
+				await session.searchHousing(houseType);
+			} catch (error) {
+				toastCenter.publish({ message: formatError(error), tone: "warning" });
+			}
+		},
+		get canTeleportFromMap() {
+			return canTeleportFromMap;
+		},
+		get recallDestinations() {
+			return recallDestinations;
+		},
+		onRecall: recall,
+		onTeleportToMapPosition: teleportToMapPosition,
+	};
+
+	const gameplaySocial: ClientGameplaySocialSurface = {
+		get chatMessages() {
+			return chatMessages;
+		},
+		chatComposer,
+		get sentChatHistory() {
+			return sentChatHistory;
+		},
+		onSendChat: sendChat,
+		onSendChatError: appendChatError,
+		onChatNotice(message) {
+			toastCenter.publish({ message, tone: "warning" });
+		},
+		get emotesEnabled() {
+			return gameplayInputEnabled;
+		},
+		get party() {
+			return party;
+		},
+		get partyHudPresent() {
+			return partyHudPresent;
+		},
+		readPartyHudDisplay() {
+			return session === null
+				? null
+				: presentPartyHud(session.partySnapshot(), session.state().playerGuid);
+		},
+		onPartyHudDemand(enabled) {
+			session?.setPartyUpdateDemand("hud", enabled);
+		},
+		onSelectPartyMember(guid) {
+			entitySelection?.selectKnownEntity(guid);
+		},
+		get friends() {
+			return session?.friends ?? null;
+		},
+		get contracts() {
+			return session?.contracts ?? null;
+		},
+		get squelch() {
+			return session?.squelch ?? null;
+		},
+		get allegiance() {
+			return session?.allegiance ?? null;
+		},
+		readCanSetCorpsePermission() {
+			return session?.state().lifecycle?.kind === "in-world";
+		},
+		onCorpsePermission(name, granted) {
+			const current = session;
+			if (current === null || current.state().lifecycle?.kind !== "in-world")
+				return;
+			void current.setCorpsePermission(name, granted).catch((error: unknown) =>
+				toastCenter.publish({
+					message: formatError(error),
+					tone: "warning",
+				}),
+			);
+		},
+		onSocialNotice(message) {
+			toastCenter.publish({ message, tone: "warning" });
+		},
+	};
 </script>
 
 <div
@@ -2797,301 +3353,14 @@
 
 	{#if page.kind === "gameplay" && canvasElement !== null && interactionRoot !== null}
 		<ClientGameplayView
-			{statArtwork}
-			platform={startupPlatform}
-			{theme}
-			onReturnToMainMenu={() => void returnToMainMenu()}
-			onDisconnect={() => void disconnect()}
-			canReturnToMenu={appState.admission.canReturn}
-			canDisconnect={appState.admission.canDisconnect}
 			bind:this={gameplayView}
-			{mouseMovement}
-			itemSession={session}
-			{partyHudPresent}
-			readPartyHudDisplay={() =>
-				session === null
-					? null
-					: presentPartyHud(
-							session.partySnapshot(),
-							session.state().playerGuid,
-						)}
-			onPartyHudDemand={(enabled) =>
-				session?.setPartyUpdateDemand("hud", enabled)}
-			characterSheet={session?.characterSheet ?? null}
-			hudLayout={userSettings.hudLayout}
-			onHudPlacementChange={changeHudPlacement}
-			onHudReset={resetHudLayout}
-			spellBarShape={userSettings.spellBarShape}
-			onSpellBarShapeChange={(spellBarShape) =>
-				changeUserSection("spellBarShape", spellBarShape)}
-			minimapViewDiameters={userSettings.minimapViewDiameters}
-			onMinimapViewDiametersChange={(minimapViewDiameters) =>
-				changeUserSection("minimapViewDiameters", minimapViewDiameters)}
-			chatChannelFilters={userSettings.chatChannelFilters}
-			onChatChannelFiltersChange={(value) =>
-				changeUserSection("chatChannelFilters", value)}
-			chatFilters={userSettings.chatFilters}
-			chatTimestamps={userSettings.chatTimestamps}
-			onChatTimestampsChange={(value) =>
-				changeUserSection("chatTimestamps", value)}
-			onChatFiltersChange={(chatFilters) =>
-				changeUserSection("chatFilters", chatFilters)}
-			inspectionPreviewHeight={userSettings.inspection.previewHeight}
-			audio={userSettings.audio}
-			onAudioChange={changeAudio}
-			graphics={userSettings.graphics}
-			ui={userSettings.ui}
-			clockFormat={userSettings.clockFormat}
-			environmentOverrides={userSettings.environmentOverrides}
-			{weatherPresets}
-			{environmentIssue}
-			readServerEnvironment={() =>
-				gameplayPresentation?.readServerEnvironment() ?? null}
-			onClockFormatChange={(format) =>
-				changeUserSection("clockFormat", clientClockFormatSchema.parse(format))}
-			onEnvironmentOverridesChange={changeEnvironmentOverrides}
-			input={userSettings.input}
-			{textureFilteringCapabilities}
-			onGraphicsChange={changeGraphics}
-			nameplates={userSettings.nameplates}
-			onNameplatesChange={changeNameplates}
-			onUiChange={changeUi}
-			onInputChange={changeInput}
-			onInspectionPreviewHeightChange={(previewHeight) =>
-				changeUserSection("inspection", { previewHeight })}
-			{hudMode}
-			{uiShowcase}
-			onHudModeChange={(mode) => (hudMode = mode)}
-			{spellBar}
-			onSpellBarChange={changeSpellBar}
-			onSwapSpellTabs={swapSpellBarTabs}
-			actionBars={characterSettings.kind === "ready"
-				? characterSettings.settings.actionBars
-				: null}
-			onActionBarsChange={(actionBars) => {
-				if (characterSettings.kind === "ready")
-					changeCharacterSettings("actionBars", actionBars);
-			}}
-			{spellBarEnabled}
-			onSelectSpellTab={selectSpellTab}
-			onActivateSpellCell={activateSpellCell}
-			onActivateCasterSpell={activateCasterSpell}
-			{combatMode}
-			{combatStatus}
-			{combatControls}
-			{combatProfileSelectionRevision}
-			onCombatProfileSelect={selectCombatProfile}
-			onStopCombat={stopCombat}
-			combatEnabled={lifecycle.kind === "in-world"}
-			emotesEnabled={gameplayInputEnabled}
-			onToggleCombat={() => void toggleCombatMode()}
-			onCastSpell={(spellId) => void castSpell(spellId)}
-			cameraController={lifecycle.kind === "in-world" ? cameraController : null}
-			{debugEnabled}
-			{nearby}
-			onSelectKnownEntity={(guid) =>
-				entitySelection?.selectKnownEntity(guid) === true}
-			inspectionItemSelection={entitySelection}
-			{readMinimapFrame}
-			onClearWaypoint={() => navigationWaypoint.clear()}
-			onSetWaypoint={(target) => navigationWaypoint.set(target, notifyWaypoint)}
-			characterGuid={characterSettings.kind === "absent"
-				? null
-				: characterSettings.characterGuid}
-			{worldMapSource}
-			{housing}
-			{housingManagement}
-			{party}
-			friends={session?.friends ?? null}
-			contracts={session?.contracts ?? null}
-			squelch={session?.squelch ?? null}
-			allegiance={session?.allegiance ?? null}
-			onSearchHousing={async (houseType) => {
-				if (session === null) return;
-				try {
-					await session.searchHousing(houseType);
-				} catch (error) {
-					toastCenter.publish({ message: formatError(error), tone: "warning" });
-				}
-			}}
-			onRefreshHousing={async () => {
-				if (session === null) return;
-				try {
-					await session.refreshHousing();
-				} catch (error) {
-					toastCenter.publish({ message: formatError(error), tone: "warning" });
-				}
-			}}
-			{canTeleportFromMap}
-			{recallDestinations}
-			onRecall={recall}
-			onTeleportToMapPosition={teleportToMapPosition}
-			{readPerformanceSession}
-			{readDiagnostics}
-			{readSelectedEntity}
-			{readFrameRates}
-			{readTargetIndicatorFrame}
-			{readCombatTargetFrame}
-			{readLockFeedbackFrames}
-			{hasActiveLockFeedback}
-			{spellCastTarget}
-			{lockFeedbackWakeRevision}
-			{readSelectedEntityDisplay}
-			{spells}
-			{enchantments}
-			{locks}
-			{salvage}
-			{inventory}
-			{worldContainer}
-			{vendor}
-			{houseCrystal}
-			{barber}
-			{trade}
-			{itemInteractions}
-			{inspection}
-			{bookReader}
-			onCloseBook={() => bookReaderOwner?.close()}
-			onRetryBook={() => bookReaderOwner?.retry()}
-			{objectPreviewService}
-			onSelectContentsItem={(guid, mode) =>
-				entitySelection?.selectContentsItem(guid, mode)}
-			onInteractEntity={() =>
-				itemInteractions?.interactSelected(unrestrictedUse)}
-			onExamineEntity={examineSelectedEntity}
-			onExamineItem={examineItem}
-			onExamineSpell={(spellId) => inspectionOwner?.examineSpell(spellId)}
-			onCloseInspection={() => inspectionOwner?.close()}
-			{selectedEntityGuid}
-			{hoveredEntityGuid}
-			showRetailHiddenGeometry={frameSettings.showRetailHiddenGeometry}
-			onShowRetailHiddenGeometryChange={setShowRetailHiddenGeometry}
-			{entityCollisionDisabled}
-			onEntityCollisionDisabledChange={setEntityCollisionDisabled}
-			{unrestrictedUse}
-			onUnrestrictedUseChange={(enabled) => (unrestrictedUse = enabled)}
-			{playerName}
-			{worldName}
-			{accountName}
-			{vitals}
-			vitalWarningsEnabled={lifecycle.kind === "in-world"}
-			readConnection={() => session?.connectionSample() ?? null}
-			{appearanceOptions}
-			{gameplayPreferences}
-			lockInteractions={userSettings.lockInteractions}
-			onLockInteractionsChange={(settings) =>
-				changeUserSection("lockInteractions", settings)}
-			chatSuppression={userSettings.chatSuppression}
-			onChatSuppressionChange={(settings) =>
-				changeUserSection("chatSuppression", settings)}
-			gameplayEnabled={lifecycle.kind === "in-world"}
-			onGameplayOptionChange={setGameplayOption}
-			onAppearanceOptionChange={setAppearanceOption}
-			jumpChargeActive={activeJumpBeginSequence !== null}
-			{jumpPowerKeys}
-			readJumpExtent={() =>
-				preciseJumpActive
-					? (preciseJumpSession?.power() ??
-						CLIENT_TUNING.preciseJump.initialPower)
-					: (inputController?.chargeExtent() ?? 0)}
-			{toast}
-			{preciseJumpActive}
-			onPreciseJumpAim={aimPreciseJump}
-			onPreciseJumpPowerSet={(power) => preciseJumpSession?.setPower(power)}
-			onPreciseJumpPowerAdjust={(steps) =>
-				preciseJumpSession?.adjustPower(steps)}
-			onPreciseJumpActivate={activatePreciseJump}
-			readCanSetCorpsePermission={() =>
-				session?.state().lifecycle?.kind === "in-world"}
-			onCorpsePermission={(name, granted) => {
-				const current = session;
-				if (current === null || current.state().lifecycle?.kind !== "in-world")
-					return;
-				void current
-					.setCorpsePermission(name, granted)
-					.catch((error: unknown) =>
-						toastCenter.publish({
-							message: formatError(error),
-							tone: "warning",
-						}),
-					);
-			}}
-			onSocialNotice={(message) =>
-				toastCenter.publish({ message, tone: "warning" })}
-			onInventoryNotice={(message) =>
-				toastCenter.publish({ message, tone: "status" })}
-			onCoordinatesCopied={() =>
-				toastCenter.publish({
-					message: "Coordinates copied to clipboard.",
-					tone: "status",
-				})}
-			onPickInventoryTarget={(x, y, destination) => {
-				if (pointerSelection === null)
-					destination.commit({
-						kind: "unavailable",
-						reason: "World picking is unavailable.",
-					});
-				else pointerSelection.acquireTarget(x, y, destination);
-			}}
-			onViewportSelect={(clientX, clientY, interact) => {
-				if (!interact) viewportTargetSequenceConsumed = false;
-				else if (viewportTargetSequenceConsumed) return;
-				const state = itemInteractions?.snapshot();
-				if (state?.kind === "acquiring") {
-					viewportTargetSequenceConsumed = true;
-					const current = itemInteractions;
-					pointerSelection?.acquireTarget(clientX, clientY, {
-						isCurrent: () => {
-							const latest = current?.snapshot();
-							return (
-								latest?.kind === "acquiring" &&
-								latest.generation === state.generation
-							);
-						},
-						commit: (result) => {
-							if (result.kind === "unavailable")
-								toastCenter.publish({ message: result.reason, tone: "status" });
-							else
-								current?.target(
-									result.kind === "entity" ? result.guid : null,
-									state.generation,
-								);
-						},
-					});
-				} else if (interact) {
-					pointerSelection?.acquireViewportPoint(clientX, clientY, (guid) =>
-						itemInteractions?.interactIfPossible(guid, unrestrictedUse),
-					);
-				} else pointerSelection?.acquireViewportPoint(clientX, clientY);
-			}}
-			onViewportExamine={(clientX, clientY) => {
-				const pointer = pointerSelection;
-				if (pointer === null) return;
-				pointer.acquireTarget(clientX, clientY, {
-					isCurrent: () => pointerSelection === pointer,
-					commit: (result) => {
-						if (result.kind === "entity")
-							void inspectionOwner?.examine(result.guid);
-						else if (result.kind === "unavailable")
-							toastCenter.publish({ message: result.reason, tone: "warning" });
-					},
-				});
-			}}
-			onViewportHover={(clientX, clientY) =>
-				pointerSelection?.acquireViewportHover(clientX, clientY)}
-			onViewportHoverClear={() => pointerSelection?.clearViewportHover()}
-			onMaintainEntitySelection={() => entitySelection?.maintainSelection()}
-			onSelectPartyMember={(guid) => entitySelection?.selectKnownEntity(guid)}
-			onSelectEntity={(guid) => entitySelection?.select(guid)}
-			{chatMessages}
-			{chatComposer}
-			{sentChatHistory}
-			{logopolisLaunchRevision}
-			onSendChat={sendChat}
-			onChatNotice={(message) =>
-				toastCenter.publish({ message, tone: "warning" })}
-			onSendChatError={appendChatError}
-			{canvasElement}
-			{interactionRoot}
+			shell={gameplayShell}
+			settings={gameplaySettings}
+			character={gameplayCharacter}
+			inventory={gameplayInventory}
+			combatMagic={gameplayCombatMagic}
+			world={gameplayWorld}
+			social={gameplaySocial}
 		/>
 	{:else}
 		<div class="client-pregame-ui" use:applyUiScale={userSettings.ui.uiScale}>

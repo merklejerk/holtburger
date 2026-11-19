@@ -1,4 +1,7 @@
 //! Sends standalone inventory requests and owns dependent inventory operations.
+//!
+//! Standalone inventory moves release admission on dispatch, whereas dependent pack exchanges
+//! hold `inventory_operation` lock ownership until the second move sends or times out.
 
 use crate::client::{
     ClientRuntime,

@@ -1,4 +1,7 @@
 //! One authority for equipment command ordering and server-confirmed progress.
+//!
+//! Multi-step execution waits for accepted storage/equipment updates between dispatches, performs
+//! no rollback on partial failure, marks timeouts uncertain, and releases admission on final send.
 
 use crate::client::{
     ClientRuntime, ClientState,

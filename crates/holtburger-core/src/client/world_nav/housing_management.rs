@@ -1,4 +1,7 @@
 //! Implicit-home administrative requests share admission and retain operation-specific evidence.
+//!
+//! HAR permission edits coalesce behind two delayed refresh reads and correlate replies with local
+//! sequence and home-generation epochs because server responses carry no client request ID.
 
 use crate::client::{ClientRuntime, ClientState, PendingOperation};
 use crate::{

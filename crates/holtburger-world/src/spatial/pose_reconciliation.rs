@@ -53,7 +53,8 @@ impl PhysicalReferenceDomain {
 
 /// Distance below which retail completes an interpolation node.
 pub const RETAIL_INTERPOLATION_TARGET_THRESHOLD_M: f32 = 0.05;
-/// Remote supported characters ignore positional error until it exceeds this distance.
+/// Remote supported characters ignore positional error until it exceeds 20 cm, then return
+/// until within the 5 cm stop threshold while retaining a dormant reference for future drift.
 pub const PHYSICAL_RETURN_START_THRESHOLD_M: f32 = 0.20;
 /// Generic remote distance at which retail directly places instead of interpolating.
 pub const RETAIL_INTERPOLATION_SNAP_DISTANCE_M: f32 = 96.0;

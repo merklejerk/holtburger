@@ -6,6 +6,8 @@ use holtburger_content::{MotionSequence, MotionSequenceTable};
 use super::MotionCommand;
 
 /// Standard player table supplying rates for missing local locomotion components.
+/// Mounted-content census (436 motion tables): 286 default-style walk/run cycles and 94 Falling
+/// cycles; counts reflect motion tables rather than playable populations.
 pub const PLAYER_LOCOMOTION_BASELINE_TABLE: u32 = 0x0900_0001;
 
 /// Execution role selected by the native interpreter or a capability lookup. Modifier clips are

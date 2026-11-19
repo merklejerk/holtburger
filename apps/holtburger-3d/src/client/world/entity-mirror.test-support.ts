@@ -59,6 +59,33 @@ export function playerEntitySnapshot(playerGuid: number): ClientEntitySnapshot {
 	};
 }
 
+/** Known entity description fixture with minimal defaults. */
+export function knownDescription(
+	name: string,
+	overrides: Partial<Omit<KnownEntityDescription, "kind" | "name">> = {},
+): KnownEntityDescription {
+	return {
+		kind: "known",
+		name,
+		healthQuery: "ineligible",
+		itemType: 0,
+		hasAlternateEquipSide: false,
+		builtInSpell: null,
+		mapCategory: "other",
+		objectFlags: 0,
+		wcid: null,
+		equipLocations: null,
+		consumable: null,
+		useCapability: "direct" as const,
+		stackCount: null,
+		cooldown: null,
+		structure: { current: null, max: null },
+		icon: { base: null, overlay: null, underlay: null, uiEffects: 0 },
+		equipmentCantrip: null,
+		...overrides,
+	};
+}
+
 /** Known non-creature fixture; each scenario explicitly supplies its storage relationship. */
 export function entityFacts(
 	guid: number,
@@ -86,25 +113,7 @@ export function entityFacts(
 		lockTool: null,
 		isLocked: null,
 		salvage: { kind: "ineligible", reason: "Fixture item cannot be salvaged." },
-		description: {
-			kind: "known",
-			name: `Item ${guid}`,
-			healthQuery: "ineligible",
-			itemType: 0,
-			hasAlternateEquipSide: false,
-			builtInSpell: null,
-			mapCategory: "other",
-			objectFlags: 0,
-			wcid: null,
-			equipLocations: null,
-			consumable: null,
-			useCapability: "direct" as const,
-			stackCount: null,
-			cooldown: null,
-			structure: { current: null, max: null },
-			icon: { base: null, overlay: null, underlay: null, uiEffects: 0 },
-			equipmentCantrip: null,
-		},
+		description: knownDescription(`Item ${guid}`),
 		location: { kind: "none" },
 		ownedByPlayer: false,
 		targeting: "non-creature",

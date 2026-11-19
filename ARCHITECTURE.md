@@ -1,124 +1,102 @@
-# Holtburger Architecture Overview 🍔
+# Holtburger Architecture Overview
 
-Welcome to the root architecture guide for the Holtburger project. This document explains how the workspace crates fit together to form a cohesive Asheron's Call client stack today, while still leaving room for a future full 3D client.
+Holtburger is a multi-crate Asheron's Call client stack built around strict ownership boundaries: wire serialization stays separate from transport, transport stays separate from authoritative world state, shared orchestration stays separate from static archive discovery, and frontend UX policy stays inside each frontend application.
 
-## Architectural Philosophy
+## Architectural Principles
 
-Holtburger is designed around **deliberate crate boundaries**. The wire protocol stays separate from world authority, the world model stays separate from transport, and the frontend talks to the engine through commands, queries, and semantic event streams instead of reaching into hidden engine state.
-
-By separating concerns into discrete library crates, we achieve:
-1. **Coherent ownership**: `session` owns transport, `content` owns runtime content discovery and bootstrap assembly, `world` owns authoritative gameplay state plus canonical runtime body state, and `core` owns orchestration plus reusable client behavior.
-2. **Performance**: Heavy tasks such as UDP chunk reassembly, DAT access, and world mutation stay off the rendering path.
-3. **Ergonomics**: Frontends consume `ClientViewEvent`s plus frontend-owned content queries, so they can keep local projection state without needing shared mutable access to engine internals.
+1. **Coherent Ownership**: `session` owns UDP transport and cryptography, `content` owns archive discovery and bootstrap assembly, `world` owns authoritative gameplay and canonical runtime body state, `core` owns session-to-world orchestration and reusable client workflows, and each frontend owns presentation and UX control policy.
+2. **One Fact, One Channel**: Shared domain semantics are derived once at their owning authority (`world` or `core`) and published over typed snapshots and semantic delta streams rather than re-derived from raw bitmasks or parallel side-events in frontends.
+3. **Mirrored Read Projections**: Frontends and scripts consume `ClientViewEvent` deltas, entity snapshots, and static content queries without holding shared mutable locks over `WorldState` or running a second movement/physics authority.
 
 ---
 
-## Crate Dependency Graph
+## Workspace Dependency Graph
 
 ```mermaid
 graph TD
-    Common[holtburger-common<br/>Bedrock Primitives]
-    Protocol[holtburger-protocol<br/>Serialization Rules]
-    Dat[holtburger-dat<br/>File Parsing]
-    Content[holtburger-content<br/>Bootstrap + Reference Data]
-    Session[holtburger-session<br/>UDP / Crypto]
-    World[holtburger-world<br/>State Authority]
-    Core[holtburger-core<br/>Engine Orchestrator]
-    CLI[holtburger-cli<br/>Terminal UI]
+    Common["holtburger-common<br/>Shared Primitives & Stats"]
+    Protocol["holtburger-protocol<br/>Wire Codecs & Opcodes"]
+    Dat["holtburger-dat<br/>DAT Archive Decoding"]
+    Content["holtburger-content<br/>HBA Discovery & Bootstrap"]
+    Session["holtburger-session<br/>UDP Sequencing & Crypto"]
+    World["holtburger-world<br/>Authoritative World & Physics"]
+    Core["holtburger-core<br/>Client Runtime & Workflows"]
+    Scripting["holtburger-scripting<br/>JS Automation Runtime"]
+    CLI["apps/holtburger-cli<br/>Terminal Client (TUI)"]
+    H3D["apps/holtburger-3d<br/>3D Client & Explorer (Electron + WebGL2)"]
 
-    %% Dependencies
     Protocol --> Common
     Dat --> Common
+    World --> Common
+    World --> Protocol
+    World --> Dat
     Content --> Dat
     Content --> World
-    World --> Common
     Session --> Protocol
     Core --> Session
     Core --> World
     Core --> Protocol
+    Scripting --> Common
+    Scripting --> World
     CLI --> Content
     CLI --> Core
-    
-    classDef bedrock fill:#2d3748,stroke:#4a5568,color:#e2e8f0;
-    classDef internal fill:#2c5282,stroke:#3182ce,color:#ebf8ff;
-    classDef engine fill:#702459,stroke:#b83280,color:#fff5f5;
-    classDef app fill:#22543d,stroke:#38a169,color:#f0fff4;
-
-    class Common bedrock;
-    class Protocol,Dat,Content,Session,World internal;
-    class Core engine;
-    class CLI app;
+    CLI --> Scripting
+    H3D --> Content
+    H3D --> Core
 ```
 
 ---
 
-## The Crates
+## Crates and Applications
 
-### 1. The Bedrock: [`holtburger-common`](crates/holtburger-common/ARCHITECTURE.md)
-The foundational layer. It contains pure, stateless primitives that every other crate relies on. It enforces the rule of having no upstream workspace dependencies.
-- **Provides**: Vectors, Quaternions, global `Guid` representations, Property Enums, and Protocol Serialization Traits.
+### 1. [`holtburger-common`](crates/holtburger-common/ARCHITECTURE.md)
+Dependency-free bedrock primitives shared across the stack: `Guid`, coordinates and math types, property enums, stat/skill/magic-school taxonomies (`MagicSchool`, `SpellSchool`), and binary codec traits.
 
-### 2. The Language: [`holtburger-protocol`](crates/holtburger-protocol/ARCHITECTURE.md)
-Contains zero-logic data structures and deterministic serialization rules corresponding 1:1 with the Asheron's Call protocol (based directly on ACE Server ground truth).
-- **Provides**: `GameOpcode`, packet representations, and binary `pack/unpack` implementations.
+### 2. [`holtburger-protocol`](crates/holtburger-protocol/ARCHITECTURE.md)
+Deterministic wire-level packet definitions, opcodes, and binary `pack`/`unpack` implementations matching the Asheron's Call network protocol with zero gameplay state.
 
-### 3. The Library: [`holtburger-dat`](crates/holtburger-dat/ARCHITECTURE.md)
-Responsible for reading, mounting, and querying static local Asheron's Call data files (`.dat`). 
-- **Provides**: Fast, memory-mapped queries for structural templates (Weenies), 3D models, and multi-layered Landblocks.
+### 3. [`holtburger-dat`](crates/holtburger-dat/ARCHITECTURE.md)
+Static client `.dat` archive access and binary record decoders for setups, animations, physics scripts, environments, landblocks, textures, sounds, and tables.
 
-### 4. The Content Seam: [`holtburger-content`](crates/holtburger-content/ARCHITECTURE.md)
-Owns runtime content discovery and typed asset access over mounted HBA sources.
-- **Provides**: `ContentRepository`, HBA discovery and mount policy, and asset-derived models such as `CharacterGenReference`.
+### 4. [`holtburger-content`](crates/holtburger-content/ARCHITECTURE.md)
+Runtime content discovery over mounted HBA/DAT sources, parsed `WorldBootstrap` assembly for `world`/`core`, and static reference-data queries consumed by frontends.
 
-### 5. The Transport: [`holtburger-session`](crates/holtburger-session/ARCHITECTURE.md)
-Encapsulates pure networking logic. It handles the lowest levels of transport without knowing anything about the game world.
-- **Provides**: UDP fragment reassembly, packet sequencing, RC4 stream encryption/decryption, and socket loops.
+### 5. [`holtburger-session`](crates/holtburger-session/ARCHITECTURE.md)
+UDP socket management, packet sequencing, fragment reassembly, checksums, and stream encryption/decryption, independent of gameplay state.
 
-### 6. The Authority: [`holtburger-world`](crates/holtburger-world/ARCHITECTURE.md)
-The authoritative in-memory world model for the client. It tracks hydrated entities, player state, spatial placement, retention/liveness rules, trade or vendor state, and world-domain helpers that other crates can query without re-deriving gameplay semantics. It also owns the canonical runtime `SpatialBody` sidecars and their sampling policy; projected samples are derived from world-owned runtime state rather than advanced in parallel elsewhere.
-- **Provides**: `WorldState`, `PlayerState`, entity hydration, canonical runtime body state, spatial and retention helpers, trade or vendor state, and world query surfaces.
+### 6. [`holtburger-world`](crates/holtburger-world/ARCHITECTURE.md)
+Authoritative in-memory world model (`WorldState` and `PlayerState`), entity hydration and retention lifecycle, canonical `SpatialScene` / `CollisionScene` / `MotionRuntimeRegistry` simulation state, semantic entity facts and inspection, and pure `WorldContext` queries.
 
-### 7. The Brain: [`holtburger-core`](crates/holtburger-core/ARCHITECTURE.md)
-The primary engine orchestrator. It ties networking (`session`) and authority (`world`) together, executes movement and interaction primitives, and projects raw protocol plus world changes into frontend-safe semantic events. `ClientRuntimeBuilder` now owns the runtime asset-loading step by reading the specific assets it needs from `ContentRepository`. Its runtime-body delivery surfaces publish mirrored read models over world-owned runtime state, not a second owner of runtime advancement.
-- **Provides**: Handshake coordination, primitive movement execution and prediction, protocol-to-world orchestration, optional reusable controllers, and `ClientViewEvent` streams for applications to consume.
+### 7. [`holtburger-core`](crates/holtburger-core/ARCHITECTURE.md)
+Client runtime orchestrator (`ClientRuntime` and `ClientRuntimeBuilder`) binding `session` and `world` together. Owns connection/character/portal session lifetimes, fixed-tick simulation and movement execution, guarded multi-step client workflows (inventory, equipment, vendor, trade, salvage, housing), reusable camera collision (`KinematicBoomController`), and the `ClientViewEvent` stream.
 
-### 8. The Frontend: [`holtburger-cli`](apps/holtburger-cli/ARCHITECTURE.md)
-The current interactive frontend. It is a terminal UI built on ratatui that consumes `ClientViewEvent`s, owns frontend-specific control policy such as when to drive optional navigation or combat helpers, and currently keeps mirrored read caches for presentation and app-thread decisions. The core runtime runs separately and feeds the frontend through events and commands; the TUI owns the local projection, not the authority. It also retains frontend-owned lookup caches derived from content or runtime state. Those caches are frontend-owned views only; they must not become a second runtime body authority.
-- **Provides**: Real-time ratatui screens, input mapping, mirrored read caches and modal state, frontend orchestration around shared core controllers, and frontend-owned content queries.
+### 8. `holtburger-scripting`
+Embedded V8/Deno JavaScript runtime exposing read-only projections (`ScriptClientView`) and typed automation intents (`ScriptIntent`) for scripted workflows without coupling scripts to engine internals.
+
+### 9. [`apps/holtburger-cli`](apps/holtburger-cli/ARCHITECTURE.md)
+Interactive `ratatui` terminal client serving as a fast proving ground over `holtburger-core`, owning TUI-local layout, keybindings, navigation policy, and script hosting.
+
+### 10. `apps/holtburger-3d`
+Full 3D desktop client and content Explorer built with Electron, Svelte 5, WebGL2, and a mode-specific Rust host sidecar (`apps/holtburger-3d/host`) keeping live Client authority separate from offline Explorer authority.
 
 ---
 
-## System Data Flow
-
-The architecture avoids a single frontend-owned monolith by keeping content discovery in `content`, authority in `world`, orchestration in `core`, and presentation or control policy in the app. Here is the runtime startup and packet flow:
+## End-to-End Runtime Flow
 
 ```mermaid
 sequenceDiagram
-    participant App as CLI / App
-    participant Content as ContentRepository
-    participant Srv as Server (UDP)
-    participant Sess as Session Layer
-    participant Core as Core Engine
-    participant World as World State
+    participant App as Frontend (3D Host / TUI)
+    participant Content as holtburger-content
+    participant Sess as holtburger-session
+    participant Core as holtburger-core
+    participant World as holtburger-world
 
-    App->>Content: Open HBA source(s)
-    Content->>App: WorldBootstrap + static queries
-    App->>Core: Start runtime with WorldBootstrap
-
-    Srv->>Sess: Inbound Encrypted Bytes
-    Sess->>Sess: Decrypt & Assemble Fragment Chunk
-    Sess->>Core: Reassembled Message Bytes
+    App->>Content: Discover HBA/DAT sources
+    Content-->>App: WorldBootstrap + static asset queries
+    App->>Core: Build ClientRuntime with WorldBootstrap
+    Sess->>Core: Reassembled inbound packet bytes
     Core->>Core: Decode GameMessage
-    
-    Core->>World: Issue Mutation Command (e.g., spawn, update vitals)
-    World->>Core: Emit StateEvent (Authority Updated)
-    
-    Core->>App: Broadcast ClientViewEvent (Semantic Delta)
-    App->>App: Update Local Projection / Controller State / Redraw
+    Core->>World: WorldState::handle_message(GameMessage)
+    World-->>Core: Vec<WorldEvent>
+    Core-->>App: ClientViewEvent + DynamicEntity / EntityFacts deltas
 ```
-
-1. **Content (`content`)** discovers HBA sources, assembles `WorldBootstrap`, and exposes static lookup-oriented data to the frontend.
-2. **Networking (`session`)** tracks sequence numbers and decrypts data.
-3. **Engine (`core`)** decodes `GameMessage`, coordinates protocol handling, movement execution, and world mutation requests.
-4. **Authority (`world`)** applies the mutation, preserves world invariants, and tells the engine what observably changed.
-5. **App (`cli`)** receives semantic deltas, updates mirrored read caches, and may query frontend-owned content or feed optional shared controllers with world-derived inputs before issuing new commands.

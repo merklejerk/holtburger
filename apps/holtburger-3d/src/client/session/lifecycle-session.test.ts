@@ -40,74 +40,43 @@ import { baselineCurrentState } from "./host-contract.test-support";
 import {
 	emptyPlayerSummary,
 	entityFacts,
+	knownDescription,
 	playerEntitySnapshot,
 } from "../world/entity-mirror.test-support";
-import { describe, expect, it, vi } from "vitest";
+import {
+	controlledPromise,
+	dynamicEntityViewFixture,
+	FakeClientTransport,
+} from "./lifecycle-session.test-support";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
 import { EQUIPMENT_SLOTS } from "../inventory/inventory-equipment";
 import inspectionFixture from "../fixtures/object-inspection-wire.json";
 
 import { landblockVector3 } from "../../lib/assets/ac-frame";
-import type { DynamicEntityView } from "../../lib/game/runtime/dynamic-entity-feed";
 import type { ClientCurrentState, ClientLifecycle } from "./host-contract";
 import type { ResolvedEnchantments } from "../magic/enchantments-view";
 import {
 	ClientLifecycleSession,
-	type ClientLifecycleTransport,
 	type ClientLifecycleSessionEvent,
 } from "./lifecycle-session";
 
-class FakeClientTransport implements ClientLifecycleTransport {
-	readonly calls: string[] = [];
-	readonly invocations: Array<{
-		command: string;
-		args: Record<string, unknown> | undefined;
-	}> = [];
-	readonly handlers = new Map<string, Set<(payload: unknown) => void>>();
-	#currentState: ClientCurrentState = currentState(0x5000_0001);
-	#emitLaggedDeltaBeforeSnapshot = false;
+function createSession(state?: ClientCurrentState): {
+	transport: FakeClientTransport;
+	session: ClientLifecycleSession;
+} {
+	const transport = new FakeClientTransport(state);
+	const session = new ClientLifecycleSession(transport);
+	onTestFinished(() => session.stop());
+	return { transport, session };
+}
 
-	async listen(
-		event: string,
-		handler: (payload: unknown) => void,
-	): Promise<() => void> {
-		this.calls.push(`listen:${event}`);
-		const handlers =
-			this.handlers.get(event) ?? new Set<(payload: unknown) => void>();
-		handlers.add(handler);
-		this.handlers.set(event, handlers);
-		return () => {
-			this.calls.push(`unlisten:${event}`);
-			handlers.delete(handler);
-			if (handlers.size === 0) this.handlers.delete(event);
-		};
-	}
-
-	async invoke(command: string, args?: Record<string, unknown>): Promise<void> {
-		this.calls.push(`invoke:${command}`);
-		this.invocations.push({ command, args });
-		if (command === "request_client_current_state") {
-			if (this.#emitLaggedDeltaBeforeSnapshot) {
-				this.emit("client-dynamic-entity", {
-					kind: "upserted",
-					entity: view(0x5000_0003),
-				});
-			}
-			this.emit("client-current-state", this.#currentState);
-		}
-		void args;
-	}
-
-	setCurrentState(state: ClientCurrentState): void {
-		this.#currentState = state;
-	}
-
-	setEmitLaggedDeltaBeforeSnapshot(enabled: boolean): void {
-		this.#emitLaggedDeltaBeforeSnapshot = enabled;
-	}
-
-	emit(event: string, payload: unknown): void {
-		for (const handler of this.handlers.get(event) ?? []) handler(payload);
-	}
+async function startSession(state?: ClientCurrentState): Promise<{
+	transport: FakeClientTransport;
+	session: ClientLifecycleSession;
+}> {
+	const ctx = createSession(state);
+	await ctx.session.start();
+	return ctx;
 }
 
 describe("ClientLifecycleSession", () => {
@@ -133,13 +102,10 @@ describe("ClientLifecycleSession", () => {
 			kind: "exiting",
 			cause: exit.cause,
 		});
-		session.stop();
 	});
 
 	it("recovers an editor whose preview event was lost without losing its draft", async () => {
-		const transport = new FakeClientTransport();
-		const session = new ClientLifecycleSession(transport);
-		await session.start();
+		const { transport, session } = await startSession();
 		const snapshot = barberSnapshotSchema.parse(barberFixture.snapshot);
 		const state = { ...currentState(1), barber: snapshot };
 		transport.emit("client-current-state", state);
@@ -185,13 +151,10 @@ describe("ClientLifecycleSession", () => {
 		expect(editor.read().choices).toEqual(choices);
 		expect(editor.read().canApply).toBe(true);
 		await editor.destroy();
-		session.stop();
 	});
 
 	it("recovers barber state, delivers previews, and retires canceled interactions", async () => {
-		const transport = new FakeClientTransport();
-		const session = new ClientLifecycleSession(transport);
-		await session.start();
+		const { transport, session } = await startSession();
 		const snapshot = barberSnapshotSchema.parse(barberFixture.snapshot);
 		const events: ClientLifecycleSessionEvent[] = [];
 		session.subscribe((event) => events.push(event));
@@ -218,12 +181,10 @@ describe("ClientLifecycleSession", () => {
 			barber: retired,
 		});
 		expect(session.barberSnapshot().interaction).toBeNull();
-		session.stop();
 	});
 
 	it("starts authority only after listeners are installed and requests snapshots without relaunching", async () => {
-		const transport = new FakeClientTransport();
-		const session = new ClientLifecycleSession(transport);
+		const { transport, session } = createSession();
 		const events: ClientLifecycleSessionEvent[] = [];
 		session.subscribe((event) => events.push(event));
 		const startAuthority = vi.fn(async () => {
@@ -244,11 +205,9 @@ describe("ClientLifecycleSession", () => {
 		);
 		await session.requestCurrentState();
 		expect(startAuthority).toHaveBeenCalledOnce();
-		session.stop();
 	});
 	it("retires every listener and closes camera registration when explicit authority startup fails", async () => {
-		const transport = new FakeClientTransport();
-		const session = new ClientLifecycleSession(transport);
+		const { transport, session } = createSession();
 		await expect(
 			session.start({
 				startAuthority: async () => {
@@ -278,8 +237,7 @@ describe("ClientLifecycleSession", () => {
 	});
 
 	it("forwards a one-time equipped visual delta and recovers it after stream loss without another gameplay change", async () => {
-		const transport = new FakeClientTransport();
-		const session = new ClientLifecycleSession(transport);
+		const { transport, session } = createSession();
 		const stage = vi.fn().mockResolvedValue(undefined);
 		const failure = vi.fn();
 		session.subscribe((event) =>
@@ -309,13 +267,10 @@ describe("ClientLifecycleSession", () => {
 		expect(session.state().playerVisualCapture).toBeNull();
 		expect(stage).toHaveBeenCalledTimes(1);
 		expect(failure).not.toHaveBeenCalled();
-		session.stop();
 	});
 
 	it("recovers a creation result after its delta was lost during resync", async () => {
-		const transport = new FakeClientTransport();
-		const session = new ClientLifecycleSession(transport);
-		await session.start();
+		const { transport, session } = await startSession();
 		transport.emit("client-character-management-changed", {
 			kind: "creating",
 			name: "Amy",
@@ -335,11 +290,9 @@ describe("ClientLifecycleSession", () => {
 			characterManagement: result,
 		});
 		expect(session.state().characterManagement).toEqual(result);
-		session.stop();
 	});
 	it("forwards typed membership activity without deriving it from snapshots or recovery", async () => {
-		const transport = new FakeClientTransport();
-		const session = new ClientLifecycleSession(transport);
+		const { transport, session } = createSession();
 		const changes: unknown[] = [];
 		session.subscribe((event) => {
 			if (event.type === "contract-membership-change")
@@ -372,11 +325,9 @@ describe("ClientLifecycleSession", () => {
 				name: "Quest",
 			}),
 		).toThrow();
-		session.stop();
 	});
 	it("discards time observed during a failed startup before allowing a retry", async () => {
-		const transport = new FakeClientTransport();
-		const session = new ClientLifecycleSession(transport);
+		const { transport, session } = createSession();
 		const invoke = vi
 			.spyOn(transport, "invoke")
 			.mockImplementationOnce(async () => {
@@ -397,8 +348,7 @@ describe("ClientLifecycleSession", () => {
 	it("anchors synchronized time at receipt, advances across late mounts, and clears on stop", async () => {
 		const now = vi.spyOn(performance, "now").mockReturnValue(1000);
 		try {
-			const transport = new FakeClientTransport();
-			const session = new ClientLifecycleSession(transport);
+			const { transport, session } = createSession();
 			expect(session.readServerTime(1000)).toBeNull();
 			await session.start();
 			const baseline = session.readServerTime(1000);
@@ -421,8 +371,7 @@ describe("ClientLifecycleSession", () => {
 		}
 	});
 	it("routes allegiance facts, preferences, commands, portal retention and character retirement", async () => {
-		const transport = new FakeClientTransport();
-		const session = new ClientLifecycleSession(transport);
+		const { transport, session } = createSession();
 		const allegiance = {
 			playerGuid: 42,
 			profile: null,
@@ -477,12 +426,10 @@ describe("ClientLifecycleSession", () => {
 			characterGuid: 43,
 		});
 		expect(session.allegiance.read().snapshot).toBeNull();
-		await session.stop();
 	});
 
 	it("carries row-targeted previews and unused selected sources through the shared wire fixture", async () => {
-		const transport = new FakeClientTransport();
-		const session = new ClientLifecycleSession(transport);
+		const { transport, session } = createSession();
 		const receipts: unknown[] = [];
 		session.subscribe((event) => {
 			if (event.type === "housing-payment-preview") receipts.push(event.result);
@@ -501,12 +448,10 @@ describe("ClientLifecycleSession", () => {
 			housingPreviewWireFixture.result,
 		);
 		expect(receipts).toEqual([housingPreviewWireFixture.result]);
-		session.stop();
 	});
 
 	it("dispatches reviewed management and validates its receipt without another toast owner", async () => {
-		const transport = new FakeClientTransport();
-		const session = new ClientLifecycleSession(transport);
+		const { transport, session } = createSession();
 		const receipts: unknown[] = [];
 		session.subscribe((event) => {
 			if (event.type === "housing-management-finished")
@@ -530,12 +475,10 @@ describe("ClientLifecycleSession", () => {
 		await expect(
 			session.submitHousingManagement({ ...request, sequence: -1 }),
 		).rejects.toThrow();
-		session.stop();
 	});
 
 	it("accepts the housing snapshot produced through the host projection", async () => {
-		const transport = new FakeClientTransport();
-		const session = new ClientLifecycleSession(transport);
+		const { transport, session } = createSession();
 		const housing = housingSnapshotSchema.parse(housingWireFixture);
 		transport.setCurrentState({ ...currentState(1), housing });
 		await session.start();
@@ -543,12 +486,10 @@ describe("ClientLifecycleSession", () => {
 		transport.emit("client-state-resyncing", null);
 		transport.emit("client-current-state", { ...currentState(1), housing });
 		expect(session.housingSnapshot()).toEqual(housingWireFixture);
-		session.stop();
 	});
 
 	it("restores access/search loading without querying and dispatches explicit typed reads", async () => {
-		const transport = new FakeClientTransport();
-		const session = new ClientLifecycleSession(transport);
+		const { transport, session } = createSession();
 		const housing: HousingSnapshot = {
 			...emptyHousing(),
 			access: {
@@ -631,12 +572,9 @@ describe("ClientLifecycleSession", () => {
 		).toThrow();
 		transport.emit("client-housing-updated", emptyHousing());
 		expect(session.housingSnapshot().pendingPayment).toBeNull();
-		session.stop();
 	});
 	it("validates housing preview commands and emits their correlated receipts without retaining opening intent", async () => {
-		const transport = new FakeClientTransport();
-		const session = new ClientLifecycleSession(transport);
-		await session.start();
+		const { transport, session } = await startSession();
 		const receipts: unknown[] = [];
 		session.subscribe((event) => {
 			if (event.type === "housing-payment-preview") receipts.push(event.result);
@@ -691,12 +629,10 @@ describe("ClientLifecycleSession", () => {
 				draft: { ...request.draft, items: [] },
 			}),
 		).rejects.toThrow();
-		session.stop();
 	});
 
 	it("retains housing through travel, replaces it on recovery, and clears it on stop", async () => {
-		const transport = new FakeClientTransport();
-		const session = new ClientLifecycleSession(transport);
+		const { transport, session } = createSession();
 		const home: HousingSnapshot = {
 			...emptyHousing(),
 			home: { kind: "none" },
@@ -782,13 +718,10 @@ describe("ClientLifecycleSession", () => {
 		transport.setCurrentState(currentState(2));
 		await session.start();
 		expect(session.connectionSample()).toBeNull();
-		session.stop();
 	});
 
 	it("dispatches examination and emits the validated cold result", async () => {
-		const transport = new FakeClientTransport();
-		const session = new ClientLifecycleSession(transport);
-		await session.start();
+		const { transport, session } = await startSession();
 		transport.invocations.length = 0;
 		const results: unknown[] = [];
 		session.subscribe((event) => {
@@ -824,7 +757,6 @@ describe("ClientLifecycleSession", () => {
 			command: "cancel_client_appraisal",
 			args: { guid: inspectionFixture.item.guid, demand: "facts-only" },
 		});
-		session.stop();
 	});
 
 	it("commits container access with pending contents and replaces it coherently after loss", async () => {
@@ -915,12 +847,10 @@ describe("ClientLifecycleSession", () => {
 			command: "close_client_container",
 			args: { guid: root },
 		});
-		session.stop();
 	});
 
 	it("keeps social readiness separate from combat mode and forwards correlated playback results", async () => {
-		const transport = new FakeClientTransport();
-		const session = new ClientLifecycleSession(transport);
+		const { transport, session } = createSession();
 		const observed = vi.fn<(event: ClientLifecycleSessionEvent) => void>();
 		session.subscribe(observed);
 		await session.start();
@@ -948,12 +878,10 @@ describe("ClientLifecycleSession", () => {
 			type: "local-motion-feedback",
 			feedback,
 		});
-		session.stop();
 	});
 
 	it("casts only in confirmed magic and forwards each caller-owned aim", async () => {
-		const transport = new FakeClientTransport();
-		const session = new ClientLifecycleSession(transport);
+		const { transport, session } = createSession();
 		const targeted = { kind: "normal", selection: 7 } as const;
 		await expect(session.castSpell(42, targeted)).rejects.toThrow(
 			"Spell session",
@@ -990,8 +918,7 @@ describe("ClientLifecycleSession", () => {
 	});
 
 	it("toggles only in world and reconciles stance through events and replacement snapshots", async () => {
-		const transport = new FakeClientTransport();
-		const session = new ClientLifecycleSession(transport);
+		const { transport, session } = createSession();
 		await session.toggleCombatMode();
 		expect(transport.calls).toEqual([]);
 		await session.start();
@@ -1022,12 +949,10 @@ describe("ClientLifecycleSession", () => {
 		transport.calls.length = 0;
 		await session.toggleCombatMode();
 		expect(transport.calls).toEqual([]);
-		session.stop();
 	});
 
 	it("forwards silent posture targets and cancellation without optimistic stance changes", async () => {
-		const transport = new FakeClientTransport();
-		const session = new ClientLifecycleSession(transport);
+		const { transport, session } = createSession();
 		await expect(session.setRestPosture("lying")).rejects.toThrow(
 			"unavailable",
 		);
@@ -1049,12 +974,10 @@ describe("ClientLifecycleSession", () => {
 			{ command: "cancel_client_rest_posture", args: undefined },
 		]);
 		expect(session.state().combatMode).toBe("magic");
-		session.stop();
 	});
 
 	it("requests peace explicitly and leaves confirmation to server events", async () => {
-		const transport = new FakeClientTransport();
-		const session = new ClientLifecycleSession(transport);
+		const { transport, session } = createSession();
 		await expect(session.setCombatMode("peace")).rejects.toThrow("unavailable");
 		await session.start();
 		transport.emit("client-current-state", {
@@ -1068,13 +991,10 @@ describe("ClientLifecycleSession", () => {
 		expect(session.state().combatMode).toBe("magic");
 		transport.emit("client-combat-mode-updated", { mode: "peace" });
 		expect(session.state().combatMode).toBe("peace");
-		session.stop();
 	});
 
 	it("recovers known spells from snapshots and preserves them across portal updates", async () => {
-		const transport = new FakeClientTransport();
-		const session = new ClientLifecycleSession(transport);
-		await session.start();
+		const { transport, session } = await startSession();
 		expect(session.state().knownSpells).toBeNull();
 		transport.emit("client-current-state", {
 			...currentState(0x50000001),
@@ -1231,13 +1151,11 @@ describe("ClientLifecycleSession", () => {
 			"Could not equip Saved Silver Ring to Left ring: The server rejected the equipment request",
 			"Could not clear Main hand: The server rejected the equipment request",
 		]);
-		session.stop();
 	});
 	it.each([false, true])(
 		"submits equipment identity and off-side preference %s",
 		async (alternate) => {
-			const transport = new FakeClientTransport();
-			const session = new ClientLifecycleSession(transport);
+			const { transport, session } = createSession();
 			await session.equipItem(91, alternate);
 			expect(transport.invocations).toEqual([
 				{
@@ -1255,8 +1173,7 @@ describe("ClientLifecycleSession", () => {
 	);
 
 	it("snapshots auto-merge policy from client tuning and submits one container command", async () => {
-		const transport = new FakeClientTransport();
-		const session = new ClientLifecycleSession(transport);
+		const { transport, session } = createSession();
 		await session.autoMergeContainer(7);
 		expect(transport.invocations).toEqual([
 			{
@@ -1287,8 +1204,7 @@ describe("ClientLifecycleSession", () => {
 	});
 
 	it("routes correlated inventory previews and submits semantic identities", async () => {
-		const transport = new FakeClientTransport();
-		const session = new ClientLifecycleSession(transport);
+		const { transport, session } = createSession();
 		const results: unknown[] = [];
 		session.subscribe((event) => {
 			if (event.type === "inventory-preview") results.push(event.result);
@@ -1393,12 +1309,10 @@ describe("ClientLifecycleSession", () => {
 		});
 		await session.submitInventory(intent);
 		expect(transport.invocations.at(-1)?.args?.storage).toEqual(storage);
-		session.stop();
 	});
 
 	it("delivers validated action feedback and detaches its listener on stop", async () => {
-		const transport = new FakeClientTransport();
-		const session = new ClientLifecycleSession(transport);
+		const { transport, session } = createSession();
 		const feedback: unknown[] = [];
 		session.subscribe((event) => {
 			if (event.type === "action-feedback") feedback.push(event.feedback);
@@ -1437,10 +1351,7 @@ describe("ClientLifecycleSession", () => {
 	});
 
 	it("installs every listener before requesting the initial replacement state", async () => {
-		const transport = new FakeClientTransport();
-		const session = new ClientLifecycleSession(transport);
-
-		await session.start();
+		const { transport, session } = await startSession();
 
 		const requestIndex = transport.calls.indexOf(
 			"invoke:request_client_current_state",
@@ -1518,7 +1429,6 @@ describe("ClientLifecycleSession", () => {
 		});
 		expect(evaluations()).toHaveLength(4);
 		expect(session.characterSheet.read().progressionUnavailable).toBeNull();
-		session.stop();
 	});
 
 	it("restores a sheet from the snapshot and ignores retired character updates", async () => {
@@ -1583,7 +1493,6 @@ describe("ClientLifecycleSession", () => {
 				},
 			},
 		]);
-		session.stop();
 	});
 
 	it("accepts the completed character-entry baseline and subsequent inventory deltas", async () => {
@@ -1641,25 +1550,7 @@ describe("ClientLifecycleSession", () => {
 				upserts: [
 					entityFacts(item.guid, {
 						...item,
-						description: {
-							kind: "known",
-							name: "Updated item",
-							healthQuery: "ineligible",
-							itemType: 0,
-							hasAlternateEquipSide: false,
-							builtInSpell: null,
-							mapCategory: "other",
-							objectFlags: 0,
-							wcid: null,
-							equipLocations: null,
-							consumable: null,
-							useCapability: "direct" as const,
-							cooldown: null,
-							stackCount: null,
-							structure: { current: null, max: null },
-							icon: { base: null, overlay: null, underlay: null, uiEffects: 0 },
-							equipmentCantrip: null,
-						},
+						description: knownDescription("Updated item"),
 					}),
 				],
 				removed: [],
@@ -1669,25 +1560,9 @@ describe("ClientLifecycleSession", () => {
 				throw new Error("Character entry did not establish inventory.");
 			expect(read.level.playerGuid).toBe(playerGuid);
 			expect([...read.level.entities.keys()]).toEqual([playerGuid, item.guid]);
-			expect(read.level.entities.get(item.guid)?.description).toEqual({
-				kind: "known",
-				name: "Updated item",
-				healthQuery: "ineligible",
-				itemType: 0,
-				hasAlternateEquipSide: false,
-				builtInSpell: null,
-				mapCategory: "other",
-				objectFlags: 0,
-				wcid: null,
-				equipLocations: null,
-				consumable: null,
-				useCapability: "direct" as const,
-				cooldown: null,
-				stackCount: null,
-				structure: { current: null, max: null },
-				icon: { base: null, overlay: null, underlay: null, uiEffects: 0 },
-				equipmentCantrip: null,
-			});
+			expect(read.level.entities.get(item.guid)?.description).toEqual(
+				knownDescription("Updated item"),
+			);
 			// Leaving the character retains the cache until the next entry replaces it.
 			transport.emit("client-lifecycle-changed", { kind: "logging-out" });
 			transport.emit("client-lifecycle-changed", {
@@ -1698,7 +1573,6 @@ describe("ClientLifecycleSession", () => {
 			});
 			expect(session.entities.read()).toBe(read);
 		}
-		session.stop();
 	});
 
 	it("replaces character identity and inventory together on logout before re-entry", async () => {
@@ -1754,7 +1628,6 @@ describe("ClientLifecycleSession", () => {
 			throw new Error("Re-entry must establish the new character baseline.");
 		expect(entered.level.playerGuid).toBe(player);
 		expect([...entered.level.entities.keys()]).toEqual([player]);
-		session.stop();
 	});
 
 	it("retires semantic state on stop and accepts reused GUIDs only from a new baseline", async () => {
@@ -1783,25 +1656,9 @@ describe("ClientLifecycleSession", () => {
 			worldContainer: { kind: "closed" },
 			entities: [
 				entityFacts(9, {
-					description: {
-						kind: "known",
-						name: "New character",
+					description: knownDescription("New character", {
 						healthQuery: "eligible",
-						itemType: 0,
-						hasAlternateEquipSide: false,
-						builtInSpell: null,
-						mapCategory: "other",
-						objectFlags: 0,
-						wcid: null,
-						equipLocations: null,
-						consumable: null,
-						useCapability: "direct" as const,
-						cooldown: null,
-						stackCount: null,
-						structure: { current: null, max: null },
-						icon: { base: null, overlay: null, underlay: null, uiEffects: 0 },
-						equipmentCantrip: null,
-					},
+					}),
 				}),
 			],
 		};
@@ -1811,36 +1668,20 @@ describe("ClientLifecycleSession", () => {
 		if (read.kind !== "current")
 			throw new Error("Restart did not establish a baseline.");
 		expect([...read.level.entities.keys()]).toEqual([9]);
-		expect(read.level.entities.get(9)?.description).toEqual({
-			kind: "known",
-			name: "New character",
-			healthQuery: "eligible",
-			itemType: 0,
-			hasAlternateEquipSide: false,
-			builtInSpell: null,
-			mapCategory: "other",
-			objectFlags: 0,
-			wcid: null,
-			equipLocations: null,
-			consumable: null,
-			useCapability: "direct" as const,
-			cooldown: null,
-			stackCount: null,
-			structure: { current: null, max: null },
-			icon: { base: null, overlay: null, underlay: null, uiEffects: 0 },
-			equipmentCantrip: null,
-		});
-		session.stop();
+		expect(read.level.entities.get(9)?.description).toEqual(
+			knownDescription("New character", { healthQuery: "eligible" }),
+		);
 	});
 
 	it("keeps shell and both mirrors unchanged when replacement validation fails", async () => {
-		const transport = new FakeClientTransport();
-		const session = new ClientLifecycleSession(transport);
-		await session.start();
+		const { transport, session } = await startSession();
 		const before = session.entities.read();
 		const player = session.state().playerGuid;
 		const invalid = currentState(9);
-		invalid.dynamic.entities = [view(9), view(9)];
+		invalid.dynamic.entities = [
+			dynamicEntityViewFixture(9),
+			dynamicEntityViewFixture(9),
+		];
 		expect(() => transport.emit("client-current-state", invalid)).toThrow(
 			"duplicate GUID",
 		);
@@ -1852,9 +1693,7 @@ describe("ClientLifecycleSession", () => {
 	});
 
 	it("marks recovery pending, gates both delta paths, and notifies only after replacement", async () => {
-		const transport = new FakeClientTransport();
-		const session = new ClientLifecycleSession(transport);
-		await session.start();
+		const { transport, session } = await startSession();
 		transport.emit("client-state-resyncing", null);
 		expect(session.entities.read().kind).toBe("pending");
 		transport.emit("client-entity-facts-changed", {
@@ -1866,7 +1705,7 @@ describe("ClientLifecycleSession", () => {
 		});
 		transport.emit("client-dynamic-entity", {
 			kind: "upserted",
-			entity: view(9),
+			entity: dynamicEntityViewFixture(9),
 		});
 		expect(session.entities.read().kind).toBe("pending");
 		const observed: number[] = [];
@@ -1886,8 +1725,7 @@ describe("ClientLifecycleSession", () => {
 	});
 
 	it("submits and delivers correlated entity-selection queries without mutating state", async () => {
-		const transport = new FakeClientTransport();
-		const session = new ClientLifecycleSession(transport);
+		const { transport, session } = createSession();
 		const delivered: unknown[] = [];
 		session.subscribe((event) => {
 			if (event.type === "entity-selection-query-result")
@@ -1929,8 +1767,7 @@ describe("ClientLifecycleSession", () => {
 	});
 
 	it("validates precise-jump commands and projects correlated results", async () => {
-		const transport = new FakeClientTransport();
-		const session = new ClientLifecycleSession(transport);
+		const { transport, session } = createSession();
 		const events: string[] = [];
 		session.subscribe((event) => events.push(event.type));
 		await session.start();
@@ -1994,9 +1831,7 @@ describe("ClientLifecycleSession", () => {
 	});
 
 	it("suppresses deltas during recovery and accepts only the replacement snapshot", async () => {
-		const transport = new FakeClientTransport();
-		const session = new ClientLifecycleSession(transport);
-		await session.start();
+		const { transport, session } = await startSession();
 
 		transport.setCurrentState(currentState(0x5000_0002));
 		transport.setEmitLaggedDeltaBeforeSnapshot(true);
@@ -2008,8 +1843,7 @@ describe("ClientLifecycleSession", () => {
 	});
 
 	it("advances world generation atomically with portal lifecycle and rejects stale portals", async () => {
-		const transport = new FakeClientTransport();
-		const session = new ClientLifecycleSession(transport);
+		const { transport, session } = createSession();
 		const lifecycles: ClientLifecycle[] = [];
 		session.subscribe((event) => {
 			if (event.type === "lifecycle") lifecycles.push(event.lifecycle);
@@ -2041,9 +1875,7 @@ describe("ClientLifecycleSession", () => {
 	});
 
 	it("resolves deletion identity to the current roster slot and restores by GUID", async () => {
-		const transport = new FakeClientTransport();
-		const session = new ClientLifecycleSession(transport);
-		await session.start();
+		const { transport, session } = await startSession();
 		transport.emit("client-lifecycle-changed", {
 			kind: "character-selection",
 			rejection: null,
@@ -2082,8 +1914,7 @@ describe("ClientLifecycleSession", () => {
 	});
 
 	it("projects strict lifecycle, time, correction, and terminal updates", async () => {
-		const transport = new FakeClientTransport();
-		const session = new ClientLifecycleSession(transport);
+		const { transport, session } = createSession();
 		const events: string[] = [];
 		session.subscribe((event) => events.push(event.type));
 		await session.start();
@@ -2163,9 +1994,7 @@ describe("ClientLifecycleSession", () => {
 	});
 
 	it("validates the renderer drive before crossing the host command seam", async () => {
-		const transport = new FakeClientTransport();
-		const session = new ClientLifecycleSession(transport);
-		await session.start();
+		const { transport, session } = await startSession();
 		transport.calls.length = 0;
 		transport.invocations.length = 0;
 
@@ -2199,9 +2028,7 @@ describe("ClientLifecycleSession", () => {
 	});
 
 	it("validates and forwards ordered character-motion edges without reshaping them", async () => {
-		const transport = new FakeClientTransport();
-		const session = new ClientLifecycleSession(transport);
-		await session.start();
+		const { transport, session } = await startSession();
 		transport.calls.length = 0;
 		transport.invocations.length = 0;
 		const release = {
@@ -2235,8 +2062,7 @@ describe("ClientLifecycleSession", () => {
 	});
 
 	it("replaces charge timing and projects sequenced character-motion feedback", async () => {
-		const transport = new FakeClientTransport();
-		const session = new ClientLifecycleSession(transport);
+		const { transport, session } = createSession();
 		const events: string[] = [];
 		session.subscribe((event) => events.push(event.type));
 		await session.start();
@@ -2260,16 +2086,13 @@ describe("ClientLifecycleSession", () => {
 	});
 
 	it("submits one exact character identity for an explicit enter action", async () => {
-		const transport = new FakeClientTransport();
-		const session = new ClientLifecycleSession(transport);
-		await session.start();
+		const { transport, session } = await startSession();
 		transport.calls.length = 0;
 
 		await session.enterWorld(0x5000_0002);
 		await session.enterWorld(0x5000_0002);
 
 		expect(transport.calls).toEqual(["invoke:select_client_character"]);
-		session.stop();
 	});
 
 	it("publishes membership and HUD presence independently without publishing vital churn", async () => {
@@ -2331,8 +2154,7 @@ describe("ClientLifecycleSession", () => {
 	});
 
 	it("recovers party without a sibling event, preserves early hydration through revelation, and retires it on stop", async () => {
-		const transport = new FakeClientTransport();
-		const session = new ClientLifecycleSession(transport);
+		const { transport, session } = createSession();
 		const party: PartySnapshot = {
 			name: "Raid",
 			leader: 1,
@@ -2554,9 +2376,7 @@ describe("ClientLifecycleSession", () => {
 	});
 
 	it("retains appearance updates and submits an appearance change", async () => {
-		const transport = new FakeClientTransport();
-		const session = new ClientLifecycleSession(transport);
-		await session.start();
+		const { transport, session } = await startSession();
 
 		transport.emit("client-character-preferences-updated", {
 			appearance: { showHelmet: false, showCloak: true },
@@ -2575,12 +2395,10 @@ describe("ClientLifecycleSession", () => {
 			command: "set_client_appearance_option",
 			args: { option: "helmet", enabled: true },
 		});
-		session.stop();
 	});
 
 	it("restores appearance from snapshots, retains it during teleport, and retires it on character changes and resync", async () => {
-		const transport = new FakeClientTransport();
-		const session = new ClientLifecycleSession(transport);
+		const { transport, session } = createSession();
 		const options = { showHelmet: false, showCloak: true };
 		const snapshot = {
 			...currentState(0x50000001),
@@ -2617,8 +2435,7 @@ describe("ClientLifecycleSession", () => {
 	});
 
 	it("sends visible local speech and rejects empty input before transport", async () => {
-		const transport = new FakeClientTransport();
-		const session = new ClientLifecycleSession(transport);
+		const { transport, session } = createSession();
 
 		await session.sendChat({ kind: "speech", message: "Hello world" });
 		expect(transport.calls).toEqual(["invoke:send_client_chat"]);
@@ -2629,9 +2446,7 @@ describe("ClientLifecycleSession", () => {
 	});
 
 	it("carries begin/stop identities through commands and unchanged idle status", async () => {
-		const transport = new FakeClientTransport();
-		const session = new ClientLifecycleSession(transport);
-		await session.start();
+		const { transport, session } = await startSession();
 		const profile = { kind: "melee", height: "medium", power: 0.5 } as const;
 		await session.beginCombatEngagement(7, profile, 31);
 		await session.updateCombatProfile(profile);
@@ -2676,8 +2491,7 @@ describe("ClientLifecycleSession", () => {
 	});
 
 	it("dispatches recall identities and recovers choices from replacement state", async () => {
-		const transport = new FakeClientTransport();
-		const session = new ClientLifecycleSession(transport);
+		const { transport, session } = createSession();
 		const choices: string[][] = [];
 		session.subscribe((event) => {
 			if (event.type === "recall-destinations")
@@ -2713,12 +2527,10 @@ describe("ClientLifecycleSession", () => {
 			command: "recall_client",
 			args: { destination: "allegiance-hometown" },
 		});
-		session.stop();
 	});
 
 	it("submits finite map points and forwards authoritative permission edges", async () => {
-		const transport = new FakeClientTransport();
-		const session = new ClientLifecycleSession(transport);
+		const { transport, session } = createSession();
 		const permissions: boolean[] = [];
 		const unsubscribe = session.subscribe((event) => {
 			if (event.type === "map-teleport-capability")
@@ -2741,8 +2553,338 @@ describe("ClientLifecycleSession", () => {
 		).rejects.toThrow();
 		expect(transport.invocations).toHaveLength(count);
 		unsubscribe();
-		session.stop();
 	});
+
+	it.each([0, 3])(
+		"retires listener installer %i after stop without launching authority",
+		async (heldIndex) => {
+			const { transport, session } = createSession();
+			const gate = controlledPromise<void>();
+			const original = transport.listen.bind(transport);
+			let installIndex = 0;
+			const listen = vi
+				.spyOn(transport, "listen")
+				.mockImplementation(async (event, handler) => {
+					if (installIndex++ === heldIndex) await gate.promise;
+					return original(event, handler);
+				});
+			const launch = vi.fn(async () => {});
+			const cancelled = expect(
+				session.start({ startAuthority: launch }),
+			).rejects.toMatchObject({ name: "AbortError" });
+			await vi.waitFor(() =>
+				expect(listen).toHaveBeenCalledTimes(heldIndex + 1),
+			);
+			session.stop();
+			await cancelled;
+			gate.resolve(undefined);
+			await vi.waitFor(() =>
+				expect(
+					transport.calls.filter((call) => call.startsWith("unlisten:")),
+				).toHaveLength(heldIndex + 1),
+			);
+			expect(transport.handlers.size).toBe(0);
+			expect(launch).not.toHaveBeenCalled();
+			expect(transport.invocations).toHaveLength(0);
+		},
+	);
+	it("cancels the local native-launch wait while retaining terminal observation for retirement", async () => {
+		const { transport, session } = createSession();
+		const gate = controlledPromise<void>();
+		const launch = vi.fn(() => gate.promise);
+		const cancelled = expect(
+			session.start({ startAuthority: launch }),
+		).rejects.toMatchObject({ name: "AbortError" });
+		await vi.waitFor(() => expect(launch).toHaveBeenCalledOnce());
+		session.cancelStartup();
+		await cancelled;
+		expect(transport.handlers.has("client-exit-requested")).toBe(true);
+		transport.emit("client-exit-requested", {
+			cause: "explicit-disconnect",
+			diagnostic: "Startup cancelled",
+		});
+		expect(session.state().exit?.diagnostic).toBe("Startup cancelled");
+		gate.resolve(undefined);
+		await Promise.resolve();
+		expect(transport.invocations).toHaveLength(0);
+		session.stop();
+		expect(transport.handlers.size).toBe(0);
+	});
+	it("does not let a late retired installer stop a fresh attachment", async () => {
+		const { transport, session } = createSession();
+		const gate = controlledPromise<void>();
+		const original = transport.listen.bind(transport);
+		const listen = vi
+			.spyOn(transport, "listen")
+			.mockImplementationOnce(async (event, handler) => {
+				await gate.promise;
+				return original(event, handler);
+			});
+		const cancelled = expect(session.start()).rejects.toMatchObject({
+			name: "AbortError",
+		});
+		await vi.waitFor(() => expect(listen).toHaveBeenCalledOnce());
+		session.stop();
+		await cancelled;
+		await session.start();
+		gate.resolve(undefined);
+		await vi.waitFor(() =>
+			expect(transport.calls).toContain("unlisten:client-dynamic-entity"),
+		);
+		transport.emit("client-world-name-updated", { name: "Fresh attachment" });
+		expect(session.state().worldName).toBe("Fresh attachment");
+		expect(transport.handlers.has("client-dynamic-entity")).toBe(true);
+		session.stop();
+		expect(transport.handlers.size).toBe(0);
+	});
+
+	it("delivers host-projected vendor contracts through the real session into the draft owner", async () => {
+		const { transport, session } = await startSession();
+		const failures: string[] = [];
+		const icons = new UiIconRepository({
+			prepare: async (requests) =>
+				requests.map(({ key }) => ({
+					kind: "ready",
+					key,
+					image: new Uint8Array([1]),
+				})),
+			createImage: async () => "blob:fixture",
+			revokeImage: () => {},
+			report: () => {},
+		});
+		const model = new ClientVendorState(
+			session,
+			icons,
+			(message) => failures.push(message),
+			() => 0,
+		);
+		const latest = () => {
+			const args = transport.invocations.at(-1)?.args;
+			if (args === undefined) throw new Error("No vendor command");
+			return vendorRequestSchema.parse(args.request);
+		};
+		try {
+			transport.emit(
+				"client-vendor-approached",
+				vendorFixture.snapshot.payload,
+			);
+			model.read();
+			const opening = latest();
+			transport.emit(vendorFixture.preview.event, {
+				...vendorFixture.preview.payload,
+				sequence: opening.sequence,
+				outcome: {
+					kind: "ready",
+					quote: { ...vendorFixture.preview.payload.outcome.quote, buys: [] },
+				},
+			});
+			model.queueBuy(1000);
+			model.confirmBuyQuantity(1000, 10);
+			const candidate = latest();
+			expect(candidate.draft).toEqual({
+				vendor: 100,
+				buys: [{ item: 1000, amount: 10 }],
+				sells: [],
+			});
+			transport.emit(vendorFixture.preview.event, {
+				...vendorFixture.preview.payload,
+				sequence: candidate.sequence,
+			});
+			expect(model.read()?.queue).toMatchObject([
+				{ name: "Food", amount: 10, total: 100 },
+			]);
+			expect(model.read()?.quote?.currencies).toHaveLength(2);
+			model.trade();
+			const submitted = latest();
+			expect(transport.invocations.at(-1)?.command).toBe(
+				"submit_client_vendor",
+			);
+			transport.emit(vendorFixture.phase.event, vendorFixture.phase.payload);
+			expect(model.read()?.phase).toBe("buying");
+			transport.emit(vendorFixture.failed.event, {
+				...vendorFixture.failed.payload,
+				sequence: submitted.sequence,
+			});
+			expect(failures).toEqual(["Purchase failed. Purchase refused"]);
+			expect(latest().draft.buys).toEqual(submitted.draft.buys);
+			model.close();
+			transport.emit(
+				vendorFixture.snapshot.event,
+				vendorFixture.snapshot.payload,
+			);
+			expect(session.vendorSnapshot()).toEqual(vendorFixture.snapshot.payload);
+			expect(model.read()).toBeNull();
+			transport.emit(
+				"client-vendor-approached",
+				vendorFixture.snapshot.payload,
+			);
+			expect(model.read()?.vendor).toBe(100);
+			transport.emit(vendorFixture.closed.event, vendorFixture.closed.payload);
+			expect(model.read()).toBeNull();
+			transport.emit("client-current-state", {
+				...currentState(1),
+				vendor: vendorFixture.snapshot.payload,
+			});
+			expect(session.vendorSnapshot()).toEqual(vendorFixture.snapshot.payload);
+			transport.emit("client-current-state", currentState(1));
+			expect(session.vendorSnapshot()).toBeNull();
+		} finally {
+			model.destroy();
+			icons.dispose();
+			session.stop();
+		}
+	});
+
+	it.each(["incremental", "snapshot"])(
+		"releases same-character entry suppression on %s refusal",
+		async (delivery) => {
+			const { transport, session } = await startSession();
+			await session.enterWorld(7);
+			const lifecycle: ClientLifecycle = {
+				kind: "character-selection",
+				maxSlots: 11,
+				characters: [{ guid: 7, name: "Mira", slot: 0, deleteTime: 0 }],
+				rejection: "The character is still in the world.",
+			};
+			if (delivery === "incremental")
+				transport.emit("client-lifecycle-changed", lifecycle);
+			else {
+				transport.setCurrentState({ ...currentState(7), lifecycle });
+				await session.requestCurrentState();
+			}
+			expect(session.state().lifecycle).toEqual(lifecycle);
+			await session.enterWorld(7);
+			expect(
+				transport.calls.filter(
+					(call) => call === "invoke:select_client_character",
+				),
+			).toHaveLength(2);
+			await session.stop();
+		},
+	);
+
+	it.each(["stop", "logging-out", "character-selection"] as const)(
+		"clears vendor, trade, barber, housing, and pack affinities on %s while retaining them across teleport",
+		async (retirement) => {
+			const player = 0x5000_0001;
+			const pack = 7;
+			const item = 91;
+			const state = currentState(player);
+			const carried = entityFacts(item, {
+				ownedByPlayer: true,
+				location: {
+					kind: "contained",
+					parentGuid: pack,
+					slot: { kind: "item", index: 0 },
+				},
+			});
+			const housing = housingSnapshotSchema.parse(housingWireFixture);
+			const barber = barberSnapshotSchema.parse(barberFixture.snapshot);
+			const trade = {
+				trade: {
+					revision: 1,
+					partner_guid: 55,
+					initiator_guid: player,
+					self_side: { guid: player, accepted: false, items: [] },
+					partner_side: { guid: 55, accepted: false, items: [] },
+				},
+				pending_items: [item],
+			};
+			const vendor = vendorSnapshotSchema.parse(vendorFixture.snapshot.payload);
+			const transport = new FakeClientTransport();
+			transport.setCurrentState({
+				...state,
+				vendor,
+				housing,
+				barber,
+				trade,
+				entities: {
+					...state.entities,
+					entities: [
+						...state.entities.entities,
+						entityFacts(pack, {
+							ownedByPlayer: true,
+							location: {
+								kind: "contained",
+								parentGuid: player,
+								slot: { kind: "pack", entryKind: "container", index: 0 },
+							},
+						}),
+						carried,
+					],
+				},
+			});
+			const session = new ClientLifecycleSession(transport);
+			await session.start();
+			transport.emit("client-entity-facts-changed", {
+				projectileSupply: null,
+				player: null,
+				worldContainer: null,
+				removed: [],
+				upserts: [
+					{
+						...carried,
+						location: {
+							kind: "equipped",
+							wearerGuid: player,
+							mask: EQUIPMENT_SLOTS[0].mask,
+						},
+					},
+				],
+			});
+			expect(session.vendorSnapshot()).toEqual(vendorFixture.snapshot.payload);
+			expect(session.tradeSnapshot()).toEqual(trade);
+			expect(session.barberSnapshot()).toEqual(barber);
+			expect(session.housingSnapshot()).toEqual(housing);
+			expect(session.packAffinities.storage(session.entities.read())).toEqual({
+				preferred: { [item]: pack },
+				fallback: [player, pack],
+			});
+
+			// Portal teleport preserves all character-scoped snapshots and pack affinities.
+			transport.emit("client-lifecycle-changed", {
+				kind: "portal-space",
+				worldGeneration: state.worldGeneration + 1,
+				cause: "teleport",
+			});
+			expect(session.vendorSnapshot()).toEqual(vendorFixture.snapshot.payload);
+			expect(session.tradeSnapshot()).toEqual(trade);
+			expect(session.barberSnapshot()).toEqual(barber);
+			expect(session.housingSnapshot()).toEqual(housing);
+			expect(session.packAffinities.storage(session.entities.read())).toEqual({
+				preferred: { [item]: pack },
+				fallback: [player, pack],
+			});
+
+			if (retirement === "stop") {
+				session.stop();
+			} else if (retirement === "logging-out") {
+				transport.emit("client-lifecycle-changed", { kind: "logging-out" });
+			} else {
+				transport.emit("client-lifecycle-changed", {
+					kind: "character-selection",
+					rejection: null,
+					maxSlots: 11,
+					characters: [],
+				});
+			}
+			expect(session.vendorSnapshot()).toBeNull();
+			expect(session.tradeSnapshot()).toEqual({
+				trade: null,
+				pending_items: [],
+			});
+			expect(session.barberSnapshot()).toEqual({
+				interaction: null,
+				result: null,
+				particles: null,
+			});
+			expect(session.housingSnapshot()).toEqual(emptyHousing());
+			expect(session.packAffinities.storage(session.entities.read())).toEqual({
+				preferred: {},
+				fallback: retirement === "stop" ? [] : [player, pack],
+			});
+		},
+	);
 });
 
 function characterSheet(
@@ -2806,396 +2948,7 @@ function currentState(playerGuid: number): ClientCurrentState {
 		playerName: "Drudge",
 		dynamic: {
 			hostTime: { seconds: 10 },
-			entities: [view(playerGuid)],
+			entities: [dynamicEntityViewFixture(playerGuid)],
 		},
 	});
 }
-
-function view(guid: number): DynamicEntityView {
-	return {
-		generation: 1,
-		identity: { guid, wcid: 42 },
-		display: { name: "Drudge", level: null },
-		presentation: {
-			placementFrame: 0,
-			entityClass: "other",
-			content: {
-				motionTableDid: null,
-				setupDid: 0x0200_0001,
-				soundTableDid: null,
-				physicsEffectTableDid: null,
-			},
-			appearance: {
-				paletteDid: null,
-				subPalettes: [],
-				textureChanges: [],
-				partChanges: [],
-			},
-			objectScale: 1,
-			radar: {
-				behavior: null,
-				category: "other",
-				obviousRange: null,
-			},
-		},
-		physics: {
-			semanticMask: 0,
-			participation: "pose-only",
-			noDraw: false,
-			hidden: false,
-			cloaked: false,
-			translucency: 0,
-			lighting: false,
-			defaultAnimation: false,
-			defaultScript: false,
-		},
-		placement: {
-			kind: "attached",
-			parent: 0,
-			parentLocation: "none",
-			placement: "default",
-		},
-		motion: null,
-	};
-}
-
-it.each([0, 3])(
-	"retires listener installer %i after stop without launching authority",
-	async (heldIndex) => {
-		const transport = new FakeClientTransport();
-		const session = new ClientLifecycleSession(transport);
-		let release: () => void = () => {
-			throw new Error("Gate not initialized.");
-		};
-		const gate = new Promise<void>((resolve) => {
-			release = resolve;
-		});
-		const original = transport.listen.bind(transport);
-		let installIndex = 0;
-		const listen = vi
-			.spyOn(transport, "listen")
-			.mockImplementation(async (event, handler) => {
-				if (installIndex++ === heldIndex) await gate;
-				return original(event, handler);
-			});
-		const launch = vi.fn(async () => {});
-		const cancelled = expect(
-			session.start({ startAuthority: launch }),
-		).rejects.toMatchObject({ name: "AbortError" });
-		await vi.waitFor(() => expect(listen).toHaveBeenCalledTimes(heldIndex + 1));
-		session.stop();
-		await cancelled;
-		release();
-		await vi.waitFor(() =>
-			expect(
-				transport.calls.filter((call) => call.startsWith("unlisten:")),
-			).toHaveLength(heldIndex + 1),
-		);
-		expect(transport.handlers.size).toBe(0);
-		expect(launch).not.toHaveBeenCalled();
-		expect(transport.invocations).toHaveLength(0);
-	},
-);
-it("cancels the local native-launch wait while retaining terminal observation for retirement", async () => {
-	const transport = new FakeClientTransport();
-	const session = new ClientLifecycleSession(transport);
-	let release: () => void = () => {
-		throw new Error("Gate not initialized.");
-	};
-	const gate = new Promise<void>((resolve) => {
-		release = resolve;
-	});
-	const launch = vi.fn(() => gate);
-	const cancelled = expect(
-		session.start({ startAuthority: launch }),
-	).rejects.toMatchObject({ name: "AbortError" });
-	await vi.waitFor(() => expect(launch).toHaveBeenCalledOnce());
-	session.cancelStartup();
-	await cancelled;
-	expect(transport.handlers.has("client-exit-requested")).toBe(true);
-	transport.emit("client-exit-requested", {
-		cause: "explicit-disconnect",
-		diagnostic: "Startup cancelled",
-	});
-	expect(session.state().exit?.diagnostic).toBe("Startup cancelled");
-	release();
-	await Promise.resolve();
-	expect(transport.invocations).toHaveLength(0);
-	session.stop();
-	expect(transport.handlers.size).toBe(0);
-});
-it("does not let a late retired installer stop a fresh attachment", async () => {
-	const transport = new FakeClientTransport();
-	const session = new ClientLifecycleSession(transport);
-	let release: () => void = () => {
-		throw new Error("Gate not initialized.");
-	};
-	const gate = new Promise<void>((resolve) => {
-		release = resolve;
-	});
-	const original = transport.listen.bind(transport);
-	const listen = vi
-		.spyOn(transport, "listen")
-		.mockImplementationOnce(async (event, handler) => {
-			await gate;
-			return original(event, handler);
-		});
-	const cancelled = expect(session.start()).rejects.toMatchObject({
-		name: "AbortError",
-	});
-	await vi.waitFor(() => expect(listen).toHaveBeenCalledOnce());
-	session.stop();
-	await cancelled;
-	await session.start();
-	release();
-	await vi.waitFor(() =>
-		expect(transport.calls).toContain("unlisten:client-dynamic-entity"),
-	);
-	transport.emit("client-world-name-updated", { name: "Fresh attachment" });
-	expect(session.state().worldName).toBe("Fresh attachment");
-	expect(transport.handlers.has("client-dynamic-entity")).toBe(true);
-	session.stop();
-	expect(transport.handlers.size).toBe(0);
-});
-
-it("delivers host-projected vendor contracts through the real session into the draft owner", async () => {
-	const transport = new FakeClientTransport();
-	const session = new ClientLifecycleSession(transport);
-	await session.start();
-	const failures: string[] = [];
-	const icons = new UiIconRepository({
-		prepare: async (requests) =>
-			requests.map(({ key }) => ({
-				kind: "ready",
-				key,
-				image: new Uint8Array([1]),
-			})),
-		createImage: async () => "blob:fixture",
-		revokeImage: () => {},
-		report: () => {},
-	});
-	const model = new ClientVendorState(
-		session,
-		icons,
-		(message) => failures.push(message),
-		() => 0,
-	);
-	const latest = () => {
-		const args = transport.invocations.at(-1)?.args;
-		if (args === undefined) throw new Error("No vendor command");
-		return vendorRequestSchema.parse(args.request);
-	};
-	try {
-		transport.emit("client-vendor-approached", vendorFixture.snapshot.payload);
-		model.read();
-		const opening = latest();
-		transport.emit(vendorFixture.preview.event, {
-			...vendorFixture.preview.payload,
-			sequence: opening.sequence,
-			outcome: {
-				kind: "ready",
-				quote: { ...vendorFixture.preview.payload.outcome.quote, buys: [] },
-			},
-		});
-		model.queueBuy(1000);
-		model.confirmBuyQuantity(1000, 10);
-		const candidate = latest();
-		expect(candidate.draft).toEqual({
-			vendor: 100,
-			buys: [{ item: 1000, amount: 10 }],
-			sells: [],
-		});
-		transport.emit(vendorFixture.preview.event, {
-			...vendorFixture.preview.payload,
-			sequence: candidate.sequence,
-		});
-		expect(model.read()?.queue).toMatchObject([
-			{ name: "Food", amount: 10, total: 100 },
-		]);
-		expect(model.read()?.quote?.currencies).toHaveLength(2);
-		model.trade();
-		const submitted = latest();
-		expect(transport.invocations.at(-1)?.command).toBe("submit_client_vendor");
-		transport.emit(vendorFixture.phase.event, vendorFixture.phase.payload);
-		expect(model.read()?.phase).toBe("buying");
-		transport.emit(vendorFixture.failed.event, {
-			...vendorFixture.failed.payload,
-			sequence: submitted.sequence,
-		});
-		expect(failures).toEqual(["Purchase failed. Purchase refused"]);
-		expect(latest().draft.buys).toEqual(submitted.draft.buys);
-		model.close();
-		transport.emit(
-			vendorFixture.snapshot.event,
-			vendorFixture.snapshot.payload,
-		);
-		expect(session.vendorSnapshot()).toEqual(vendorFixture.snapshot.payload);
-		expect(model.read()).toBeNull();
-		transport.emit("client-vendor-approached", vendorFixture.snapshot.payload);
-		expect(model.read()?.vendor).toBe(100);
-		transport.emit(vendorFixture.closed.event, vendorFixture.closed.payload);
-		expect(model.read()).toBeNull();
-		transport.emit("client-current-state", {
-			...currentState(1),
-			vendor: vendorFixture.snapshot.payload,
-		});
-		expect(session.vendorSnapshot()).toEqual(vendorFixture.snapshot.payload);
-		transport.emit("client-current-state", currentState(1));
-		expect(session.vendorSnapshot()).toBeNull();
-	} finally {
-		model.destroy();
-		icons.dispose();
-		session.stop();
-	}
-});
-
-it.each(["incremental", "snapshot"])(
-	"releases same-character entry suppression on %s refusal",
-	async (delivery) => {
-		const transport = new FakeClientTransport();
-		const session = new ClientLifecycleSession(transport);
-		await session.start();
-		await session.enterWorld(7);
-		const lifecycle: ClientLifecycle = {
-			kind: "character-selection",
-			maxSlots: 11,
-			characters: [{ guid: 7, name: "Mira", slot: 0, deleteTime: 0 }],
-			rejection: "The character is still in the world.",
-		};
-		if (delivery === "incremental")
-			transport.emit("client-lifecycle-changed", lifecycle);
-		else {
-			transport.setCurrentState({ ...currentState(7), lifecycle });
-			await session.requestCurrentState();
-		}
-		expect(session.state().lifecycle).toEqual(lifecycle);
-		await session.enterWorld(7);
-		expect(
-			transport.calls.filter(
-				(call) => call === "invoke:select_client_character",
-			),
-		).toHaveLength(2);
-		await session.stop();
-	},
-);
-
-it.each(["stop", "logging-out", "character-selection"] as const)(
-	"clears vendor, trade, barber, housing, and pack affinities on %s while retaining them across teleport",
-	async (retirement) => {
-		const player = 0x5000_0001;
-		const pack = 7;
-		const item = 91;
-		const state = currentState(player);
-		const carried = entityFacts(item, {
-			ownedByPlayer: true,
-			location: {
-				kind: "contained",
-				parentGuid: pack,
-				slot: { kind: "item", index: 0 },
-			},
-		});
-		const housing = housingSnapshotSchema.parse(housingWireFixture);
-		const barber = barberSnapshotSchema.parse(barberFixture.snapshot);
-		const trade = {
-			trade: {
-				revision: 1,
-				partner_guid: 55,
-				initiator_guid: player,
-				self_side: { guid: player, accepted: false, items: [] },
-				partner_side: { guid: 55, accepted: false, items: [] },
-			},
-			pending_items: [item],
-		};
-		const vendor = vendorSnapshotSchema.parse(vendorFixture.snapshot.payload);
-		const transport = new FakeClientTransport();
-		transport.setCurrentState({
-			...state,
-			vendor,
-			housing,
-			barber,
-			trade,
-			entities: {
-				...state.entities,
-				entities: [
-					...state.entities.entities,
-					entityFacts(pack, {
-						ownedByPlayer: true,
-						location: {
-							kind: "contained",
-							parentGuid: player,
-							slot: { kind: "pack", entryKind: "container", index: 0 },
-						},
-					}),
-					carried,
-				],
-			},
-		});
-		const session = new ClientLifecycleSession(transport);
-		await session.start();
-		transport.emit("client-entity-facts-changed", {
-			projectileSupply: null,
-			player: null,
-			worldContainer: null,
-			removed: [],
-			upserts: [
-				{
-					...carried,
-					location: {
-						kind: "equipped",
-						wearerGuid: player,
-						mask: EQUIPMENT_SLOTS[0].mask,
-					},
-				},
-			],
-		});
-		expect(session.vendorSnapshot()).toEqual(vendorFixture.snapshot.payload);
-		expect(session.tradeSnapshot()).toEqual(trade);
-		expect(session.barberSnapshot()).toEqual(barber);
-		expect(session.housingSnapshot()).toEqual(housing);
-		expect(session.packAffinities.storage(session.entities.read())).toEqual({
-			preferred: { [item]: pack },
-			fallback: [player, pack],
-		});
-
-		// Portal teleport preserves all character-scoped snapshots and pack affinities.
-		transport.emit("client-lifecycle-changed", {
-			kind: "portal-space",
-			worldGeneration: state.worldGeneration + 1,
-			cause: "teleport",
-		});
-		expect(session.vendorSnapshot()).toEqual(vendorFixture.snapshot.payload);
-		expect(session.tradeSnapshot()).toEqual(trade);
-		expect(session.barberSnapshot()).toEqual(barber);
-		expect(session.housingSnapshot()).toEqual(housing);
-		expect(session.packAffinities.storage(session.entities.read())).toEqual({
-			preferred: { [item]: pack },
-			fallback: [player, pack],
-		});
-
-		if (retirement === "stop") {
-			session.stop();
-		} else if (retirement === "logging-out") {
-			transport.emit("client-lifecycle-changed", { kind: "logging-out" });
-		} else {
-			transport.emit("client-lifecycle-changed", {
-				kind: "character-selection",
-				rejection: null,
-				maxSlots: 11,
-				characters: [],
-			});
-		}
-		expect(session.vendorSnapshot()).toBeNull();
-		expect(session.tradeSnapshot()).toEqual({ trade: null, pending_items: [] });
-		expect(session.barberSnapshot()).toEqual({
-			interaction: null,
-			result: null,
-			particles: null,
-		});
-		expect(session.housingSnapshot()).toEqual(emptyHousing());
-		expect(session.packAffinities.storage(session.entities.read())).toEqual({
-			preferred: {},
-			fallback: retirement === "stop" ? [] : [player, pack],
-		});
-		if (retirement !== "stop") session.stop();
-	},
-);

@@ -78,6 +78,7 @@ pub const PASSIVE_MOTOR_ACCELERATION: f32 = 20.0;
 pub const PASSIVE_MOTOR_BRAKING: f32 = 80.0;
 
 /// Normalized gameplay weight controlling a body's share of positional separation.
+/// Local players use `0.01` vs `1.0` for peers, tolerating bounded residual overlap across ticks.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ContactMobility(f32);
 

@@ -84,8 +84,8 @@ impl CharacterJumpKinematics {
     }
 }
 
-/// Retail interpreter launch speeds do not depend on body animation coverage (retail movement
-/// state velocity query, ACE MotionInterp.cs).
+/// Retail behavior is to launch player jumps using interpreter baseline speeds (walk `3.12`,
+/// run `4.0`, sidestep `1.25`) rather than animation-derived grounded speeds.
 pub fn retail_jump_kinematics(
     run_rate_scalar: f32,
     full_extent_jump_height: f32,

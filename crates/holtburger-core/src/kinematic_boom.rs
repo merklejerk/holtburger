@@ -601,6 +601,8 @@ struct KinematicBoomTickFrame {
 }
 
 /// Stateful comfort policy; collision and placement remain delegated to the injected scene.
+/// Clearance recovery retries once with the committed envelope radius on failure, and settlement
+/// thresholds stay excluded from user camera tuning.
 #[derive(Debug, Clone)]
 pub struct KinematicBoomController {
     profile: KinematicBoomProfile,

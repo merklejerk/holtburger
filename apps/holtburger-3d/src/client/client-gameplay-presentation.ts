@@ -10,25 +10,13 @@ import type {
 	CycleCandidate,
 	CycleSelectionPresentationFrame,
 } from "./client-target-acquisition";
-import {
-	ClientLockFeedbackEffects,
-	type ClientLockFeedbackFrame,
-} from "./client-lock-feedback";
+import type { ClientLockFeedbackFrame } from "./client-lock-feedback";
 import {
 	EMPTY_ENTITY_OVERLAY_FRAME,
 	type EntityOverlayFrame,
 } from "../lib/game/renderer/entity-overlay-policy";
-import { ClientCombatHealthRequests } from "./client-combat-health-requests";
-import {
-	ClientEntityOverlays,
-	resolveActiveCombatEngagement,
-	resolveFreshCreatureHealth,
-	type NameplateMode,
-} from "./client-entity-overlays";
-import { resolveImmediateCandidate } from "./client-target-acquisition";
-import { distanceBetweenDynamicWorldPoses } from "./client-entity-distance";
-import { projectClientEntityCenter } from "./client-entity-projection";
-import type { BarberPreview, BarberSnapshot } from "./client-barber-contract";
+import type { NameplateMode } from "./client-entity-overlays";
+import type { BarberPreview } from "./client-barber-contract";
 import type { DynamicPresentationOverride } from "../lib/game/runtime/dynamic-presentation-override";
 import {
 	abortError,
@@ -42,79 +30,28 @@ import type {
 	CombatEffectsAppearance,
 	CombatEffectsTuning,
 } from "../lib/game/systems/combat-effects-system";
-import { formatClientLocation } from "./client-location-command";
-import {
-	type LandblockVector3,
-	acVector3,
-	acVectorToRender,
-	landblockVector3,
-	renderVector3,
-	renderVectorToAc,
-	sceneVec3,
-	sceneVector3,
-} from "../lib/assets/ac-frame";
 import type { ActiveRegionSource } from "../lib/assets/active-region-source";
 import type { LandblockProfileSource } from "../lib/assets/landblock-profile-source";
-import {
-	CLIENT_TUNING,
-	CLIENT_COMBAT_EFFECTS_TUNING,
-	CLIENT_LOCK_FEEDBACK_TUNING,
-} from "./client-tuning";
 import type { ResolvedSceneEnvironment } from "../lib/game/environment/scene-environment";
-import {
-	bindClientPresentationEnvironment,
-	clientWeatherPresets,
-	createClientServerEnvironmentSource,
-	CLIENT_ENVIRONMENT_INTERVAL_MS,
-	type ClientEnvironmentReadout,
-	type ClientEnvironmentSource,
-	type ClientServerEnvironmentSource,
-	type ClientWeatherPreset,
+import type {
+	ClientEnvironmentReadout,
+	ClientWeatherPreset,
 } from "./client-environment";
-import {
-	CLIENT_ENVIRONMENT_OVERRIDES_DEFAULT,
-	type ClientEnvironmentOverrides,
-} from "./client-environment-settings";
-import {
-	createLandblockWorldOrigin,
-	normalizeLandblockOwner,
-} from "../lib/game/landblocks";
-import {
-	createCameraAxesRadians,
-	rotateRenderVector,
-	createCameraRotationRadians,
-	resolveCameraLookAtAngles,
-	createEntityFacingCameraYaw,
-} from "../lib/game/math/camera-orientation";
-import { Quat, Vec3 } from "../lib/game/math/types";
-import {
-	datAssetId,
-	hasUsableDynamicBody,
-	type DynamicEntityRealizationDisposition,
-	type DynamicEntityRealizationResults,
+import type { ClientEnvironmentOverrides } from "./client-environment-settings";
+import type {
+	DynamicEntityRealizationDisposition,
+	DynamicEntityRealizationResults,
 } from "../lib/game/runtime/dynamic-entity-presentation";
 import type {
 	DynamicEntityTickBatch,
 	DynamicEntityEvent,
 	DynamicEntityView,
-	DynamicEntityWorldPlacement,
 } from "../lib/game/runtime/dynamic-entity-feed";
-import {
-	SceneInterestRequestCoordinator,
-	type SceneInterestTarget,
-} from "../lib/game/runtime/scene-target";
 import type { SceneInterestRequest } from "../lib/game/runtime/scene-interest";
-import { validateSceneInterestRadiiOrThrow } from "../lib/game/runtime/scene-interest";
-import type { SceneInterestRadii } from "../lib/game/runtime/types";
-import {
-	CLIENT_GRAPHICS_DEFAULTS,
-	clientSceneInterestRadii,
-} from "./client-settings-policy";
-import { CLIENT_GRAPHICS_RANGES } from "./client-settings-values";
 import type {
 	AudioListenerPlacement,
-	Camera,
 	PrimaryCameraView,
+	SceneInterestRadii,
 } from "../lib/game/runtime/types";
 import type {
 	ResolvedSceneOrigin,
@@ -133,7 +70,6 @@ import type {
 	ClientCameraTick,
 	ClientDynamicScriptCue,
 	ClientDynamicSoundCue,
-	ClientLifecycle,
 	ClientPresentationDiscontinuity,
 	ClientEntitySelectionQueryRequest,
 } from "./client-host-contract";
@@ -145,20 +81,13 @@ import {
 	ClientLifecycleSession,
 	type ClientLifecycleSessionEvent,
 } from "./client-lifecycle-session";
-import {
-	ClientCameraSession,
-	type ClientCameraStatus,
-	type ClientCameraTarget,
-} from "../lib/game/camera/client-camera-session";
-import { PossessionCameraController } from "../lib/game/camera/possession-camera-controller";
-import {
-	createProjectionClearanceRevision,
-	type ProjectionClearanceRevision,
-} from "../lib/game/camera/projection-clearance";
-import type { HostKinematicBoomPresentation } from "../lib/game/motion/host-kinematic-boom-path";
-import { PortalTransitionController } from "../lib/client/portal-transition-controller";
 import type {
-	PortalRevealReceipt,
+	ClientCameraStatus,
+	ClientCameraTarget,
+} from "../lib/game/camera/client-camera-session";
+import type { PossessionCameraController } from "../lib/game/camera/possession-camera-controller";
+import type { HostKinematicBoomPresentation } from "../lib/game/motion/host-kinematic-boom-path";
+import type {
 	PortalTransitionPresentationPlan,
 	PortalTransitionPresentationReceipt,
 } from "../lib/client/portal-transition-presentation";
@@ -166,36 +95,28 @@ import type {
 	FrameSelectionMetrics,
 	RendererFrameDiagnosticsSnapshot,
 	WorldIndicatorInput,
-	WorldCurveTrajectoryInput,
-	WorldTrajectoryInput,
 } from "../lib/game/renderer/renderer";
 import type { MinimapFrame } from "../app/minimap-frame";
 import type { MapEntity } from "../lib/game/map/map-blips";
 import type { MapTerrainSource } from "../lib/game/map/map-renderer";
-import {
-	type MapAnchor,
-	mapHeadingFromSceneTransform,
-} from "../lib/game/map/map-view";
-import {
-	refineEntitySelectionCandidates,
-	type EntitySelectionGeometry,
-	type EntitySelectionRefinement,
-	type PresentedSelectionRay,
+import type {
+	EntitySelectionGeometry,
+	EntitySelectionRefinement,
+	PresentedSelectionRay,
 } from "../lib/game/selection/entity-selection-intersection";
 import type {
 	PortalTransitionRuntimeDiagnostics,
 	DynamicEntityPresentationState,
 } from "../lib/game/runtime/game-presentation-runtime";
-import {
-	clientSelectedEntityDistance,
-	type ClientSelectedEntityTrackingStatus,
-} from "./client-selection-tracking";
-import {
-	projectClientTargetIndicator,
-	projectClientCombatTarget,
-	type ClientCombatTargetFrame,
-	type ClientTargetIndicatorFrame,
+import type { ClientSelectedEntityTrackingStatus } from "./client-selection-tracking";
+import type {
+	ClientCombatTargetFrame,
+	ClientTargetIndicatorFrame,
 } from "./client-target-indicator";
+import { ClientEnvironmentPresenter } from "./client-presentation-environment";
+import { ClientScenePortalCoordinator } from "./client-presentation-scene-portal";
+import { ClientCameraAndSelectionPresenter } from "./client-presentation-camera-selection";
+import { ClientCombatAndOverlayPresenter } from "./client-presentation-combat-overlays";
 
 /** Presentation state exposed to the thin client shell. */
 export type ClientGameplayPresentationStatusKind =
@@ -260,44 +181,6 @@ export interface ClientGameplayPresentationDiagnostics {
 		readonly dynamicDrawCalls: number;
 		readonly particleBatches: number;
 	};
-}
-
-/** One exact portal destination's static acceptance and dynamic installation progress. */
-type PortalSceneActivation =
-	| {
-			readonly kind: "requesting";
-			readonly generation: number;
-			readonly key: string;
-	  }
-	| {
-			readonly kind: "accepted";
-			readonly generation: number;
-			readonly key: string;
-			readonly receipt: SceneActivationReceipt;
-			readonly realization: "idle" | "pending" | "deferred" | "ready";
-			/** Exact player residency/membership facts used by the latest realization attempt. */
-			readonly realizedPlayerPlacementKey: string | null;
-			readonly revealAcknowledged: boolean;
-	  };
-
-/** One generation-current answer to whether the destination may begin portal exit rendering. */
-type PortalDestinationReadiness =
-	| {
-			readonly kind: "waiting";
-			readonly status: "loading-activation" | "loading-player";
-			readonly diagnostic?: string;
-	  }
-	| { readonly kind: "failed"; readonly diagnostic: string }
-	| {
-			readonly kind: "ready";
-			/** Settled camera whose own cell is installed, ready to retain for portal exit. */
-			readonly primaryView: PrimaryCameraView;
-	  };
-
-/** Settled destination view retained unchanged for every frame of one portal exit. */
-interface PortalDestinationFrame {
-	readonly generation: number;
-	readonly primaryView: PrimaryCameraView;
 }
 
 /** Client-local camera controller exposed only to the client shell's semantic input handlers. */
@@ -423,16 +306,6 @@ export interface ClientGameplayRuntime
 	getPortalTransitionDiagnostics?(): PortalTransitionRuntimeDiagnostics;
 }
 
-const EMPTY_ALERT_GUIDS: ReadonlySet<number> = new Set();
-
-interface MutableCombatHealthCandidate {
-	guid: number;
-	generation: number;
-	isHostileMob: boolean;
-	distanceMeters: number | null;
-	freshObservedAtMs: number | null;
-}
-
 /** Borrowed presentation capabilities consumed by gameplay; browser-resource lifetime stays in the root. */
 export interface ClientGameplayPresentationResources {
 	readonly activeRegion: ActiveRegionSource;
@@ -464,32 +337,16 @@ export interface ClientGameplayPresentationDependencies {
 	) => readonly CycleCandidate[] | null;
 }
 
-/** One authority-scoped sound or script cue delivered to the borrowed runtime. */
-type GameplayPresentationCue =
-	| {
-			readonly kind: "script";
-			readonly worldGeneration: number;
-			readonly cue: ClientDynamicScriptCue;
-	  }
-	| {
-			readonly kind: "sound";
-			readonly worldGeneration: number;
-			readonly receivedAtMs: number;
-			readonly cue: ClientDynamicSoundCue;
-	  };
-
 /**
  * Bridges one client authority session into the shared renderer runtime.
  *
  * This class owns no game state. The lifecycle session remains the authority mirror; this adapter
- * only schedules realization, interpolation, camera, environment and static demand. It borrows
- * app-owned rendering resources and drains its own work before another scene controller takes over.
+ * delegates domain presentation to focused collaborators and drains its own work before another
+ * scene controller takes over.
  */
 export class ClientGameplayPresentation {
 	readonly camera: ClientGameplayPresentationCameraController;
 	readonly #session: ClientLifecycleSession;
-	/** Candidate visuals stay imperative; only their owner publishes cold HUD readiness. */
-	#barberPreview: BarberPreview | null = null;
 	readonly #canvas: HTMLCanvasElement;
 	readonly #onError: (error: unknown) => void;
 	readonly #resources: ClientGameplayPresentationResources;
@@ -497,55 +354,15 @@ export class ClientGameplayPresentation {
 	readonly #pendingWork = new Set<Promise<void>>();
 	/** Borrow admitted by start and withdrawn before the next driver takes over. */
 	#activeResources: ClientGameplayPresentationResources | null = null;
-	/** Last picked location retained as pending feedback between replacement surface picks. */
-	#preciseJumpMarker: WorldIndicatorInput["marker"] | null = null;
-	/** Source composition owns one server sample; the adapter retains no resolved output. */
-	#environmentSources: {
-		readonly server: ClientServerEnvironmentSource;
-		presentation: ClientEnvironmentSource;
-	} | null = null;
-	/** Cold preferences seed the borrowed runtime when gameplay starts. */
-	#environmentOverrides: ClientEnvironmentOverrides =
-		CLIENT_ENVIRONMENT_OVERRIDES_DEFAULT;
-	#lastEnvironmentAtMs = Number.NEGATIVE_INFINITY;
-	readonly #onSceneMembership: ClientGameplayPresentationDependencies["onSceneMembership"];
-	readonly #onWeatherPresets: ClientGameplayPresentationDependencies["onWeatherPresets"];
-	readonly #onEnvironmentIssue: ClientGameplayPresentationDependencies["onEnvironmentIssue"];
-	readonly #onLockFeedback: ClientGameplayPresentationDependencies["onLockFeedback"];
-	#combatEffectsTuning: CombatEffectsTuning = CLIENT_COMBAT_EFFECTS_TUNING;
-	/** Null until the appearance scope resolves; no duplicate hardcoded theme palette. */
-	#summonLeashColors: ClientSummonLeashColors | null = null;
-	#sceneInterestRadii: SceneInterestRadii = clientSceneInterestRadii(
-		CLIENT_GRAPHICS_DEFAULTS.viewDistance,
-	);
-	#sceneInterestRevision = 0;
-	#fieldOfView: number = CLIENT_GRAPHICS_DEFAULTS.verticalFovDegrees;
-	#pendingFieldOfView: number | null = null;
-	#sceneInterestCoordinator: SceneInterestRequestCoordinator | null = null;
+	readonly #environment: ClientEnvironmentPresenter;
+	readonly #scenePortal: ClientScenePortalCoordinator;
+	readonly #cameraSelection: ClientCameraAndSelectionPresenter;
+	readonly #combatOverlays: ClientCombatAndOverlayPresenter;
 	#unsubscribe: (() => void) | null = null;
-	readonly #lockFeedback = new ClientLockFeedbackEffects();
-	readonly #combatHealth: ClientCombatHealthRequests;
-	readonly #overlays: ClientEntityOverlays;
-	readonly #trackedAlertGuids: () => ReadonlySet<number>;
-	readonly #sampleImmediateTargetCandidates:
-		| ((
-				frame: CycleSelectionPresentationFrame,
-		  ) => readonly CycleCandidate[] | null)
-		| null;
-	/** Reused candidate records for active combat health requests. */
-	readonly #combatHealthCandidates: MutableCombatHealthCandidate[] = [];
 	#playerGuid: number | null = null;
 	#startPromise: Promise<void> | null = null;
-	#sceneTargetKey: string | null = null;
-	#portalSceneActivation: PortalSceneActivation | null = null;
-	#portalDestinationFrame: PortalDestinationFrame | null = null;
-	readonly #portalTransition = new PortalTransitionController(
-		CLIENT_TUNING.portalTransition.timing,
-	);
 	#hasRenderedFrame = false;
 	#renderedFrameCount = 0;
-	#lastCameraResidency: ClientGameplayPresentationDiagnostics["cameraResidency"] =
-		null;
 	#status: ClientGameplayPresentationStatus = {
 		kind: "starting",
 		diagnostic: null,
@@ -556,46 +373,41 @@ export class ClientGameplayPresentation {
 	/** Withdraw waits whose mutable publication is fenced by driver/runtime ownership. */
 	readonly #lifetime = new AbortController();
 	#retirement: Promise<void> | null = null;
-	#cameraTarget: ClientCameraTarget | null = null;
-	#cameraProjection: ProjectionClearanceRevision | null = null;
-	#cameraSynchronization: Promise<void> = Promise.resolve();
-	/** Exact camera/extent pair used by the most recently presented frame. */
-	#lastPrimaryView: PrimaryCameraView | null = null;
-	#selectedEntityGuid: number | null = null;
-	/** Retained across gameplay initialization, like selected identity. */
-	#hoveredEntityGuid: number | null = null;
 
 	constructor(dependencies: ClientGameplayPresentationDependencies) {
 		this.#session = dependencies.session;
-		this.#onSceneMembership = dependencies.onSceneMembership;
-		this.#onWeatherPresets = dependencies.onWeatherPresets;
-		this.#onEnvironmentIssue = dependencies.onEnvironmentIssue;
-		this.#onLockFeedback = dependencies.onLockFeedback;
 		this.#canvas = dependencies.canvas;
 		this.#onError = dependencies.onError ?? (() => undefined);
 		this.#resources = dependencies.resources;
-		this.#trackedAlertGuids =
-			dependencies.trackedAlertGuids ?? (() => EMPTY_ALERT_GUIDS);
-		this.#sampleImmediateTargetCandidates =
-			dependencies.sampleImmediateTargetCandidates ?? null;
-		this.#combatHealth = new ClientCombatHealthRequests({
-			tuning: CLIENT_TUNING.combatHealth,
-			requestFacts: (guid, priority) =>
-				this.#session.appraisals.requestFacts(guid, priority),
+		this.#environment = new ClientEnvironmentPresenter({
+			onWeatherPresets: dependencies.onWeatherPresets,
+			onEnvironmentIssue: dependencies.onEnvironmentIssue,
 		});
-		this.#overlays = new ClientEntityOverlays({
-			tuning: CLIENT_TUNING.entityOverlays,
-			initialMode: dependencies.nameplateMode,
+		this.#scenePortal = new ClientScenePortalCoordinator({
+			onSceneMembership: dependencies.onSceneMembership,
+			isActiveResources: (resources) => this.#activeResources === resources,
+			isDestroyed: () => this.#destroyed,
+			isAwaitingSnapshot: () => this.#session.mirror.isAwaitingSnapshot(),
+			playerGuid: () => this.#playerGuid,
+			worldGeneration: () => this.#session.state().worldGeneration,
+			authoritativePlayer: (guid) => this.#authoritativePlayer(guid),
+			observeWork: (completion) =>
+				this.#observePresentationCompletion(completion),
+			onError: (error) => this.#reportError(error),
 		});
-		const cameraSession = new ClientCameraSession(this.#session);
-		this.camera = new PossessionCameraController({
-			initialLook: {
-				pitchRadians: CLIENT_TUNING.camera.pitchRadians,
-				yawRadians: 0,
-			},
-			orbit: CLIENT_TUNING.camera.orbit,
-			recenter: CLIENT_TUNING.camera.recenter,
-			session: cameraSession,
+		this.#cameraSelection = new ClientCameraAndSelectionPresenter({
+			session: this.#session,
+			canvas: this.#canvas,
+		});
+		this.camera = this.#cameraSelection.camera;
+		this.#combatOverlays = new ClientCombatAndOverlayPresenter({
+			session: this.#session,
+			canvas: this.#canvas,
+			onLockFeedback: dependencies.onLockFeedback,
+			nameplateMode: dependencies.nameplateMode,
+			trackedAlertGuids: dependencies.trackedAlertGuids,
+			sampleImmediateTargetCandidates:
+				dependencies.sampleImmediateTargetCandidates,
 		});
 	}
 
@@ -620,50 +432,21 @@ export class ClientGameplayPresentation {
 
 	/** True server display facts; this capability is never routed through the override adapter. */
 	readServerEnvironment(): ClientEnvironmentReadout | null {
-		return this.#environmentSources?.server.readout() ?? null;
+		return this.#environment.readServerEnvironment();
 	}
 
 	/** Replace only the local presentation binding; the server source and runtime survive. */
 	setEnvironmentOverrides(overrides: ClientEnvironmentOverrides): void {
-		this.#environmentOverrides = overrides;
-		this.#bindEnvironment();
-		this.#applyEnvironment();
+		this.#environment.setEnvironmentOverrides(overrides);
 	}
 
 	/** Pull one coherent radar frame from the same presentation facts the world scene draws. */
 	readMinimapFrame(): MinimapFrame {
-		const resources = this.#activeResources;
-		const playerGuid = this.#playerGuid;
-		const placement =
-			resources === null || playerGuid === null
-				? null
-				: resources.runtime.spawnedEntityPlacement(playerGuid);
-		return {
-			surfaceMapEligible:
-				resources !== null &&
-				placement !== null &&
-				resources.runtime
-					.sceneInterestMembership()
-					.surfaceMapEligible(placement) === true,
-			waypoint: null,
-			cameraFovRadians:
-				((this.#lastPrimaryView?.camera.fov ?? this.#fieldOfView) * Math.PI) /
-				180,
-			cameraHeadingRadians: this.camera.desiredLook().yawRadians,
-			presentedEntities: () =>
-				resources?.runtime.listPresentedSpawnedEntities() ?? [],
-			presentedEntitiesRevision: resources?.runtime.mapEntityRevision ?? 0,
-			selectedGuid: this.#selectedEntityGuid,
-			source: resources?.runtime ?? null,
-			subject:
-				placement === null || playerGuid === null
-					? null
-					: {
-							anchor: mapAnchorFromPlacement(placement),
-							guid: playerGuid,
-							kind: "controlled-entity",
-						},
-		};
+		return this.#cameraSelection.readMinimapFrame(
+			this.#activeResources,
+			this.#playerGuid,
+			this.#scenePortal.fieldOfView(),
+		);
 	}
 
 	/** Sample diagnostic poses on demand without publishing frame-hot data through Svelte. */
@@ -672,140 +455,71 @@ export class ClientGameplayPresentation {
 			this.#playerGuid === null
 				? null
 				: this.#authoritativePlayer(this.#playerGuid);
-		if (player === null || player.placement.kind !== "world")
-			throw new Error("Player location is unavailable.");
-		if (this.#status.kind !== "ready" || this.#lastPrimaryView === null)
-			throw new Error("Presented camera location is unavailable.");
-		return formatClientLocation(
-			player.placement.pose,
-			this.#lastPrimaryView.camera.placement,
-		);
+		return this.#cameraSelection.readLocationReport(player, this.#status.kind);
 	}
 
 	/** Cold UI mode update; stops passive preview immediately when leaving Smart. */
 	setNameplateMode(mode: NameplateMode): void {
-		this.#overlays.setMode(mode);
+		this.#combatOverlays.setNameplateMode(mode);
 	}
 
 	/** Invalidate passive preview immediately after input targeting preferences change. */
 	invalidateImmediateOverlayPreview(): void {
-		this.#overlays.invalidateImmediatePreview();
+		this.#combatOverlays.invalidateImmediateOverlayPreview();
 	}
 
 	/** Forward the cold identity level once; presentation resolves realization and pose per frame. */
 	setSelectedEntityGuid(guid: number | null): void {
-		this.#selectedEntityGuid = guid;
-		this.#combatHealth.setSelectedTarget(guid);
-		this.#activeResources?.runtime.setSelectedEntityGuid(guid);
+		this.#cameraSelection.setSelectedEntityGuid(
+			guid,
+			this.#activeResources?.runtime,
+		);
+		this.#combatOverlays.setSelectedTarget(guid);
 	}
 
 	/** Pull target-local overlays against the same presented camera as combat indicators. */
 	readLockFeedbackFrames(): readonly ClientLockFeedbackFrame[] {
-		const view = this.#lastPrimaryView;
-		return this.#lockFeedback.readFrames(
-			performance.now(),
-			this.#session.state().worldGeneration,
-			(feedback) => {
-				if (
-					view === null ||
-					this.#session.mirror.entity(feedback.target, feedback.generation) ===
-						null
-				)
-					return null;
-				const state =
-					this.#activeResources?.runtime.dynamicEntityPresentationState(
-						feedback.target,
-					);
-				if (state?.kind !== "realized") return null;
-				return projectClientEntityCenter({
-					bounds: state.frame.localBounds,
-					placement: state.frame.placement,
-					view,
-					cssWidth: this.#canvas.clientWidth,
-					cssHeight: this.#canvas.clientHeight,
-				});
-			},
+		return this.#combatOverlays.readLockFeedbackFrames(
+			this.#cameraSelection.lastPrimaryView(),
+			this.#activeResources?.runtime,
 		);
 	}
 
 	/** A clipped feedback still needs polling until its existing lifetime expires. */
 	hasActiveLockFeedback(): boolean {
-		return this.#lockFeedback.active;
+		return this.#combatOverlays.hasActiveLockFeedback();
 	}
 
 	/** Pull the combat bound and presented camera without publishing frame-hot UI state. */
 	readCombatTargetFrame(): ClientCombatTargetFrame | null {
-		const view = this.#lastPrimaryView;
-		// Pending non-self spell cast takes presentation priority without changing auto-attack intent.
-		const engagement = resolveActiveCombatEngagement(this.#session.state());
-		const state =
-			engagement === null
-				? null
-				: this.#activeResources?.runtime.dynamicEntityPresentationState(
-						engagement.target,
-					);
-		if (view === null || engagement === null || state?.kind !== "realized")
-			return null;
-		const projection = projectClientCombatTarget({
-			heightFraction: engagement.heightFraction,
-			tuning: CLIENT_TUNING.combatTargetIndicator,
-			bounds: state.frame.localBounds,
-			placement: state.frame.placement,
-			view,
-			cssWidth: this.#canvas.clientWidth,
-			cssHeight: this.#canvas.clientHeight,
-		});
-		return projection === null
-			? null
-			: { ...projection, combatType: engagement.combatType };
+		return this.#combatOverlays.readCombatTargetFrame(
+			this.#cameraSelection.lastPrimaryView(),
+			this.#activeResources?.runtime,
+		);
 	}
 
 	setHoveredEntityGuid(guid: number | null): void {
-		this.#hoveredEntityGuid = guid;
-		this.#activeResources?.runtime.setHoveredEntityGuid(guid);
+		this.#cameraSelection.setHoveredEntityGuid(
+			guid,
+			this.#activeResources?.runtime,
+		);
 	}
 
 	/** Read one coherent residency and camera-distance fact for app-local selection policy. */
 	selectedEntityTrackingStatus(
 		guid: number,
 	): ClientSelectedEntityTrackingStatus {
-		const view = this.#lastPrimaryView;
-		const state =
-			this.#activeResources?.runtime.dynamicEntityPresentationState(guid);
-		if (state?.kind === "frontend-evicted") return state;
-		if (view === null || state?.kind !== "realized")
-			return { kind: "temporarily-unrealized" };
-		return {
-			distance: clientSelectedEntityDistance(view, state.frame),
-			kind: "tracked",
-		};
+		return this.#cameraSelection.selectedEntityTrackingStatus(
+			guid,
+			this.#activeResources?.runtime,
+		);
 	}
 
 	/** Project the exact current selected bound through the exact primary view last presented. */
 	readTargetIndicatorFrame(): ClientTargetIndicatorFrame | null {
-		const view = this.#lastPrimaryView;
-		const state =
-			this.#selectedEntityGuid === null
-				? null
-				: (this.#activeResources?.runtime.dynamicEntityPresentationState(
-						this.#selectedEntityGuid,
-					) ?? null);
-		const selected = state?.kind === "realized" ? state.frame : null;
-		// An absent target needs no projection or synchronous browser layout read.
-		if (view === null || selected === null) return null;
-		const cssWidth = this.#canvas.clientWidth;
-		const cssHeight = this.#canvas.clientHeight;
-		if (cssWidth <= 0 || cssHeight <= 0) {
-			return null;
-		}
-		return projectClientTargetIndicator({
-			bounds: selected.localBounds,
-			cssHeight,
-			cssWidth,
-			placement: selected.placement,
-			tuning: CLIENT_TUNING.entitySelection.offscreenIndicator,
-			view,
-		});
+		return this.#cameraSelection.readTargetIndicatorFrame(
+			this.#activeResources?.runtime,
+		);
 	}
 
 	/** Pull one bounded diagnostics snapshot without making frame-hot facts reactive. */
@@ -826,7 +540,7 @@ export class ClientGameplayPresentation {
 							landblockId: playerPlacement.landblockId,
 							envCellId: playerPlacement.envCellId,
 						},
-			cameraResidency: this.#lastCameraResidency,
+			cameraResidency: this.#cameraSelection.lastCameraResidency(),
 			cameraStatus: this.camera.status(),
 			renderedFrameCount: this.#renderedFrameCount,
 			viewport: {
@@ -861,15 +575,11 @@ export class ClientGameplayPresentation {
 	withCycleSelectionFrame<T>(
 		visit: (frame: CycleSelectionPresentationFrame) => T,
 	): T | null {
-		const resources = this.#activeResources;
-		if (this.#destroyed || resources === null || this.#status.kind !== "ready")
-			return null;
-		return visit({
-			view:
-				this.camera.status().kind === "active" ? this.#lastPrimaryView : null,
-			visitRealizedEntitySelectionBounds: (consume) =>
-				resources.runtime.visitRealizedEntitySelectionBounds(consume),
-		});
+		return this.#cameraSelection.withCycleSelectionFrame(
+			this.#activeResources?.runtime,
+			!this.#destroyed && this.#status.kind === "ready",
+			visit,
+		);
 	}
 
 	/** Sample host-query and exact-render rays from the exact camera and viewport last presented. */
@@ -877,64 +587,7 @@ export class ClientGameplayPresentation {
 		clientX: number,
 		clientY: number,
 	): ClientPresentedCameraRay | null {
-		const view = this.#lastPrimaryView;
-		const cameraStatus = this.camera.status();
-		if (view === null || cameraStatus.kind !== "active") return null;
-		const bounds = this.#canvas.getBoundingClientRect();
-		if (bounds.width <= 0 || bounds.height <= 0) return null;
-		const normalizedX = ((clientX - bounds.left) / bounds.width) * 2 - 1;
-		const normalizedY = 1 - ((clientY - bounds.top) / bounds.height) * 2;
-		if (!Number.isFinite(normalizedX) || !Number.isFinite(normalizedY))
-			return null;
-		const tangent = Math.tan((view.camera.fov * Math.PI) / 360);
-		const aspect = view.extent.width / view.extent.height;
-		const localDirection = new Vec3(
-			normalizedX * tangent * aspect,
-			normalizedY * tangent,
-			-1,
-		);
-		const localLength = Math.hypot(
-			localDirection.x,
-			localDirection.y,
-			localDirection.z,
-		);
-		const renderDirection = rotateRenderVector(
-			new Vec3(
-				localDirection.x / localLength,
-				localDirection.y / localLength,
-				localDirection.z / localLength,
-			),
-			view.camera.placement.rotation,
-		);
-		const acDirection = renderVectorToAc(
-			renderVector3([renderDirection.x, renderDirection.y, renderDirection.z]),
-		);
-		const landblockOrigin = createLandblockWorldOrigin(
-			view.camera.placement.landblockId,
-		);
-		const acStart = renderVectorToAc(
-			renderVector3([
-				view.camera.placement.position.x - landblockOrigin.x,
-				view.camera.placement.position.y - landblockOrigin.y,
-				view.camera.placement.position.z - landblockOrigin.z,
-			]),
-		);
-		return {
-			query: {
-				camera: cameraStatus.identity,
-				anchor: parseCellId(view.camera.placement.landblockId),
-				start: landblockVector3(acStart),
-				direction: acDirection,
-				previousCell:
-					view.camera.placement.envCellId === null
-						? null
-						: parseCellId(view.camera.placement.envCellId),
-			},
-			refinement: {
-				direction: renderDirection,
-				start: view.camera.placement.position.clone(),
-			},
-		};
+		return this.#cameraSelection.samplePresentedCameraRay(clientX, clientY);
 	}
 
 	/** Preserve precise-jump's established host contract through the shared camera sampler. */
@@ -942,13 +595,7 @@ export class ClientGameplayPresentation {
 		clientX: number,
 		clientY: number,
 	): ClientPreciseJumpRay | null {
-		const sampled = this.samplePresentedCameraRay(clientX, clientY);
-		return sampled === null
-			? null
-			: {
-					...sampled.query,
-					maximumDistance: CLIENT_TUNING.preciseJump.maximumAimDistance,
-				};
+		return this.#cameraSelection.samplePreciseJumpRay(clientX, clientY);
 	}
 
 	/** Refine a host candidate set against current posed browser geometry. */
@@ -957,229 +604,63 @@ export class ClientGameplayPresentation {
 		candidateGuids: readonly number[],
 		staticLimitDistance: number,
 	): EntitySelectionRefinement {
-		const runtime = this.#activeResources?.runtime;
-		return runtime === undefined
-			? {
-					complete: false,
-					distance: null,
-					selectedGuid: null,
-				}
-			: refineEntitySelectionCandidates(
-					runtime,
-					ray,
-					candidateGuids,
-					staticLimitDistance,
-				);
+		return this.#cameraSelection.refineEntitySelection(
+			this.#activeResources?.runtime,
+			ray,
+			candidateGuids,
+			staticLimitDistance,
+		);
 	}
 
 	/** Publish one accepted atomic marker and optional reachable trajectory. */
 	setPreciseJumpPresentation(snapshot: ClientPreciseJumpSnapshot): void {
-		if (snapshot.active) {
-			this.#canvas.dataset.preciseJump = "active";
-		} else {
-			delete this.#canvas.dataset.preciseJump;
-			this.#preciseJumpMarker = null;
-		}
-		const evaluation = snapshot.marker;
-		const runtime = this.#activeResources?.runtime;
-		if (runtime === undefined) return;
-		if (!snapshot.active) {
-			runtime.setWorldIndicator(null);
-			return;
-		}
-		if (evaluation === null) {
-			// Pending input has already lost launch authority. Preserve only its last
-			// picked location, with neutral animation and no old trajectory.
-			const previous = this.#preciseJumpMarker;
-			runtime.setWorldIndicator(
-				previous === null
-					? null
-					: {
-							marker: {
-								...previous,
-								pending: true,
-								color: preciseJumpMarkerColor("neutral"),
-							},
-						},
-			);
-			return;
-		}
-		if (!("launch" in evaluation)) {
-			this.#preciseJumpMarker = null;
-			runtime.setWorldIndicator(null);
-			return;
-		}
-		if (snapshot.refreshing) {
-			const previous = this.#preciseJumpMarker;
-			runtime.setWorldIndicator(
-				previous === null
-					? null
-					: {
-							marker: {
-								...previous,
-								pending: true,
-								color: preciseJumpMarkerColor("neutral"),
-							},
-						},
-			);
-			return;
-		}
-		const launch = evaluation.launch;
-		const target = launch.target;
-		const neutral = preciseJumpMarkerColor("neutral");
-		const success =
-			evaluation.phase === "completed" &&
-			evaluation.status === "predicted" &&
-			evaluation.flight.outcome.kind === "landed" &&
-			evaluation.flight.outcome.matchesTarget;
-		const pending = evaluation.phase === "launch-resolved";
-		const worldPosition = (anchor: number, point: LandblockVector3) => {
-			const landblockId = normalizeLandblockOwner(
-				`0x${anchor.toString(16).padStart(8, "0")}`,
-			);
-			const origin = createLandblockWorldOrigin(landblockId);
-			const local = acVectorToRender(acVector3(point));
-			return sceneVec3(origin.add(new Vec3(local[0], local[1], local[2])));
-		};
-		const scope = (cell: number | null) =>
-			cell === null ? "outdoor" : `0x${cell.toString(16).padStart(8, "0")}`;
-		const renderNormal = (normal: readonly [number, number, number]) => {
-			const vector = acVectorToRender(acVector3(normal));
-			return sceneVector3([vector[0], vector[1], vector[2]]);
-		};
-		const marker: WorldIndicatorInput["marker"] = {
-			shape: "target",
-			pending,
-			color: success ? preciseJumpMarkerColor("success") : neutral,
-			normal: renderNormal(target.normal),
-			position: worldPosition(target.anchor, target.point),
-			radius: CLIENT_TUNING.preciseJump.markerRadius,
-			renderScopeKey: scope(target.committedCell),
-		};
-		this.#preciseJumpMarker = marker;
-		const curve = (
-			input: typeof launch.preview.curve,
-			color: readonly [number, number, number, number],
-		): WorldCurveTrajectoryInput => {
-			const velocity = acVectorToRender(acVector3(input.velocity));
-			const acceleration = acVectorToRender(acVector3(input.acceleration));
-			return {
-				kind: "curve",
-				style: "dashed",
-				revision: evaluation.sequence,
-				color,
-				origin: worldPosition(input.anchor, input.origin),
-				velocity: [velocity[0], velocity[1], velocity[2]],
-				acceleration: [acceleration[0], acceleration[1], acceleration[2]],
-				durationSeconds: input.durationSeconds,
-				placements: input.placements.map((p) => ({
-					startFraction: p.startFraction,
-					endFraction: p.endFraction,
-					renderScopeKey: scope(p.committedCell),
-				})),
-			};
-		};
-		if (
-			evaluation.phase === "completed" &&
-			evaluation.status === "prediction-failed"
-		) {
-			runtime.setWorldIndicator({ marker });
-			return;
-		}
-		const desiredTrajectory =
-			launch.preview.kind === "below-height"
-				? undefined
-				: curve(launch.preview.curve, [0.62, 0.68, 0.75, 0.35]);
-		if (evaluation.phase !== "completed" || evaluation.status !== "predicted") {
-			runtime.setWorldIndicator({
-				marker,
-				desiredTrajectory,
-				trajectory:
-					launch.preview.kind === "below-height"
-						? curve(launch.preview.curve, neutral)
-						: undefined,
-			});
-			return;
-		}
-		const flight = evaluation.flight;
-		const trajectory: WorldTrajectoryInput = {
-			kind: "polyline",
-			style: "solid",
-			revision: evaluation.sequence,
-			color: success ? preciseJumpMarkerColor("success") : neutral,
-			segments: flight.segments.map((segment) => ({
-				start: worldPosition(flight.anchor, segment.start),
-				end: worldPosition(flight.anchor, segment.end),
-				renderScopeKey: scope(segment.committedCell),
-			})),
-		};
-		const outcome = flight.outcome;
-		const landingMarker: WorldIndicatorInput["landingMarker"] =
-			outcome.kind === "landed" && !outcome.matchesTarget
-				? {
-						shape: "miss",
-						pending: false,
-						color: preciseJumpMarkerColor("miss"),
-						normal: renderNormal(outcome.normal),
-						position: worldPosition(flight.anchor, outcome.contactPoint),
-						radius: CLIENT_TUNING.preciseJump.markerRadius,
-						renderScopeKey: scope(outcome.committedCell),
-					}
-				: undefined;
-		runtime.setWorldIndicator({
-			marker,
-			desiredTrajectory,
-			trajectory,
-			landingMarker,
-		});
+		this.#cameraSelection.setPreciseJumpPresentation(
+			snapshot,
+			this.#activeResources?.runtime,
+		);
 	}
 
 	/** Apply gameplay effect appearance when attached and when preferences change. */
 	setCombatEffectsAppearance(appearance: CombatEffectsAppearance): void {
-		this.#combatEffectsTuning = { ...this.#combatEffectsTuning, ...appearance };
-		this.#activeResources?.runtime.setCombatEffectsAppearance(appearance);
+		this.#combatOverlays.setCombatEffectsAppearance(
+			appearance,
+			this.#activeResources?.runtime,
+		);
 	}
 
 	refreshCombatEffectsFontAtlas(): void {
-		this.#activeResources?.runtime.refreshCombatEffectsFontAtlas();
+		this.#combatOverlays.refreshCombatEffectsFontAtlas(
+			this.#activeResources?.runtime,
+		);
 	}
 
 	/** Theme changes update existing leashes without replacing the runtime or its GPU resources. */
 	setSummonLeashColors(colors: ClientSummonLeashColors): void {
-		this.#summonLeashColors = colors;
-		this.#reconcileEntityPresentationPolicy();
+		this.#combatOverlays.setSummonLeashColors(
+			colors,
+			this.#activeResources?.runtime,
+		);
 	}
 
 	/** Reissue static demand on the next frame even if the player has not moved. */
 	setSceneInterestRadii(radii: SceneInterestRadii): void {
-		validateSceneInterestRadiiOrThrow(radii);
-		if (
-			this.#sceneInterestRadii.terrainRadius === radii.terrainRadius &&
-			this.#sceneInterestRadii.buildingRadius === radii.buildingRadius &&
-			this.#sceneInterestRadii.explicitObjectRadius ===
-				radii.explicitObjectRadius &&
-			this.#sceneInterestRadii.generatedObjectRadius ===
-				radii.generatedObjectRadius &&
-			this.#sceneInterestRadii.envCellRadius === radii.envCellRadius
-		)
-			return;
-		this.#sceneInterestRadii = radii;
-		this.#sceneInterestRevision += 1;
+		this.#scenePortal.setSceneInterestRadii(radii);
 	}
 
 	/** The host acknowledges a projection revision before the new FOV becomes visible. */
 	setFieldOfView(degrees: number): void {
-		if (
-			!Number.isFinite(degrees) ||
-			degrees < CLIENT_GRAPHICS_RANGES.verticalFovDegrees.minimum ||
-			degrees > CLIENT_GRAPHICS_RANGES.verticalFovDegrees.maximum
-		)
-			throw new Error(
-				"Client vertical field of view is outside the configurable range.",
-			);
-		if (this.#portalTransition.activeGeneration() !== null)
-			this.#pendingFieldOfView = degrees;
-		else this.#fieldOfView = degrees;
+		this.#scenePortal.setFieldOfView(degrees);
+	}
+
+	/** Install only the current opening/revision's visual, leaving all authoritative facts untouched. */
+	async setBarberPreview(preview: BarberPreview | null): Promise<void> {
+		this.#combatOverlays.setBarberPreview(preview);
+		if (preview !== null && this.#activeResources === null) await this.start();
+		await this.#combatOverlays.reconcileBarberPresentation(
+			this.#session.barberSnapshot(),
+			this.#playerGuid,
+			this.#activeResources?.runtime,
+		);
 	}
 
 	/**
@@ -1201,8 +682,7 @@ export class ClientGameplayPresentation {
 			this.#setStatus("error", this.#terminalPresentationError);
 			return { rendered: false, status: this.#status };
 		}
-		if (nowMs - this.#lastEnvironmentAtMs >= CLIENT_ENVIRONMENT_INTERVAL_MS)
-			this.#refreshEnvironment(nowMs);
+		this.#environment.refreshIfDue(nowMs);
 		if (this.#session.mirror.isAwaitingSnapshot()) {
 			this.#setStatus("awaiting-snapshot");
 			return { rendered: false, status: this.#status };
@@ -1218,9 +698,20 @@ export class ClientGameplayPresentation {
 			return { rendered: false, status: this.#status };
 		}
 		if (portal) {
-			this.#ensurePortalTransition(resources, lifecycle);
+			this.#scenePortal.ensurePortalTransition(
+				resources,
+				lifecycle,
+				this.#hasRenderedFrame,
+				() => {
+					// The core resets its camera at the same generation edge. Drop the frontend registration too
+					// so the next seed is accepted even when the player instance itself was reused by the server.
+					this.#cameraSelection.resetTarget(true, (error) =>
+						this.#reportError(error),
+					);
+				},
+			);
 		}
-		const portalGeneration = this.#portalTransition.activeGeneration();
+		const portalGeneration = this.#scenePortal.activePortalGeneration();
 		if (portal) {
 			resources.runtime.pollPortalTransitionLoading();
 		}
@@ -1245,7 +736,7 @@ export class ClientGameplayPresentation {
 		const player = this.#authoritativePlayer(playerGuid);
 		if (player === null) {
 			resources.runtime.setViewerEntity(null);
-			this.#clearSceneDemand(resources);
+			this.#scenePortal.clearSceneDemand(resources);
 			this.#setStatus(
 				"loading-player",
 				`Local player 0x${playerGuid.toString(16).padStart(8, "0")} is absent from the authoritative dynamic mirror.`,
@@ -1256,7 +747,7 @@ export class ClientGameplayPresentation {
 		}
 		if (player.placement.kind !== "world") {
 			resources.runtime.setViewerEntity(null);
-			this.#clearSceneDemand(resources);
+			this.#scenePortal.clearSceneDemand(resources);
 			this.#setStatus(
 				"loading-player",
 				`Local player has ${player.placement.kind} placement instead of world placement.`,
@@ -1271,169 +762,60 @@ export class ClientGameplayPresentation {
 					"Portal presentation is active without a generation-owned transition.",
 				);
 			}
-			this.#syncSceneActivation(player, portalGeneration);
+			this.#scenePortal.syncSceneActivation(
+				resources,
+				player,
+				portalGeneration,
+			);
 		} else {
-			this.#portalTransition.reset();
-			if (this.#pendingFieldOfView !== null) {
-				this.#fieldOfView = this.#pendingFieldOfView;
-				this.#pendingFieldOfView = null;
-			}
-			resources.runtime.setPortalTransition(undefined);
-			if (this.#portalSceneActivation?.kind === "accepted") {
-				resources.runtime.completeSceneActivation(
-					this.#portalSceneActivation.generation,
-				);
-			}
-			this.#portalSceneActivation = null;
-			this.#syncSceneInterest(player);
+			this.#scenePortal.exitPortalToWorld(resources);
+			this.#scenePortal.syncSceneInterest(resources, player);
 		}
 		resources.runtime.setViewerEntity(playerGuid);
 		if (!portal) {
-			this.#reconcileCombatHealth(nowMs);
+			this.#combatOverlays.reconcileCombatHealth(nowMs);
 			resources.runtime.tick(nowMs);
 		}
-		let primaryView: PrimaryCameraView;
-		if (portal) {
-			if (portalGeneration === null) {
-				throw new Error(
-					"Portal destination rendering requires an active generation.",
-				);
-			}
-			const destinationFrame =
-				this.#portalDestinationFrame?.generation === portalGeneration
-					? this.#portalDestinationFrame
-					: null;
-			if (destinationFrame !== null) {
-				primaryView = destinationFrame.primaryView;
-			} else {
-				const readiness = this.#portalDestinationReadiness(
+		const primaryView = portal
+			? this.#resolvePortalFrame(
 					resources,
 					player,
 					playerGuid,
+					portalGeneration!,
 					nowMs,
-				);
-				if (readiness.kind === "failed") {
-					return this.#failPortalPresentation(resources, readiness.diagnostic);
-				}
-				if (readiness.kind === "waiting") {
-					this.#setStatus(readiness.status, readiness.diagnostic);
-					return this.#renderPortalLoadingFrame(resources, nowMs);
-				}
-				primaryView = readiness.primaryView;
-				this.#portalDestinationFrame = {
-					generation: portalGeneration,
-					primaryView,
-				};
-			}
-			const plan = this.#publishPortalTransition(resources, nowMs, true);
-			if (plan.kind === "origin-to-tunnel" || plan.kind === "tunnel-only") {
-				this.#setStatus("loading-activation");
-				return this.#renderPortalLoadingFrame(resources, nowMs, false);
-			}
-		} else {
-			this.#portalDestinationFrame = null;
-			const resolvedOrigin = resources.runtime.dynamicEntityOrigin(playerGuid);
-			if (resolvedOrigin === null) {
-				const failure = resources.runtime.dynamicEntityBodyFailure(playerGuid);
-				if (failure !== null) {
-					this.#setStatus("error", formatError(failure));
-					return { rendered: false, status: this.#status };
-				}
-				this.#setStatus(
-					"loading-player",
-					"The authoritative local player has no installed runtime presentation.",
-				);
-				return { rendered: false, status: this.#status };
-			}
-			if (
-				resolvedOrigin.envCellId !== null &&
-				!resources.runtime.hasEnvCellScope(resolvedOrigin)
-			) {
-				this.#setStatus("loading-activation");
-				return { rendered: false, status: this.#status };
-			}
-			const extent = resources.runtime.resolveViewportExtent(
-				this.#canvas.clientWidth,
-				this.#canvas.clientHeight,
-			);
-			const projection = this.#resolveCameraProjection(extent);
-			this.#ensureCamera(player, projection);
-			const facingYaw = createEntityFacingCameraYaw(
-				player.placement.pose.rotation,
-			);
-			this.camera.advance(nowMs, facingYaw);
-			const submitCamera = this.camera.queueSynchronization(projection);
-			if (submitCamera !== null) {
-				this.#cameraSynchronization = this.#cameraSynchronization
-					.then(() => {
-						if (!this.#destroyed) return submitCamera();
-					})
-					.catch((error: unknown) => this.#reportError(error));
-			}
-			const presentation = this.camera.presentation(nowMs);
-			if (presentation === null) {
-				const cameraStatus = this.camera.status();
-				this.#setStatus(
-					cameraStatus.kind === "awaiting-first-path"
-						? "loading-activation"
-						: "loading-player",
-					clientCameraWaitDiagnostic(cameraStatus),
-				);
-				return { rendered: false, status: this.#status };
-			}
-			const camera = createClientCamera(
-				player,
-				resolvedOrigin,
-				presentation,
-				this.camera.acknowledgedProjection(nowMs),
-				this.#fieldOfView,
-			);
-			// A third-person boom can cross a cell boundary before the player's room changes.
-			if (
-				camera.placement.envCellId !== null &&
-				!resources.runtime.hasEnvCellScope(camera.placement)
-			) {
-				this.#setStatus(
-					"loading-activation",
-					"Waiting for the camera's room to load.",
-				);
-				return { rendered: false, status: this.#status };
-			}
-			primaryView = { camera, extent };
+				)
+			: this.#resolveWorldFrame(resources, player, playerGuid, nowMs);
+		if ("earlyReturn" in primaryView) {
+			return primaryView.earlyReturn;
 		}
-		const { camera } = primaryView;
-		if (
-			this.#lastCameraResidency?.landblockId !== camera.placement.landblockId ||
-			this.#lastCameraResidency.envCellId !== camera.placement.envCellId
-		) {
-			this.#lastCameraResidency = {
-				landblockId: camera.placement.landblockId,
-				envCellId: camera.placement.envCellId,
-			};
-		}
-		resources.runtime.setPrimaryView(primaryView);
-		this.#lastPrimaryView = primaryView;
+		this.#cameraSelection.commitPrimaryView(
+			resources.runtime,
+			primaryView.view,
+			!portal,
+		);
 		if (portal) {
-			this.#clearOverlayPresentation(resources.runtime);
+			this.#combatOverlays.clearOverlayPresentation(resources.runtime);
 		} else {
-			resources.runtime.setAudioListener(audioListenerFor(camera));
-			this.#publishEntityOverlays(resources, player, nowMs);
+			this.#combatOverlays.publishEntityOverlays(
+				resources.runtime,
+				player,
+				nowMs,
+				this.#cameraSelection.selectedEntityGuid(),
+				this.#cameraSelection.hoveredEntityGuid(),
+				this.#status.kind === "ready" && this.camera.status().kind === "active",
+				(visit) => this.withCycleSelectionFrame(visit),
+			);
 		}
 		const transitionReceipt = resources.runtime.render(nowMs / 1_000);
 		this.#hasRenderedFrame = true;
 		this.#renderedFrameCount += 1;
 		this.#setStatus("ready");
-		if (portal && this.#portalSceneActivation?.kind === "accepted") {
-			const sceneActivation = this.#portalSceneActivation;
-			const generation = sceneActivation.generation;
-			const reveal = this.#acknowledgePortalPresentation(transitionReceipt);
-			if (reveal !== null && !sceneActivation.revealAcknowledged) {
-				this.#portalSceneActivation = {
-					...sceneActivation,
-					revealAcknowledged: true,
-				};
+		if (portal) {
+			const acknowledgedGeneration =
+				this.#scenePortal.claimPortalRevealAcknowledgement(transitionReceipt);
+			if (acknowledgedGeneration !== null) {
 				void this.#session
-					.acknowledgeWorldReveal(generation)
+					.acknowledgeWorldReveal(acknowledgedGeneration)
 					.catch((error: unknown) => this.#reportError(error));
 			}
 		}
@@ -1449,11 +831,10 @@ export class ClientGameplayPresentation {
 	}
 
 	async #destroy(): Promise<void> {
-		delete this.#canvas.dataset.preciseJump;
-		this.#preciseJumpMarker = null;
+		this.#cameraSelection.clearPreciseJumpMarker();
 		this.#destroyed = true;
 		this.#lifetime.abort(abortError("Gameplay presentation retired."));
-		this.#cameraTarget = null;
+		this.#cameraSelection.resetTarget(false);
 		const failures: unknown[] = [];
 		const labels: string[] = [];
 		const attempt = async (
@@ -1470,12 +851,13 @@ export class ClientGameplayPresentation {
 		// Revoke camera registration before joining work that may depend on its receipt.
 		await attempt("camera-stop", () => this.camera.stop());
 		// Withdraw desired entities before awaiting startup/realization so late visuals cannot publish.
-		this.#lockFeedback.clear();
-		this.#combatHealth.destroy();
-		this.#clearOverlayPresentation();
+		this.#combatOverlays.destroy();
+		this.#combatOverlays.clearOverlayPresentation(
+			this.#activeResources?.runtime,
+		);
 		this.#unsubscribe?.();
 		this.#unsubscribe = null;
-		this.#sceneInterestCoordinator?.invalidate();
+		this.#scenePortal.invalidateCoordinator();
 		await attempt("withdraw-local-appearance", () =>
 			this.#activeResources?.runtime.setDynamicPresentationOverride(null),
 		);
@@ -1490,26 +872,27 @@ export class ClientGameplayPresentation {
 					(result): result is PromiseRejectedResult =>
 						result.status === "rejected",
 				);
-				if (failed.length)
+				if (failed.length) {
 					throw new AggregateError(
 						failed.map((result) => result.reason),
 						"Gameplay work retirement failed.",
 					);
+				}
 			}),
 		);
-		await attempt("camera-synchronization", () => this.#cameraSynchronization);
+		await attempt("camera-synchronization", () =>
+			this.#cameraSelection.awaitSynchronization(),
+		);
 		await attempt("camera-destroy", () => this.camera.destroy());
-		this.#sceneInterestCoordinator = null;
 		// Startup failure belongs to start()/onError; it must not prevent later scene retry.
-		if (this.#startPromise !== null)
+		if (this.#startPromise !== null) {
 			await Promise.allSettled([this.#startPromise]);
+		}
 		const resources = this.#activeResources;
 		this.#activeResources = null;
-		this.#onSceneMembership?.(null);
-		this.#environmentSources = null;
-		this.#onWeatherPresets?.([]);
-		this.#onEnvironmentIssue?.(null);
-		this.#overlays.clear();
+		this.#scenePortal.detach(null);
+		this.#environment.detach();
+		this.#combatOverlays.clearOverlays();
 		if (resources !== null) {
 			resources.runtime.setEntityOverlayFrame(EMPTY_ENTITY_OVERLAY_FRAME);
 			resources.runtime.clearDynamicEntityCues();
@@ -1540,27 +923,25 @@ export class ClientGameplayPresentation {
 			const resources = this.#resources;
 			if (this.#destroyed) return;
 			this.#activeResources = resources;
-			await this.#reconcileBarberPresentation(this.#session.barberSnapshot());
+			await this.#combatOverlays.reconcileBarberPresentation(
+				this.#session.barberSnapshot(),
+				this.#playerGuid,
+				resources.runtime,
+			);
 			// Appearance work may outlive withdrawal; never republish a retired driver's demand.
 			if (this.#destroyed) return;
-			this.#onSceneMembership?.(resources.runtime.sceneInterestMembership());
-			const server = createClientServerEnvironmentSource(
-				resources.activeRegion,
-				(timeMs) => this.#session.readServerTime(timeMs),
+			this.#environment.attach(resources, (timeMs) =>
+				this.#session.readServerTime(timeMs),
 			);
-			this.#environmentSources = { server, presentation: server };
-			this.#onWeatherPresets?.(clientWeatherPresets(resources.activeRegion));
-			this.#bindEnvironment();
 			resources.runtime.setEntityOverlayFrame(EMPTY_ENTITY_OVERLAY_FRAME);
-			this.#overlays.clear();
-			resources.runtime.setSelectedEntityGuid(this.#selectedEntityGuid);
-			resources.runtime.setHoveredEntityGuid(this.#hoveredEntityGuid);
-			this.#syncCombatHealthWorld(true);
-			this.#combatHealth.setSelectedTarget(this.#selectedEntityGuid);
-			this.#reconcileEntityPresentationPolicy();
-			this.#sceneInterestCoordinator = new SceneInterestRequestCoordinator(
-				resources.profileSource,
+			this.#combatOverlays.clearOverlays();
+			this.#cameraSelection.applySelectionToRuntime(resources.runtime);
+			this.#combatOverlays.syncCombatHealthWorld(true);
+			this.#combatOverlays.setSelectedTarget(
+				this.#cameraSelection.selectedEntityGuid(),
 			);
+			this.#combatOverlays.reconcileEntityPresentationPolicy(resources.runtime);
+			this.#scenePortal.attach(resources);
 			const lifecycle = this.#session.state().lifecycle;
 			if (
 				lifecycle?.kind !== "entering-world" &&
@@ -1568,14 +949,12 @@ export class ClientGameplayPresentation {
 				lifecycle?.kind !== "portal-space"
 			) {
 				this.#activeResources = null;
-				this.#onSceneMembership?.(null);
-				this.#environmentSources = null;
-				this.#onWeatherPresets?.([]);
-				this.#onEnvironmentIssue?.(null);
+				this.#scenePortal.detach(null);
+				this.#environment.detach();
 				this.#status = { kind: "stopped", diagnostic: null };
 				return;
 			}
-			this.#refreshEnvironment(performance.now());
+			this.#environment.refreshNow(performance.now());
 			await awaitWithAbort(
 				this.#requestDynamicSnapshotReplacement(
 					this.#session.mirror.entities(),
@@ -1593,40 +972,13 @@ export class ClientGameplayPresentation {
 		if (this.#destroyed) return;
 		switch (event.type) {
 			case "lock-feedback":
-				if (
-					!this.#session.mirror.isAwaitingSnapshot() &&
-					event.feedback.worldGeneration ===
-						this.#session.state().worldGeneration
-				) {
-					this.#lockFeedback.accept(
-						event.feedback,
-						performance.now(),
-						CLIENT_LOCK_FEEDBACK_TUNING,
-					);
-					this.#onLockFeedback?.();
-				}
+				this.#combatOverlays.acceptLockFeedback(event.feedback);
 				return;
 			case "combat-outcome":
-				if (
-					this.#session.mirror.isAwaitingSnapshot() ||
-					event.outcome.worldGeneration !==
-						this.#session.state().worldGeneration
-				) {
-					return;
-				}
-				if (event.outcome.attribution.kind === "attributed") {
-					this.#combatHealth.acceptPlayerAttack(
-						event.outcome.attribution.target,
-						this.#hostNowMs(event.receivedAtMs),
-					);
-				}
-				this.#activeResources?.runtime.acceptCombatOutcome(
-					event.outcome.outcome,
-					event.outcome.attribution.kind === "attributed"
-						? event.outcome.attribution.target
-						: null,
-					this.#combatEffectsTuning,
+				this.#combatOverlays.acceptCombatOutcome(
+					event.outcome,
 					event.receivedAtMs,
+					this.#activeResources?.runtime,
 				);
 				return;
 			case "resyncing":
@@ -1634,161 +986,137 @@ export class ClientGameplayPresentation {
 					[],
 					CLIENT_SUMMON_TUNING,
 				);
-				this.#lockFeedback.clear();
-				this.#clearOverlayPresentation();
-				this.#syncCombatHealthWorld(true);
+				this.#combatOverlays.clearLockFeedback();
+				this.#combatOverlays.clearOverlayPresentation(
+					this.#activeResources?.runtime,
+				);
+				this.#combatOverlays.syncCombatHealthWorld(true);
 				this.#activeResources?.runtime.clearCombatEffects();
 				return;
 			case "barber-updated":
 				this.#observePresentationCompletion(
-					this.#reconcileBarberPresentation(event.barber),
+					this.#combatOverlays.reconcileBarberPresentation(
+						event.barber,
+						this.#playerGuid,
+						this.#activeResources?.runtime,
+					),
 				);
 				return;
 			case "combat-mode":
-				this.#combatHealth.setCombatMode(event.mode);
-				this.#overlays.invalidateImmediatePreview();
+				this.#combatOverlays.setCombatMode(event.mode);
 				return;
 			case "party-presence":
 				// Fellowship creation/dissolution/HUD presence invalidates immediately; mid-party roster
 				// changes settle on the next 10 Hz preview sample without subscribing to vital ticks.
-				this.#overlays.invalidateImmediatePreview();
+				this.#combatOverlays.invalidateImmediateOverlayPreview();
 				return;
 			case "combat":
-				this.#combatHealth.setCombatTarget(
+				this.#combatOverlays.setCombatTarget(
 					event.status.desired?.target ?? null,
-					this.#hostNowMs(performance.now()),
 				);
 				return;
 			case "entity-combat-observed":
-				this.#combatHealth.acceptCombatObserved(event.combat);
+				this.#combatOverlays.acceptCombatObserved(event.combat);
 				return;
 			case "appraisal-facts-settled":
-				this.#combatHealth.acceptAppraisalFactsSettled(event.guid);
+				this.#combatOverlays.acceptAppraisalFactsSettled(event.guid);
 				return;
 			case "current-state":
-				this.#lockFeedback.clear();
+				this.#combatOverlays.clearLockFeedback();
 				this.#receiveCurrentState(event.state);
-				this.#syncCombatHealthWorld(true);
-				this.#reconcileEntityPresentationPolicy();
+				this.#combatOverlays.syncCombatHealthWorld(true);
+				this.#combatOverlays.reconcileEntityPresentationPolicy(
+					this.#activeResources?.runtime,
+				);
 				return;
 			case "entities":
-				this.#reconcileEntityPresentationPolicy();
+				this.#combatOverlays.reconcileEntityPresentationPolicy(
+					this.#activeResources?.runtime,
+				);
 				return;
 			case "lifecycle":
 				if (event.lifecycle.kind !== "in-world") {
-					this.#lockFeedback.clear();
-					this.#clearOverlayPresentation();
-					this.#syncCombatHealthWorld(true);
+					this.#combatOverlays.clearLockFeedback();
+					this.#combatOverlays.clearOverlayPresentation(
+						this.#activeResources?.runtime,
+					);
+					this.#combatOverlays.syncCombatHealthWorld(true);
 				} else {
-					this.#syncCombatHealthWorld(false);
+					this.#combatOverlays.syncCombatHealthWorld(false);
 				}
 				return;
 			case "local-player-established":
 				this.#playerGuid = event.identity.playerGuid;
-				this.#reconcileEntityPresentationPolicy();
+				this.#combatOverlays.reconcileEntityPresentationPolicy(
+					this.#activeResources?.runtime,
+				);
 				return;
 			case "presentation-tick":
-				if (event.tick.dynamic !== null)
+				if (event.tick.dynamic !== null) {
 					this.#receiveDynamic(
 						{ kind: "ticked", batch: event.tick.dynamic },
 						event.receivedAtMs,
 					);
+				}
 				return;
 			case "dynamic":
 				this.#receiveDynamic(event.event, performance.now());
 				return;
 			case "dynamic-sound-cue":
-				this.#deliverEntityCue({
-					kind: "sound",
-					worldGeneration: event.cue.worldGeneration,
-					receivedAtMs: performance.now(),
-					cue: event.cue,
-				});
+				this.#combatOverlays.deliverEntityCue(
+					{
+						kind: "sound",
+						worldGeneration: event.cue.worldGeneration,
+						receivedAtMs: performance.now(),
+						cue: event.cue,
+					},
+					this.#destroyed,
+					this.#activeResources?.runtime,
+				);
 				return;
 			case "dynamic-script-cue":
-				this.#deliverEntityCue({
-					kind: "script",
-					worldGeneration: this.#session.state().worldGeneration,
-					cue: event.cue,
-				});
+				this.#combatOverlays.deliverEntityCue(
+					{
+						kind: "script",
+						worldGeneration: this.#session.state().worldGeneration,
+						cue: event.cue,
+					},
+					this.#destroyed,
+					this.#activeResources?.runtime,
+				);
 				return;
 			case "server-time":
-				this.#refreshEnvironment(performance.now());
-				this.#reconcileEntityPresentationPolicy();
+				this.#environment.refreshNow(performance.now());
+				this.#combatOverlays.reconcileEntityPresentationPolicy(
+					this.#activeResources?.runtime,
+				);
 				return;
 			case "presentation-discontinuity":
-				this.#lockFeedback.clear();
-				this.#clearOverlayPresentation();
-				this.#syncCombatHealthWorld(true);
+				this.#combatOverlays.clearLockFeedback();
+				this.#combatOverlays.clearOverlayPresentation(
+					this.#activeResources?.runtime,
+				);
+				this.#combatOverlays.syncCombatHealthWorld(true);
 				this.#receivePresentationDiscontinuity(event.discontinuity);
 				return;
 			case "exit-requested":
-				this.#lockFeedback.clear();
+				this.#combatOverlays.clearLockFeedback();
 				// Session outcomes belong to ClientApp; ending authority is not a renderer failure.
 				this.#setStatus("stopped", event.exit.diagnostic);
 				return;
 		}
 	}
 
-	/** Install only the current opening/revision's visual, leaving all authoritative facts untouched. */
-	async setBarberPreview(preview: BarberPreview | null): Promise<void> {
-		this.#barberPreview = preview;
-		if (preview !== null && this.#activeResources === null) await this.start();
-		await this.#reconcileBarberPresentation(this.#session.barberSnapshot());
-	}
-
-	async #reconcileBarberPresentation(snapshot: BarberSnapshot): Promise<void> {
-		const interaction = snapshot.interaction;
-		const preview = this.#barberPreview;
-		const usable =
-			preview !== null &&
-			preview.outcome.kind === "ready" &&
-			interaction?.id === preview.id &&
-			(interaction.phase.kind === "editing" ||
-				interaction.phase.kind === "sending");
-		if (!usable) this.#barberPreview = null;
-		const committed = snapshot.particles;
-		const subject = usable ? preview.subject : committed?.subject;
-		const entity =
-			subject === undefined ? null : this.#authoritativePlayer(subject.guid);
-		let level: DynamicPresentationOverride | null = null;
-		if (
-			subject !== undefined &&
-			subject.guid === this.#playerGuid &&
-			entity?.generation === subject.instance
-		) {
-			const candidate =
-				usable && preview.outcome.kind === "ready" ? preview.outcome : null;
-			const particle =
-				candidate?.particles.kind === "replace" &&
-				interaction?.phase.kind !== "sending"
-					? {
-							key: `preview:${preview?.id}:${candidate.particles.script}`,
-							script: candidate.particles.script,
-						}
-					: committed?.subject.guid === subject.guid &&
-						  committed.subject.instance === subject.instance
-						? { key: `apply:${committed.revision}`, script: committed.script }
-						: null;
-			level = {
-				guid: subject.guid,
-				generation: subject.instance,
-				body:
-					candidate === null
-						? null
-						: { setupDid: candidate.setup, appearance: candidate.appearance },
-				particles: particle,
-			};
-		}
-		await this.#activeResources?.runtime.setDynamicPresentationOverride(level);
-	}
-
 	#receiveCurrentState(state: ClientCurrentState): void {
 		this.#playerGuid = state.localPlayerGuid;
 		this.#observePresentationCompletion(
-			this.#reconcileBarberPresentation(state.barber),
+			this.#combatOverlays.reconcileBarberPresentation(
+				state.barber,
+				this.#playerGuid,
+				this.#activeResources?.runtime,
+			),
 		);
-		this.#refreshEnvironment(performance.now());
+		this.#environment.refreshNow(performance.now());
 	}
 
 	#receiveDynamic(event: DynamicEntityEvent, receivedAtMs: number): void {
@@ -1798,49 +1126,44 @@ export class ClientGameplayPresentation {
 					this.#setStatus("awaiting-snapshot");
 					return;
 				}
-				const activation = this.#portalSceneActivation;
-				const retryDeferred =
-					activation?.kind === "accepted" &&
-					activation.realization === "deferred" &&
-					activation.realizedPlayerPlacementKey !==
-						this.#authoritativePlayerConvergenceKey();
-				if (retryDeferred) {
-					this.#portalSceneActivation = {
-						...activation,
-						realization: "idle",
-					};
+				const retryDeferred = this.#scenePortal.prepareDynamicTickRetry();
+				const resources = this.#activeResources;
+				if (resources !== null) {
+					resources.runtime.applyDynamicEntityTick(event.batch, receivedAtMs);
+					if (retryDeferred) {
+						this.#scenePortal.ensureScenePresentationConvergence(resources);
+					}
 				}
-				if (this.#activeResources !== null) {
-					this.#activeResources.runtime.applyDynamicEntityTick(
-						event.batch,
-						receivedAtMs,
-					);
-				}
-				if (retryDeferred) this.#ensureScenePresentationConvergence();
 				return;
 			}
 			case "snapshot":
-				this.#invalidatePlayerPresentationConvergence();
+				this.#scenePortal.invalidatePlayerPresentationConvergence();
 				this.#observePresentationCompletion(
 					this.#requestDynamicSnapshotReplacement(event.snapshot.entities),
 				);
-				this.#reconcileEntityPresentationPolicy();
+				this.#combatOverlays.reconcileEntityPresentationPolicy(
+					this.#activeResources?.runtime,
+				);
 				return;
 			case "upserted":
-				if (event.entity.identity.guid === this.#playerGuid)
-					this.#invalidatePlayerPresentationConvergence();
+				if (event.entity.identity.guid === this.#playerGuid) {
+					this.#scenePortal.invalidatePlayerPresentationConvergence();
+				}
 				if (this.#activeResources !== null) {
 					this.#observePresentationCompletion(
 						this.#activeResources.runtime.upsertDynamicEntity(event.entity),
 					);
 				}
-				this.#reconcileEntityNameplate(event.entity.identity.guid);
+				this.#combatOverlays.reconcileEntityNameplate(
+					event.entity.identity.guid,
+					this.#activeResources?.runtime,
+				);
 				return;
 			case "removed":
-				this.#lockFeedback.remove(event.guid, event.generation);
-				this.#combatHealth.removeEntity(event.guid);
-				if (event.guid === this.#playerGuid)
-					this.#invalidatePlayerPresentationConvergence();
+				this.#combatOverlays.removeEntity(event.guid, event.generation);
+				if (event.guid === this.#playerGuid) {
+					this.#scenePortal.invalidatePlayerPresentationConvergence();
+				}
 				this.#activeResources?.runtime.removeDynamicEntity(
 					event.guid,
 					event.generation,
@@ -1849,371 +1172,128 @@ export class ClientGameplayPresentation {
 		}
 	}
 
-	#hostNowSeconds(localNowMs: number): number | null {
-		return this.#session.mirror.isAwaitingSnapshot()
-			? null
-			: this.#session.mirror.hostTimeSeconds(localNowMs / 1_000);
-	}
-
-	#hostNowMs(localNowMs: number): number | null {
-		const seconds = this.#hostNowSeconds(localNowMs);
-		return seconds === null ? null : seconds * 1_000;
-	}
-
-	#clearOverlayPresentation(
-		runtime: ClientGameplayRuntime | undefined = this.#activeResources?.runtime,
-	): void {
-		this.#overlays.clear();
-		runtime?.setEntityOverlayFrame(EMPTY_ENTITY_OVERLAY_FRAME);
-	}
-
-	#syncCombatHealthWorld(forceReset: boolean): void {
-		const sessionState = this.#session.state();
-		if (
-			forceReset ||
-			this.#combatHealth.worldGeneration() !== sessionState.worldGeneration
-		) {
-			this.#combatHealth.resetWorld(sessionState.worldGeneration);
-		}
-		this.#combatHealth.setCombatMode(sessionState.combatMode);
-		this.#combatHealth.setCombatTarget(
-			sessionState.combat.desired?.target ?? null,
-			this.#hostNowMs(performance.now()),
-		);
-	}
-
-	#reconcileCombatHealth(nowMs: number): void {
-		if (this.#combatHealth.isIdle()) return;
-		const hostNowSeconds = this.#hostNowSeconds(nowMs);
-		if (hostNowSeconds === null) return;
-		const hostNowMs = hostNowSeconds * 1_000;
-		const read = this.#session.entities.read();
-		if (read.kind !== "current") {
-			this.#combatHealth.reconcile([], hostNowMs);
-			return;
-		}
-		const levelEntities = read.level.entities;
-		const player =
-			read.level.playerGuid === null
-				? null
-				: this.#session.mirror.entityByGuid(read.level.playerGuid);
-		const playerPose =
-			player?.placement.kind === "world" ? player.placement.pose : null;
-		const recentWindowSeconds =
-			CLIENT_TUNING.combatHealth.recentWindowMs / 1_000;
-		const candidates = this.#combatHealthCandidates;
-		let candidateCount = 0;
-		for (const dynamic of this.#session.mirror.currentEntities()) {
-			const guid = dynamic.identity.guid;
-			const facts = levelEntities.get(guid);
-			const isHostileMob =
-				dynamic.presentation.entityClass === "mob" &&
-				facts !== undefined &&
-				facts.isHostile &&
-				facts.corpse === null;
-			const distanceMeters =
-				isHostileMob &&
-				playerPose !== null &&
-				dynamic.placement.kind === "world"
-					? distanceBetweenDynamicWorldPoses(playerPose, dynamic.placement.pose)
-					: null;
-			const freshHealth = resolveFreshCreatureHealth(
-				facts,
-				dynamic.generation,
-				hostNowSeconds,
-				recentWindowSeconds,
-			);
-			const freshObservedAtMs =
-				freshHealth === null ? null : freshHealth.observedAtSeconds * 1_000;
-			const candidate = candidates[candidateCount];
-			if (candidate === undefined)
-				candidates.push({
-					guid,
-					generation: dynamic.generation,
-					isHostileMob,
-					distanceMeters,
-					freshObservedAtMs,
-				});
-			else {
-				candidate.guid = guid;
-				candidate.generation = dynamic.generation;
-				candidate.isHostileMob = isHostileMob;
-				candidate.distanceMeters = distanceMeters;
-				candidate.freshObservedAtMs = freshObservedAtMs;
-			}
-			candidateCount += 1;
-		}
-		candidates.length = candidateCount;
-		this.#combatHealth.reconcile(candidates, hostNowMs);
-	}
-
-	#publishEntityOverlays(
-		resources: ClientGameplayPresentationResources,
-		player: DynamicEntityView,
-		nowMs: number,
-	): void {
-		const read = this.#session.entities.read();
-		const hostNowSeconds = this.#hostNowSeconds(nowMs);
-		if (
-			read.kind !== "current" ||
-			player.placement.kind !== "world" ||
-			hostNowSeconds === null
-		) {
-			this.#clearOverlayPresentation(resources.runtime);
-			return;
-		}
-		const engagement = resolveActiveCombatEngagement(this.#session.state());
-		const sampleCandidates =
-			this.#status.kind === "ready" &&
-			this.camera.status().kind === "active" &&
-			this.#sampleImmediateTargetCandidates !== null
-				? this.#sampleImmediateTargetCandidates
-				: null;
-		const frame = this.#overlays.composeFrame({
-			nowMs,
-			hostNowSeconds,
-			playerGuid: player.identity.guid,
-			playerPose: player.placement.pose,
-			dynamicEntities: this.#session.mirror.currentEntities(),
-			resolveDynamicGeneration: (guid) =>
-				this.#session.mirror.entityByGuid(guid)?.generation ?? null,
-			factsEntities: read.level.entities,
-			selectedGuid: this.#selectedEntityGuid,
-			hoveredGuid: this.#hoveredEntityGuid,
-			activeCombatTargetGuid: engagement?.target ?? null,
-			alertGuids: this.#trackedAlertGuids(),
-			categoryVisibility:
-				CLIENT_TUNING.frameSettings.nameplates.categoryVisibility,
-			sampleImmediateTarget:
-				sampleCandidates === null
-					? undefined
-					: () =>
-							this.withCycleSelectionFrame((selectionFrame) => {
-								const sampled = sampleCandidates(selectionFrame);
-								if (sampled === null) return null;
-								return (
-									resolveImmediateCandidate(sampled, "smart-combat")?.guid ??
-									null
-								);
-							}),
-		});
-		resources.runtime.setEntityOverlayFrame(frame);
-	}
-
-	/** Reconcile app-owned summon effects and name decorations from the complete semantic level. */
-	#reconcileEntityPresentationPolicy(): void {
-		const read = this.#session.entities.read();
-		const nowMs = performance.now();
-		const serverTime = this.#session.readServerTime(nowMs);
-		const playerGuid = this.#session.state().playerGuid;
-		const levels: SummonVisualLevel[] = [];
-		const colors = this.#summonLeashColors;
-		if (read.kind === "current") {
-			for (const entity of read.level.entities.values()) {
-				const summon = entity.summon;
-				if (summon === null || summon.activity !== "active") continue;
-				levels.push({
-					guid: entity.guid,
-					generation: summon.instanceSequence,
-					leash:
-						colors === null
-							? null
-							: {
-									owner: summon.owner,
-									color:
-										summon.owner === playerGuid ? colors.own : colors.other,
-								},
-					expiresAtSeconds:
-						summon.lifetime.kind === "estimated" && serverTime !== null
-							? nowMs / 1000 + summon.lifetime.expiresAtServerTime - serverTime
-							: null,
-				});
-			}
-		}
-		this.#activeResources?.runtime.setSummonVisuals(
-			levels,
-			CLIENT_SUMMON_TUNING,
-		);
-		for (const dynamic of this.#session.mirror.currentEntities())
-			this.#reconcileEntityNameplate(dynamic.identity.guid);
-	}
-
-	/** Project semantic corpse history into app-local decoration without copying display facts. */
-	#reconcileEntityNameplate(guid: number): void {
-		const runtime = this.#activeResources?.runtime;
-		const entities = this.#session.entities.read();
-		if (runtime === undefined || entities.kind !== "current") return;
-		const facts = entities.level.entities.get(guid);
-		const opened = facts?.corpse === "opened";
-		runtime.setDynamicEntityNameplateDecoration(guid, {
-			indicators: [],
-			strikeThrough: opened,
-			...(facts !== undefined && facts.summon !== null
-				? { nameColor: "player" as const }
-				: {}),
-		});
-	}
-
-	#deliverEntityCue(pending: GameplayPresentationCue): void {
-		if (
-			this.#destroyed ||
-			pending.worldGeneration !== this.#session.state().worldGeneration
-		)
-			return;
-		const runtime = this.#activeResources?.runtime;
-		if (runtime === undefined) return;
-		if (pending.kind === "script")
-			runtime.playDynamicEntityScriptCue(pending.cue);
-		else runtime.playDynamicEntitySoundCue(pending.cue, pending.receivedAtMs);
-	}
-
 	#receivePresentationDiscontinuity(
 		discontinuity: ClientPresentationDiscontinuity,
 	): void {
 		this.#activeResources?.runtime.clearCombatEffects();
-		void this.camera.stop().catch((error: unknown) => this.#reportError(error));
-		this.#cameraTarget = null;
-		this.#cameraProjection = null;
-		this.#sceneTargetKey = null;
-		this.#portalSceneActivation = null;
-		this.#portalDestinationFrame = null;
-		this.#portalTransition.reset();
+		this.#cameraSelection.resetOnDiscontinuity((error) =>
+			this.#reportError(error),
+		);
+		this.#scenePortal.resetOnDiscontinuity(this.#activeResources);
 		this.#hasRenderedFrame = false;
-		this.#lastPrimaryView = null;
-		this.#sceneInterestCoordinator?.invalidate();
-		this.#activeResources?.runtime.clearSceneInterest();
 		// The host's next reset/teleport batch owns placement invalidation. This edge only drops
 		// frontend demand/camera history; no canonical pose is manufactured here.
 		this.#activeResources?.runtime.clearDynamicEntityCues();
 		void discontinuity;
 	}
 
-	/** Start one generation-keyed portal presentation edge and choose outgoing capture policy. */
-	#ensurePortalTransition(
+	#resolvePortalFrame(
 		resources: ClientGameplayPresentationResources,
-		lifecycle: Extract<ClientLifecycle, { kind: "portal-space" }>,
-	): void {
-		const generation = this.#portalTransition.activeGeneration();
-		if (generation === lifecycle.worldGeneration) return;
-		if (this.#portalSceneActivation?.kind === "accepted") {
-			resources.runtime.completeSceneActivation(
-				this.#portalSceneActivation.generation,
+		player: DynamicEntityView,
+		playerGuid: number,
+		portalGeneration: number,
+		nowMs: number,
+	):
+		| { readonly view: PrimaryCameraView }
+		| { readonly earlyReturn: ClientGameplayPresentationFrame } {
+		let primaryView =
+			this.#scenePortal.portalDestinationFrame(portalGeneration);
+		if (primaryView === null) {
+			const activation = this.#scenePortal.checkPortalDestinationActivation(
+				resources,
+				playerGuid,
+			);
+			if (activation.kind === "failed") {
+				return {
+					earlyReturn: this.#failPortalPresentation(
+						resources,
+						activation.diagnostic,
+					),
+				};
+			}
+			if (activation.kind === "waiting") {
+				this.#setStatus(activation.status, activation.diagnostic);
+				return {
+					earlyReturn: this.#renderPortalLoadingFrame(resources, nowMs),
+				};
+			}
+			const cameraView =
+				this.#cameraSelection.resolvePortalDestinationPrimaryView(
+					resources,
+					player,
+					activation.origin,
+					this.#scenePortal.fieldOfView(),
+					nowMs,
+					(error) => this.#reportError(error),
+				);
+			if (cameraView.kind === "waiting") {
+				this.#setStatus(cameraView.status, cameraView.diagnostic);
+				return {
+					earlyReturn: this.#renderPortalLoadingFrame(resources, nowMs),
+				};
+			}
+			primaryView = cameraView.primaryView;
+			this.#scenePortal.setPortalDestinationFrame(
+				portalGeneration,
+				primaryView,
 			);
 		}
-		this.#portalSceneActivation = null;
-		this.#portalDestinationFrame = null;
-		resources.runtime.setAudioListener(null);
-		// The core resets its camera at the same generation edge. Drop the frontend registration too
-		// so the next seed is accepted even when the player instance itself was reused by the server.
-		void this.camera.stop().catch((error: unknown) => this.#reportError(error));
-		this.#cameraTarget = null;
-		const origin =
-			generation === null &&
-			lifecycle.cause === "teleport" &&
-			this.#hasRenderedFrame
-				? { kind: "capture-last-world" as const }
-				: { kind: "absent" as const };
-		this.#portalTransition.begin(lifecycle.worldGeneration, origin);
-		resources.runtime.playPortalTransitionSound?.("enter");
-	}
-
-	/** Advance the presentation state before a portal frame; waiting has no timeout. */
-	#publishPortalTransition(
-		resources: ClientGameplayPresentationResources,
-		nowMs: number,
-		destinationReady: boolean,
-	): PortalTransitionPresentationPlan {
-		const update = this.#portalTransition.advance({ nowMs, destinationReady });
-		if (update.audio !== undefined) {
-			resources.runtime.playPortalTransitionSound?.(update.audio);
+		const plan = this.#scenePortal.publishPortalTransition(
+			resources,
+			nowMs,
+			true,
+		);
+		if (plan.kind === "origin-to-tunnel" || plan.kind === "tunnel-only") {
+			this.#setStatus("loading-activation");
+			return {
+				earlyReturn: this.#renderPortalLoadingFrame(resources, nowMs, false),
+			};
 		}
-		resources.runtime.setPortalTransition(update.plan);
-		return update.plan;
+		return { view: primaryView };
 	}
 
-	#portalDestinationReadiness(
+	#resolveWorldFrame(
 		resources: ClientGameplayPresentationResources,
 		player: DynamicEntityView,
 		playerGuid: number,
 		nowMs: number,
-	): PortalDestinationReadiness {
-		const sceneActivation = this.#portalSceneActivation;
-		if (sceneActivation?.kind !== "accepted") {
-			return { kind: "waiting", status: "loading-activation" };
-		}
-		const activation = resources.runtime.sceneActivationStatus(
-			sceneActivation.receipt,
-		);
-		if (activation.kind === "failed") {
-			return { kind: "failed", diagnostic: activation.diagnostic };
-		}
-		if (activation.kind !== "ready") {
-			return { kind: "waiting", status: "loading-activation" };
-		}
-		this.#ensureScenePresentationConvergence();
-		const convergedActivation = this.#portalSceneActivation;
-		if (convergedActivation?.kind !== "accepted") {
-			return { kind: "waiting", status: "loading-activation" };
-		}
-		const playerFailure =
-			resources.runtime.dynamicEntityBodyFailure(playerGuid);
-		if (playerFailure !== null)
-			return { kind: "failed", diagnostic: formatError(playerFailure) };
-		if (convergedActivation.realization !== "ready") {
-			return { kind: "waiting", status: "loading-player" };
-		}
-		const origin = resources.runtime.dynamicEntityOrigin(playerGuid);
-		if (origin === null) {
-			return {
-				kind: "waiting",
-				status: "loading-player",
-				diagnostic:
-					"The authoritative local player has no installed runtime presentation.",
-			};
+	):
+		| { readonly view: PrimaryCameraView }
+		| { readonly earlyReturn: ClientGameplayPresentationFrame } {
+		const resolvedOrigin = resources.runtime.dynamicEntityOrigin(playerGuid);
+		if (resolvedOrigin === null) {
+			const failure = resources.runtime.dynamicEntityBodyFailure(playerGuid);
+			if (failure !== null) {
+				this.#setStatus("error", formatError(failure));
+				return { earlyReturn: { rendered: false, status: this.#status } };
+			}
+			this.#setStatus(
+				"loading-player",
+				"The authoritative local player has no installed runtime presentation.",
+			);
+			return { earlyReturn: { rendered: false, status: this.#status } };
 		}
 		if (
-			origin.envCellId !== null &&
-			!resources.runtime.hasEnvCellScope(origin)
+			resolvedOrigin.envCellId !== null &&
+			!resources.runtime.hasEnvCellScope(resolvedOrigin)
 		) {
-			return { kind: "waiting", status: "loading-activation" };
+			this.#setStatus("loading-activation");
+			return { earlyReturn: { rendered: false, status: this.#status } };
 		}
-		const extent = resources.runtime.resolveViewportExtent(
-			this.#canvas.clientWidth,
-			this.#canvas.clientHeight,
-		);
-		const projection = this.#resolveCameraProjection(extent);
-		this.#ensureCamera(player, projection);
-		const cameraPresentation = this.camera.presentation(nowMs);
-		const cameraStatus = this.camera.status();
-		if (
-			cameraPresentation === null ||
-			cameraStatus.kind !== "active" ||
-			cameraStatus.convergence !== "settled"
-		) {
-			return {
-				kind: "waiting",
-				status: "loading-activation",
-				diagnostic: "Waiting for the destination boom camera to settle.",
-			};
-		}
-		const camera = createClientCamera(
+		const cameraView = this.#cameraSelection.resolveWorldPrimaryView(
+			resources,
 			player,
-			origin,
-			cameraPresentation,
-			this.camera.acknowledgedProjection(nowMs),
-			this.#fieldOfView,
+			resolvedOrigin,
+			this.#scenePortal.fieldOfView(),
+			nowMs,
+			() => this.#destroyed,
+			(error) => this.#reportError(error),
 		);
-		if (
-			camera.placement.envCellId !== null &&
-			!resources.runtime.hasEnvCellScope(camera.placement)
-		) {
-			return {
-				kind: "waiting",
-				status: "loading-activation",
-				diagnostic: "Waiting for the destination camera's room to load.",
-			};
+		if (cameraView.kind === "waiting") {
+			this.#setStatus(cameraView.status, cameraView.diagnostic);
+			return { earlyReturn: { rendered: false, status: this.#status } };
 		}
-		return { kind: "ready", primaryView: { camera, extent } };
+		return { view: cameraView.primaryView };
 	}
 
 	/** Present one portal-only frame while destination prerequisites remain unavailable. */
@@ -2222,9 +1302,9 @@ export class ClientGameplayPresentation {
 		nowMs: number,
 		advanceTransition = true,
 	): ClientGameplayPresentationFrame {
-		this.#clearOverlayPresentation(resources.runtime);
+		this.#combatOverlays.clearOverlayPresentation(resources.runtime);
 		if (advanceTransition) {
-			this.#publishPortalTransition(resources, nowMs, false);
+			this.#scenePortal.publishPortalTransition(resources, nowMs, false);
 		}
 		const extent = resources.runtime.resolveViewportExtent(
 			this.#canvas.clientWidth,
@@ -2234,18 +1314,10 @@ export class ClientGameplayPresentation {
 			nowMs / 1_000,
 			extent,
 		);
-		this.#acknowledgePortalPresentation(receipt);
+		this.#scenePortal.acknowledgePresented(receipt);
 		this.#hasRenderedFrame = true;
 		this.#renderedFrameCount += 1;
 		return { rendered: true, status: this.#status };
-	}
-
-	#acknowledgePortalPresentation(
-		receipt: PortalTransitionPresentationReceipt | null,
-	): PortalRevealReceipt | null {
-		return receipt === null
-			? null
-			: this.#portalTransition.acknowledgePresented(receipt);
 	}
 
 	/** Retire every portal-owned presentation edge and latch the explicit black error surface. */
@@ -2253,64 +1325,11 @@ export class ClientGameplayPresentation {
 		resources: ClientGameplayPresentationResources,
 		diagnostic: string,
 	): ClientGameplayPresentationFrame {
-		if (this.#portalSceneActivation?.kind === "accepted") {
-			resources.runtime.completeSceneActivation(
-				this.#portalSceneActivation.generation,
-			);
-		}
-		this.#portalSceneActivation = null;
-		this.#portalDestinationFrame = null;
-		this.#portalTransition.reset();
-		resources.runtime.setPortalTransition(undefined);
+		this.#scenePortal.failPortalPresentation(resources);
 		resources.runtime.clearPresentation();
 		this.#terminalPresentationError = diagnostic;
 		this.#setStatus("error", diagnostic);
 		return { rendered: false, status: this.#status };
-	}
-
-	#resolveCameraProjection(extent: RenderExtent): ProjectionClearanceRevision {
-		const current = this.#cameraProjection;
-		if (
-			current !== null &&
-			current.extent.width === extent.width &&
-			current.extent.height === extent.height &&
-			current.fov === this.#fieldOfView
-		)
-			return current;
-		const projection = createProjectionClearanceRevision(
-			(current?.revision ?? 0) + 1,
-			{ fov: this.#fieldOfView, near: CLIENT_TUNING.camera.near },
-			extent,
-		);
-		this.#cameraProjection = projection;
-		return projection;
-	}
-
-	#ensureCamera(
-		player: DynamicEntityView,
-		projection: ProjectionClearanceRevision,
-	): void {
-		if (player.placement.kind !== "world") return;
-		const target: ClientCameraTarget = {
-			playerGuid: player.identity.guid,
-			entityGeneration: player.generation,
-		};
-		if (
-			this.#cameraTarget?.playerGuid === target.playerGuid &&
-			this.#cameraTarget.entityGeneration === target.entityGeneration
-		)
-			return;
-		this.#cameraTarget = target;
-		this.camera.replaceLook({
-			pitchRadians: CLIENT_TUNING.camera.pitchRadians,
-			yawRadians: createEntityFacingCameraYaw(player.placement.pose.rotation),
-		});
-		void this.camera
-			.start(target, CLIENT_TUNING.camera.distance, projection)
-			.catch((error: unknown) => {
-				if (this.#cameraTarget === target && !isAbortError(error))
-					this.#reportError(error);
-			});
 	}
 
 	#authoritativePlayer(guid: number): DynamicEntityView | null {
@@ -2328,88 +1347,6 @@ export class ClientGameplayPresentation {
 			.then(() => undefined);
 	}
 
-	async #requestDynamicEligibilityReevaluation(): Promise<void> {
-		if (
-			this.#activeResources === null ||
-			this.#session.mirror.isAwaitingSnapshot()
-		)
-			return;
-		const portalActivation = this.#portalSceneActivation;
-		if (
-			portalActivation?.kind !== "accepted" ||
-			portalActivation.realization !== "pending" ||
-			!this.#isCurrentPortalPresentation(portalActivation.generation)
-		)
-			return;
-		const results =
-			await this.#activeResources.runtime.reevaluateDynamicEntityEligibility();
-		if (!this.#isCurrentPortalPresentation(portalActivation.generation)) return;
-		const current = this.#portalSceneActivation;
-		if (
-			current?.kind !== "accepted" ||
-			current.receipt !== portalActivation.receipt
-		)
-			return;
-		const realization = this.#localPlayerHasUsableBody(results)
-			? "ready"
-			: "deferred";
-		this.#portalSceneActivation = {
-			...current,
-			realization,
-		};
-		if (
-			realization === "deferred" &&
-			current.realizedPlayerPlacementKey !==
-				this.#authoritativePlayerConvergenceKey()
-		) {
-			this.#portalSceneActivation = {
-				...this.#portalSceneActivation,
-				realization: "idle",
-			};
-			this.#ensureScenePresentationConvergence();
-		}
-	}
-
-	/** Force the exact local-player installation barrier to observe its latest desired level. */
-	#invalidatePlayerPresentationConvergence(): void {
-		const activation = this.#portalSceneActivation;
-		if (activation?.kind !== "accepted") return;
-		this.#portalSceneActivation = {
-			...activation,
-			realization: "idle",
-			realizedPlayerPlacementKey: null,
-		};
-	}
-
-	/** Begin normal dynamic eligibility only after the destination's static products are installed. */
-	#ensureScenePresentationConvergence(): void {
-		const activation = this.#portalSceneActivation;
-		if (activation?.kind !== "accepted" || activation.realization !== "idle")
-			return;
-		this.#portalSceneActivation = {
-			...activation,
-			realization: "pending",
-			realizedPlayerPlacementKey: this.#authoritativePlayerConvergenceKey(),
-		};
-		this.#observePresentationCompletion(
-			this.#requestDynamicEligibilityReevaluation(),
-		);
-	}
-
-	#localPlayerHasUsableBody(results: DynamicEntityRealizationResults): boolean {
-		if (this.#playerGuid === null) return false;
-		const disposition = results.get(this.#playerGuid);
-		return hasUsableDynamicBody(disposition);
-	}
-
-	#authoritativePlayerConvergenceKey(): string | null {
-		return this.#playerGuid === null
-			? null
-			: playerPresentationConvergenceKey(
-					this.#authoritativePlayer(this.#playerGuid),
-				);
-	}
-
 	/** Observe asynchronous realization failures without ordering later accepted state behind them. */
 	#observePresentationCompletion(completion: Promise<unknown>): void {
 		const observed = awaitWithAbort(completion, this.#lifetime.signal)
@@ -2420,167 +1357,6 @@ export class ClientGameplayPresentation {
 			});
 		this.#pendingWork.add(observed);
 		void observed.then(() => this.#pendingWork.delete(observed));
-	}
-
-	/** Resolve and install one exact destination before any portal frame is acknowledged. */
-	#syncSceneActivation(
-		player: DynamicEntityView,
-		worldGeneration: number,
-	): void {
-		if (player.placement.kind !== "world") return;
-		const target = clientSceneInterestTarget(player.placement);
-		const key = `${worldGeneration}:${sceneInterestTargetKey(target)}`;
-		if (this.#portalSceneActivation?.key === key) return;
-		const coordinator = this.#sceneInterestCoordinator;
-		const resources = this.#activeResources;
-		if (coordinator === null || resources === null) return;
-		if (this.#portalSceneActivation !== null) {
-			// A later destination within the same authority generation supersedes any fade progress
-			// earned by the provisional scene. Only the replacement may produce the reveal frame.
-			this.#portalTransition.begin(worldGeneration, { kind: "absent" });
-			this.#portalDestinationFrame = null;
-		}
-		if (this.#portalSceneActivation?.kind === "accepted") {
-			resources.runtime.completeSceneActivation(
-				this.#portalSceneActivation.generation,
-			);
-		}
-		this.#portalSceneActivation = {
-			kind: "requesting",
-			generation: worldGeneration,
-			key,
-		};
-		const request = coordinator.request(target, this.#sceneInterestRadii);
-		void request.promise
-			.then((resolved) => {
-				if (
-					this.#destroyed ||
-					this.#activeResources !== resources ||
-					!coordinator.isCurrent(request.revision)
-				)
-					return null;
-				return resources.runtime.activateScene({
-					generation: worldGeneration,
-					target: resolved,
-				});
-			})
-			.then((receipt) => {
-				if (receipt === null) return;
-				const current = this.#portalSceneActivation;
-				if (
-					this.#destroyed ||
-					this.#activeResources !== resources ||
-					!coordinator.isCurrent(request.revision) ||
-					current?.kind !== "requesting" ||
-					current.key !== key ||
-					!this.#isCurrentPortalPresentation(worldGeneration)
-				)
-					return;
-				this.#portalSceneActivation = {
-					kind: "accepted",
-					generation: worldGeneration,
-					key,
-					receipt,
-					realization: "idle",
-					realizedPlayerPlacementKey: null,
-					revealAcknowledged: false,
-				};
-			})
-			.catch((error: unknown) => {
-				if (!this.#destroyed && coordinator.isCurrent(request.revision))
-					this.#reportError(error);
-			});
-	}
-
-	/** Whether one controller generation still owns the session's current presentation barrier. */
-	#isCurrentPortalPresentation(generation: number): boolean {
-		return (
-			this.#portalTransition.activeGeneration() === generation &&
-			this.#session.state().worldGeneration === generation
-		);
-	}
-
-	#syncSceneInterest(player: DynamicEntityView): void {
-		if (player.placement.kind !== "world") {
-			this.#clearSceneDemand(this.#activeResources);
-			return;
-		}
-		const target = clientSceneInterestTarget(player.placement);
-		const key = `${this.#sceneInterestRevision}:${sceneInterestTargetKey(target)}`;
-		if (key === this.#sceneTargetKey) return;
-		const coordinator = this.#sceneInterestCoordinator;
-		const resources = this.#activeResources;
-		if (coordinator === null || resources === null) return;
-		this.#sceneTargetKey = key;
-		const request = coordinator.request(target, this.#sceneInterestRadii);
-		void request.promise
-			.then((resolved) => {
-				if (
-					this.#destroyed ||
-					this.#activeResources !== resources ||
-					!coordinator.isCurrent(request.revision) ||
-					this.#sceneTargetKey !== key
-				)
-					return;
-				resources.runtime.updateSceneInterest(resolved);
-			})
-			.catch((error: unknown) => {
-				if (!this.#destroyed && coordinator.isCurrent(request.revision)) {
-					this.#reportError(error);
-				}
-			});
-	}
-
-	#clearSceneDemand(
-		resources: ClientGameplayPresentationResources | null,
-	): void {
-		if (this.#sceneTargetKey === null && this.#portalSceneActivation === null)
-			return;
-		this.#sceneTargetKey = null;
-		if (
-			resources !== null &&
-			this.#portalSceneActivation?.kind === "accepted"
-		) {
-			resources.runtime.completeSceneActivation(
-				this.#portalSceneActivation.generation,
-			);
-		}
-		this.#portalSceneActivation = null;
-		this.#portalDestinationFrame = null;
-		this.#sceneInterestCoordinator?.invalidate();
-		if (resources !== null) resources.runtime.clearSceneInterest();
-	}
-
-	#bindEnvironment(): void {
-		const resources = this.#activeResources;
-		const sources = this.#environmentSources;
-		if (resources === null || sources === null) return;
-		const binding = bindClientPresentationEnvironment(
-			sources.server,
-			resources.activeRegion,
-			this.#environmentOverrides,
-		);
-		sources.presentation = binding.source;
-		this.#onEnvironmentIssue?.(binding.issue);
-	}
-
-	#refreshEnvironment(nowMs: number): void {
-		const resources = this.#activeResources;
-		const sources = this.#environmentSources;
-		if (resources === null || sources === null) return;
-		sources.server.refresh(nowMs);
-		this.#lastEnvironmentAtMs = nowMs;
-		this.#applyEnvironment();
-	}
-
-	/** Renderer application is shared by cold binding changes and server-source refresh. */
-	#applyEnvironment(): void {
-		const resources = this.#activeResources;
-		const sources = this.#environmentSources;
-		if (resources === null || sources === null) return;
-		const sample = sources.presentation.read();
-		if (sample !== null)
-			resources.runtime.setSceneEnvironment(sample.environment);
 	}
 
 	#setStatus(
@@ -2596,183 +1372,4 @@ export class ClientGameplayPresentation {
 		this.#setStatus("error", formatError(error));
 		this.#onError(error);
 	}
-}
-
-function clientSceneInterestTarget(
-	placement: DynamicEntityWorldPlacement,
-): SceneInterestTarget {
-	const cellId = placement.pose.landblockId >>> 0;
-	const landblockId = normalizeLandblockOwner(
-		datAssetId((cellId & 0xffff_0000) | 0xffff),
-	);
-	const envCellId = cellId & 0xffff;
-	return envCellId >= 0x0100
-		? {
-				kind: "env-cell",
-				landblockId,
-				envCellId: datAssetId(cellId) as `0x${string}`,
-			}
-		: { kind: "automatic-landblock", landblockId };
-}
-
-function sceneInterestTargetKey(target: SceneInterestTarget): string {
-	return target.kind === "env-cell"
-		? `${target.kind}:${target.landblockId}:${target.envCellId}`
-		: `${target.kind}:${target.landblockId}`;
-}
-
-/** Stable retry identity for player facts that can change dynamic scope eligibility. */
-function playerPresentationConvergenceKey(
-	player: DynamicEntityView | null,
-): string | null {
-	if (player?.placement.kind !== "world") return null;
-	const membership = player.placement.spatialMembership;
-	return [
-		player.generation,
-		player.placement.pose.landblockId,
-		membership.reachesOutdoors ? "outdoor" : "interior",
-		...membership.reachedEnvCellIds,
-	].join(":");
-}
-
-/** Exact non-rendering camera prerequisite surfaced by the client instead of one vague wait. */
-function clientCameraWaitDiagnostic(
-	status: ReturnType<ClientGameplayPresentationCameraController["status"]>,
-): string {
-	switch (status.kind) {
-		case "stopped":
-			return "The local-player camera is stopped.";
-		case "awaiting-registration":
-			return "Waiting for local-player camera registration.";
-		case "awaiting-first-path":
-			return "Waiting for the first host-authored camera path.";
-		case "active":
-			return status.placementOutcome?.kind === "held"
-				? `The camera withdrew its rendered path while held for ${status.placementOutcome.reason}.`
-				: "The active camera has no renderable playback path.";
-	}
-}
-
-function createClientCamera(
-	player: DynamicEntityView,
-	origin: ResolvedSceneOrigin,
-	boom: HostKinematicBoomPresentation | null,
-	projection: ProjectionClearanceRevision | null,
-	requestedFieldOfView: number,
-): Camera {
-	if (player.placement.kind !== "world") {
-		throw new Error("Client camera requires a world-placed player.");
-	}
-	const fallbackYaw = createEntityFacingCameraYaw(
-		player.placement.pose.rotation,
-	);
-	const fallbackRotation = createCameraRotationRadians(
-		fallbackYaw,
-		CLIENT_TUNING.camera.pitchRadians,
-	);
-	if (boom !== null) {
-		const look = resolveCameraLookAtAngles(
-			new Vec3(
-				boom.placement.position.x,
-				boom.placement.position.y,
-				boom.placement.position.z,
-			),
-			new Vec3(boom.visualPivot.x, boom.visualPivot.y, boom.visualPivot.z),
-		);
-		return {
-			far: CLIENT_TUNING.camera.far,
-			fov: projection?.fov ?? requestedFieldOfView,
-			near: projection?.near ?? CLIENT_TUNING.camera.near,
-			placement: {
-				...boom.placement.residency,
-				position: boom.placement.position,
-				rotation:
-					look === null
-						? fallbackRotation
-						: createCameraRotationRadians(look.yawRadians, look.pitchRadians),
-			},
-		};
-	}
-	const axes = createCameraAxesRadians(
-		fallbackYaw,
-		CLIENT_TUNING.camera.pitchRadians,
-	);
-	const originWorld = createLandblockWorldOrigin(origin.landblockId).add(
-		origin.landblockOrigin,
-	);
-	const position = sceneVec3(
-		new Vec3(
-			originWorld.x - axes.forward.x * CLIENT_TUNING.camera.rearDistance,
-			originWorld.y +
-				CLIENT_TUNING.camera.height -
-				axes.forward.y * CLIENT_TUNING.camera.rearDistance,
-			originWorld.z - axes.forward.z * CLIENT_TUNING.camera.rearDistance,
-		),
-	);
-	return {
-		far: CLIENT_TUNING.camera.far,
-		fov: projection?.fov ?? requestedFieldOfView,
-		near: CLIENT_TUNING.camera.near,
-		placement: {
-			envCellId: origin.envCellId,
-			landblockId: origin.landblockId,
-			position,
-			rotation: fallbackRotation,
-		},
-	};
-}
-
-function parseCellId(value: string): number {
-	const parsed = Number.parseInt(
-		value.startsWith("0x") ? value.slice(2) : value,
-		16,
-	);
-	if (!Number.isSafeInteger(parsed) || parsed < 0 || parsed > 0xffff_ffff)
-		throw new Error(`Client camera placement has invalid cell id ${value}.`);
-	return parsed;
-}
-
-function preciseJumpMarkerColor(
-	status: "neutral" | "success" | "miss",
-): readonly [number, number, number, number] {
-	switch (status) {
-		case "success":
-			return [0.08, 0.48, 1, 0.9];
-		case "miss":
-			return [1, 0.12, 0.08, 0.9];
-		default:
-			return [0.62, 0.68, 0.75, 0.8];
-	}
-}
-
-/** Convert the player's live scene placement into the world-space subject used by the radar. */
-function mapAnchorFromPlacement(placement: ScenePlacement): MapAnchor {
-	const origin = createLandblockWorldOrigin(placement.landblockId);
-	return {
-		headingRadians: mapHeadingFromSceneTransform(placement.localTransform),
-		residency: {
-			envCellId: placement.envCellId,
-			landblockId: placement.landblockId,
-		},
-		worldX: origin.x + placement.localTransform.m41,
-		worldY: origin.y + placement.localTransform.m42,
-		worldZ: origin.z + placement.localTransform.m43,
-	};
-}
-
-function audioListenerFor(camera: Camera): AudioListenerPlacement {
-	return {
-		envCellId: camera.placement.envCellId,
-		position: sceneVector3([
-			camera.placement.position.x,
-			camera.placement.position.y,
-			camera.placement.position.z,
-		]),
-		rotation: new Quat(
-			camera.placement.rotation.w,
-			camera.placement.rotation.x,
-			camera.placement.rotation.y,
-			camera.placement.rotation.z,
-		),
-	};
 }

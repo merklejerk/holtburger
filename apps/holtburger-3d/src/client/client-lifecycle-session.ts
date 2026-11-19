@@ -721,11 +721,48 @@ interface SessionAttachment {
 	readonly unlisteners: (() => void)[];
 }
 
+/** Connection-attempt state retained only while an authority attachment is active. */
+interface ActiveClientSession {
+	readonly attachment: SessionAttachment;
+	/** Transport samples stay imperative; only the mounted badge polls them. */
+	connection: ClientConnectionObservation | null;
+	/** Receipt-owned clock survives delayed presentation mounts, but never session stop. */
+	serverClock: {
+		readonly serverTime: number;
+		readonly receivedAtMs: number;
+	} | null;
+	entryRequestGuid: number | null;
+}
+
+/** Character-scoped imperative domain snapshots retired together on character leave or stop. */
+interface CharacterSessionData {
+	/** Latest submitted snapshot names outlive shortcut removal, without retaining past activations. */
+	equipmentNames: Map<number, string>;
+	/** Cold membership/HUD publication excludes roster and vital updates. */
+	partyPresence: { inParty: boolean; hudPresent: boolean };
+	party: PartySnapshot | null;
+	vendor: VendorSnapshot;
+	housing: HousingSnapshot;
+	trade: TradeSnapshot;
+	/** Cold barber lifetime; candidate visual resources stay with the presentation owner. */
+	barber: BarberSnapshot;
+}
+
+function emptyCharacterSessionData(): CharacterSessionData {
+	return {
+		equipmentNames: new Map(),
+		partyPresence: { inParty: false, hudPresent: false },
+		party: null,
+		vendor: null,
+		housing: emptyHousing(),
+		trade: { trade: null, pending_items: [] },
+		barber: { interaction: null, result: null, particles: null },
+	};
+}
+
 export class ClientLifecycleSession {
 	/** App-owned last-container memory and outgoing-equipment placement policy. */
 	readonly packAffinities = new ClientPackAffinities();
-	/** Latest submitted snapshot names outlive shortcut removal, without retaining past activations. */
-	#equipmentNames = new Map<number, string>();
 	/** Imperative progression owner retained across character-panel mounts. */
 	readonly characterSheet: ClientCharacterSheetState;
 	/** Shared appraisal work routes results to requesting consumers without opening UI. */
@@ -746,29 +783,10 @@ export class ClientLifecycleSession {
 	/** Shared semantic source for inventory, selection, and selected display. */
 	readonly entities = new ClientEntityMirror();
 	readonly #dynamicSession: DynamicEntitySession;
-	#attachment: SessionAttachment | null = null;
 	readonly #partyUpdates: ClientPartyUpdates;
-	/** Cold membership/HUD publication excludes roster and vital updates. */
-	#partyPresence = { inParty: false, hudPresent: false };
-	#party: PartySnapshot | null = null;
+	#active: ActiveClientSession | null = null;
+	#character: CharacterSessionData = emptyCharacterSessionData();
 	#state: ClientLifecycleSessionState = emptyState();
-	/** Transport samples stay imperative; only the mounted badge polls them. */
-	#connection: ClientConnectionObservation | null = null;
-	/** Receipt-owned clock survives delayed presentation mounts, but never session stop. */
-	#serverClock: {
-		readonly serverTime: number;
-		readonly receivedAtMs: number;
-	} | null = null;
-	#vendor: VendorSnapshot = null;
-	#housing: HousingSnapshot = emptyHousing();
-	#trade: TradeSnapshot = { trade: null, pending_items: [] };
-	/** Cold barber lifetime; candidate visual resources stay with the presentation owner. */
-	#barber: BarberSnapshot = {
-		interaction: null,
-		result: null,
-		particles: null,
-	};
-	#entryRequestGuid: number | null = null;
 
 	constructor(
 		transport: ClientLifecycleTransport,
@@ -868,17 +886,10 @@ export class ClientLifecycleSession {
 	start(options?: {
 		readonly startAuthority: () => Promise<void>;
 	}): Promise<void> {
-		if (this.#attachment !== null) return this.#attachment.completion;
+		if (this.#active !== null) return this.#active.attachment.completion;
 		this.#cameras.open();
-		this.#serverClock = null;
 		this.#state = emptyState();
-		this.#resetCharacterLists();
-		this.#connection = null;
-		this.characterSheet.reset(null, null);
-		this.#vendor = null;
-		this.#housing = emptyHousing();
-		this.#trade = { trade: null, pending_items: [] };
-		this.#barber = { interaction: null, result: null, particles: null };
+		this.#retireCharacterSession({ emitPartyPresence: true });
 		const attachment: SessionAttachment = {
 			events: new AbortController(),
 			startup: new AbortController(),
@@ -887,7 +898,12 @@ export class ClientLifecycleSession {
 				this.#attach(attachment, options),
 			),
 		};
-		this.#attachment = attachment;
+		this.#active = {
+			attachment,
+			connection: null,
+			serverClock: null,
+			entryRequestGuid: null,
+		};
 		return attachment.completion;
 	}
 	async #attach(
@@ -914,55 +930,55 @@ export class ClientLifecycleSession {
 				},
 			});
 		} catch (error) {
-			if (this.#attachment === attachment) this.#dynamicSession.stop();
+			if (this.#active?.attachment === attachment) this.#dynamicSession.stop();
 			// An issued native launch can still publish its terminal outcome while presentation retires.
 			if (!isAbortError(error) || attachment.events.signal.aborted) {
-				if (this.#attachment === attachment) this.#serverClock = null;
+				if (this.#active?.attachment === attachment) {
+					this.#cameras.close();
+					this.#active = null;
+				}
 				attachment.events.abort(abortError("Client attachment retired."));
 				for (const unlisten of attachment.unlisteners.splice(0)) unlisten();
-				if (this.#attachment === attachment) this.#attachment = null;
 			}
 			throw error;
 		}
 	}
 	/** Withdraw unissued startup stages without losing live authority observation needed for cleanup. */
 	cancelStartup(): void {
-		this.#attachment?.startup.abort(abortError("Client startup withdrawn."));
+		this.#active?.attachment.startup.abort(
+			abortError("Client startup withdrawn."),
+		);
 	}
 
 	/** Stop all listeners and require replacement state if this owner starts again. */
 	stop(): void {
-		this.packAffinities.reset();
 		this.#cameras.close();
-		this.#equipmentNames = new Map();
 		this.#partyUpdates.stop();
-		this.#serverClock = null;
-		this.#resetCharacterLists();
-		const attachment = this.#attachment;
-		this.#attachment = null;
-		if (attachment !== null) {
-			attachment.startup.abort(abortError("Client session retired."));
-			attachment.events.abort(abortError("Client session retired."));
-			for (const unlisten of attachment.unlisteners.splice(0)) unlisten();
+		const active = this.#active;
+		this.#active = null;
+		if (active !== null) {
+			active.attachment.startup.abort(abortError("Client session retired."));
+			active.attachment.events.abort(abortError("Client session retired."));
+			for (const unlisten of active.attachment.unlisteners.splice(0))
+				unlisten();
 		}
 		this.#dynamicSession.stop();
 		this.entities.awaitSnapshot();
-		this.#entryRequestGuid = null;
-		this.#state = {
-			...this.#state,
-			knownSpells: null,
-			enchantments: null,
-			characterPreferences: null,
-		};
-		this.characterSheet.reset(null, null);
-		this.#connection = null;
-		this.#housing = emptyHousing();
-		this.#emit({ type: "resyncing" });
+		this.#state = emptyState();
+		this.#retireCharacterSession({ emitPartyPresence: true });
+		this.characterSheet.setContext(null);
+		this.friends.setContext(null, false);
+		this.contracts.setContext(null, false);
+		this.squelch.setContext(null, false);
+		this.allegiance.setContext(null, false);
+		const event: ClientLifecycleSessionEvent = { type: "resyncing" };
+		this.appraisals.receive(event);
+		this.#emit(event);
 	}
 
 	/** Read the retained transport observation without subscribing the UI to network events. */
 	connectionSample(): ClientConnectionObservation | null {
-		return this.#connection;
+		return this.#active?.connection ?? null;
 	}
 
 	/** Submit a validated user build; completion arrives through retained management state. */
@@ -1020,7 +1036,7 @@ export class ClientLifecycleSession {
 
 	/** Extrapolate the synchronized observation with browser monotonic time only. */
 	readServerTime(timeMs: number): number | null {
-		const anchor = this.#serverClock;
+		const anchor = this.#active?.serverClock ?? null;
 		return anchor === null
 			? null
 			: anchor.serverTime + (timeMs - anchor.receivedAtMs) / 1000;
@@ -1042,12 +1058,14 @@ export class ClientLifecycleSession {
 
 	/** Submit one exact authority-provided character identity for the explicit enter action. */
 	async enterWorld(guid: number): Promise<void> {
-		if (this.#entryRequestGuid === guid) return;
-		this.#entryRequestGuid = guid;
+		const active = this.#active;
+		if (active === null) throw new Error("Client session is not active.");
+		if (active.entryRequestGuid === guid) return;
+		active.entryRequestGuid = guid;
 		try {
 			await this.#transport.invoke("select_client_character", { guid });
 		} catch (error) {
-			this.#entryRequestGuid = null;
+			if (active.entryRequestGuid === guid) active.entryRequestGuid = null;
 			throw error;
 		}
 	}
@@ -1121,7 +1139,7 @@ export class ClientLifecycleSession {
 
 	/** Shared offers and acknowledgment waits survive HUD window mounts. */
 	tradeSnapshot(): TradeSnapshot {
-		return this.#trade;
+		return this.#character.trade;
 	}
 
 	async submitTrade(request: TradeRequest): Promise<void> {
@@ -1132,7 +1150,7 @@ export class ClientLifecycleSession {
 
 	/** Recoverable interaction level, independent of HUD mount lifetime. */
 	barberSnapshot(): BarberSnapshot {
-		return this.#barber;
+		return this.#character.barber;
 	}
 
 	async requestBarber(request: BarberRequest): Promise<void> {
@@ -1143,7 +1161,7 @@ export class ClientLifecycleSession {
 
 	/** Retained housing facts survive panel mounts; opening intent is an independent event. */
 	housingSnapshot(): HousingSnapshot {
-		return this.#housing;
+		return this.#character.housing;
 	}
 
 	async refreshHousing(): Promise<void> {
@@ -1187,7 +1205,7 @@ export class ClientLifecycleSession {
 	}
 
 	vendorSnapshot(): VendorSnapshot {
-		return this.#vendor;
+		return this.#character.vendor;
 	}
 
 	async previewVendor(request: VendorRequest): Promise<void> {
@@ -1216,7 +1234,7 @@ export class ClientLifecycleSession {
 
 	/** Submission is re-evaluated by core; an earlier preview is not an authorization token. */
 	async submitInventory(intent: ClientInventoryIntent): Promise<void> {
-		this.#equipmentNames.delete(intent.item);
+		this.#character.equipmentNames.delete(intent.item);
 		await this.#transport.invoke("submit_client_inventory", {
 			intent: inventoryIntentSchema.parse(intent),
 			storage: this.packAffinities.storage(this.entities.read()),
@@ -1307,7 +1325,7 @@ export class ClientLifecycleSession {
 
 	/** Submit equipment primitives while retaining app-only names for attributed warnings. */
 	async applyEquipmentSet(bindings: readonly LoadoutBinding[]): Promise<void> {
-		this.#equipmentNames = new Map(
+		this.#character.equipmentNames = new Map(
 			bindings.flatMap((binding) =>
 				binding.item === null ? [] : [[binding.item, binding.name] as const],
 			),
@@ -1329,7 +1347,9 @@ export class ClientLifecycleSession {
 		}
 		for (const binding of feedback.equipment) {
 			const name =
-				binding.item === null ? null : this.#equipmentNames.get(binding.item);
+				binding.item === null
+					? null
+					: this.#character.equipmentNames.get(binding.item);
 			const itemLabel = name === undefined ? `item ${binding.item}` : name;
 			this.#emit({
 				type: "action-feedback",
@@ -1346,7 +1366,10 @@ export class ClientLifecycleSession {
 
 	/** Cast using complete caller-owned recipient intent; core resolves normal spell routes. */
 	async castSpell(spellId: number, aim: ClientSpellCastAim): Promise<void> {
-		if (this.#attachment === null || this.#attachment.unlisteners.length === 0)
+		if (
+			this.#active === null ||
+			this.#active.attachment.unlisteners.length === 0
+		)
 			throw new Error("Spell session is unavailable.");
 		if (
 			this.#state.lifecycle?.kind !== "in-world" ||
@@ -1414,7 +1437,7 @@ export class ClientLifecycleSession {
 
 	/** Retained fellowship facts stay imperative, independent of panel lifetime. */
 	partySnapshot(): PartySnapshot | null {
-		return this.#party;
+		return this.#character.party;
 	}
 	async submitParty(action: PartyAction): Promise<void> {
 		await this.#transport.invoke("submit_client_party", {
@@ -1427,7 +1450,7 @@ export class ClientLifecycleSession {
 	}
 	/** Presence is computed by the session that owns player and roster identity. */
 	partyHudPresent(): boolean {
-		return this.#partyPresence.hudPresent;
+		return this.#character.partyPresence.hudPresent;
 	}
 	/** On-demand data query; the app owns command grammar and presentation. */
 	async queryDeathLocations(query: DeathLocationQuery): Promise<void> {
@@ -1601,12 +1624,14 @@ export class ClientLifecycleSession {
 				),
 			);
 			unlisteners.push(
-				await listen("client-object-inspection-result", (payload) =>
-					this.#emit({
+				await listen("client-object-inspection-result", (payload) => {
+					const event: ClientLifecycleSessionEvent = {
 						type: "object-inspection-result",
 						result: decodeObjectInspectionResult(payload),
-					}),
-				),
+					};
+					this.appraisals.receive(event);
+					this.#emit(event);
+				}),
 			);
 			unlisteners.push(
 				await listen("client-object-preview-result", (payload) =>
@@ -1637,8 +1662,16 @@ export class ClientLifecycleSession {
 					this.entities.awaitSnapshot();
 					this.mirror.awaitSnapshot();
 					this.characterSheet.reset(null, null);
-					this.#connection = null;
-					this.#emit({ type: "resyncing" });
+					if (this.#active !== null) this.#active.connection = null;
+					this.#partyUpdates.setActive(false, true);
+					this.characterSheet.setContext(null);
+					this.friends.setContext(this.#state.playerGuid, false);
+					this.contracts.setContext(this.#state.playerGuid, false);
+					this.squelch.setContext(this.#state.playerGuid, false);
+					this.allegiance.setContext(this.#state.playerGuid, false);
+					const event: ClientLifecycleSessionEvent = { type: "resyncing" };
+					this.appraisals.receive(event);
+					this.#emit(event);
 				}),
 			);
 			unlisteners.push(
@@ -1702,12 +1735,15 @@ export class ClientLifecycleSession {
 			);
 			unlisteners.push(
 				await listen("client-party-updated", (payload) => {
-					this.#party = z
+					this.#character.party = z
 						.object({ party: partySnapshotSchema.nullable() })
 						.strict()
 						.parse(payload).party;
 					this.#updatePartyPresence();
-					this.#emit({ type: "party-updated", party: this.#party });
+					this.#emit({
+						type: "party-updated",
+						party: this.#character.party,
+					});
 				}),
 			);
 			unlisteners.push(
@@ -1760,10 +1796,12 @@ export class ClientLifecycleSession {
 			);
 			unlisteners.push(
 				await listen("client-connection-updated", (payload) => {
-					this.#connection = {
-						sample: connectionSampleSchema.parse(payload),
-						receivedAtMs: performance.now(),
-					};
+					if (this.#active !== null) {
+						this.#active.connection = {
+							sample: connectionSampleSchema.parse(payload),
+							receivedAtMs: performance.now(),
+						};
+					}
 				}),
 				await listen("client-current-state", (payload) =>
 					this.#receiveCurrentState(payload),
@@ -1922,12 +1960,15 @@ export class ClientLifecycleSession {
 					});
 				}),
 				await listen("client-trade-snapshot", (payload) => {
-					this.#trade = tradeSnapshotSchema.parse(payload);
-					this.#emit({ type: "trade-snapshot", trade: this.#trade });
+					this.#character.trade = tradeSnapshotSchema.parse(payload);
+					this.#emit({ type: "trade-snapshot", trade: this.#character.trade });
 				}),
 				await listen("client-barber-updated", (payload) => {
-					this.#barber = barberSnapshotSchema.parse(payload);
-					this.#emit({ type: "barber-updated", barber: this.#barber });
+					this.#character.barber = barberSnapshotSchema.parse(payload);
+					this.#emit({
+						type: "barber-updated",
+						barber: this.#character.barber,
+					});
 				}),
 				await listen("client-barber-preview", (payload) => {
 					this.#emit({
@@ -1942,8 +1983,11 @@ export class ClientLifecycleSession {
 					});
 				}),
 				await listen("client-housing-updated", (payload) => {
-					this.#housing = housingSnapshotSchema.parse(payload);
-					this.#emit({ type: "housing-updated", housing: this.#housing });
+					this.#character.housing = housingSnapshotSchema.parse(payload);
+					this.#emit({
+						type: "housing-updated",
+						housing: this.#character.housing,
+					});
 				}),
 				await listen("client-housing-payment-finished", (payload) => {
 					this.#emit({
@@ -1957,12 +2001,15 @@ export class ClientLifecycleSession {
 				}),
 				await listen("client-vendor-approached", (payload) => {
 					const vendor = vendorApproachedSchema.parse(payload);
-					this.#vendor = vendor;
+					this.#character.vendor = vendor;
 					this.#emit({ type: "vendor-approached", vendor });
 				}),
 				await listen("client-vendor-snapshot", (payload) => {
-					this.#vendor = vendorSnapshotSchema.parse(payload);
-					this.#emit({ type: "vendor-snapshot", vendor: this.#vendor });
+					this.#character.vendor = vendorSnapshotSchema.parse(payload);
+					this.#emit({
+						type: "vendor-snapshot",
+						vendor: this.#character.vendor,
+					});
 				}),
 				await listen("client-vendor-preview", (payload) => {
 					this.#emit({
@@ -2044,12 +2091,14 @@ export class ClientLifecycleSession {
 				),
 			);
 			unlisteners.push(
-				await listen("client-appraisal-facts-settled", (payload) =>
-					this.#emit({
+				await listen("client-appraisal-facts-settled", (payload) => {
+					const event: ClientLifecycleSessionEvent = {
 						type: "appraisal-facts-settled",
 						guid: decodeClientAppraisalFactsSettled(payload).guid,
-					}),
-				),
+					};
+					this.appraisals.receive(event);
+					this.#emit(event);
+				}),
 			);
 			unlisteners.push(
 				await listen("client-action-feedback", (payload) =>
@@ -2156,10 +2205,19 @@ export class ClientLifecycleSession {
 		const state = decodeClientCurrentState(payload);
 		// Final task completion outranks snapshots already in flight from this authority.
 		if (this.#state.exit !== null) return;
-		this.#serverClock =
-			state.serverTime === null
-				? null
-				: { serverTime: state.serverTime, receivedAtMs: performance.now() };
+		if (this.#active !== null) {
+			this.#active.serverClock =
+				state.serverTime === null
+					? null
+					: { serverTime: state.serverTime, receivedAtMs: performance.now() };
+		}
+		if (state.lifecycle.kind === "exiting") this.#cameras.close();
+		else if (
+			state.lifecycle.kind === "logging-out" ||
+			state.lifecycle.kind === "character-selection"
+		) {
+			this.#cameras.reset();
+		}
 		this.allegiance.recover(
 			state.allegiance,
 			state.characterPreferences?.allegiance ?? null,
@@ -2182,19 +2240,19 @@ export class ClientLifecycleSession {
 			state.localPlayerGuid,
 			state.lifecycle.kind === "in-world",
 		);
-		this.#party = state.party;
+		this.#character.party = state.party;
 		this.characterSheet.reset(state.characterSheet, state.lifecycle.kind);
-		this.#housing = state.housing;
-		this.#vendor = state.vendor;
-		this.#trade = state.trade;
-		this.#barber = state.barber;
+		this.#character.housing = state.housing;
+		this.#character.vendor = state.vendor;
+		this.#character.trade = state.trade;
+		this.#character.barber = state.barber;
 		const semantic = this.entities.prepareSnapshot(
 			state.entities,
 			state.localPlayerGuid,
 		);
 		const commitDynamic = this.mirror.prepareSnapshot(state.dynamic);
-		if (state.lifecycle.kind !== "entering-world") {
-			this.#entryRequestGuid = null;
+		if (state.lifecycle.kind !== "entering-world" && this.#active !== null) {
+			this.#active.entryRequestGuid = null;
 		}
 		this.#state = {
 			...this.#state,
@@ -2227,14 +2285,19 @@ export class ClientLifecycleSession {
 			kind: "snapshot",
 			snapshot: state.dynamic,
 		};
-		this.#connection =
-			state.connection === null
-				? null
-				: { sample: state.connection, receivedAtMs: performance.now() };
+		if (this.#active !== null) {
+			this.#active.connection =
+				state.connection === null
+					? null
+					: { sample: state.connection, receivedAtMs: performance.now() };
+		}
 		this.entities.commit(semantic);
 		this.packAffinities.observe(this.entities.read());
 		commitDynamic();
-		this.#emit({ type: "current-state", state });
+		const event: ClientLifecycleSessionEvent = { type: "current-state", state };
+		this.appraisals.receive(event);
+		this.#syncCharacterContext(true);
+		this.#emit(event);
 		this.#emit({ type: "dynamic", event: dynamic });
 	}
 
@@ -2246,16 +2309,15 @@ export class ClientLifecycleSession {
 			lifecycle.worldGeneration < this.#state.worldGeneration
 		)
 			return;
-		if (lifecycle.kind !== "in-world") this.#equipmentNames = new Map();
-		if (lifecycle.kind !== "entering-world") {
-			this.#entryRequestGuid = null;
+		if (lifecycle.kind !== "in-world")
+			this.#character.equipmentNames = new Map();
+		if (lifecycle.kind !== "entering-world" && this.#active !== null) {
+			this.#active.entryRequestGuid = null;
 		}
+		const leavingCharacter =
+			lifecycle.kind !== "in-world" && lifecycle.kind !== "portal-space";
 		const retiresCharacterDescription =
-			lifecycle.kind === "connecting" ||
-			lifecycle.kind === "authenticating" ||
-			lifecycle.kind === "character-selection" ||
-			lifecycle.kind === "entering-world" ||
-			lifecycle.kind === "exiting" ||
+			leavingCharacter ||
 			(lifecycle.kind === "portal-space" &&
 				lifecycle.cause === "initial-entry" &&
 				lifecycle.worldGeneration !== this.#state.worldGeneration);
@@ -2276,10 +2338,18 @@ export class ClientLifecycleSession {
 					? lifecycle.worldGeneration
 					: this.#state.worldGeneration,
 		};
-		if (retiresCharacterDescription) this.characterSheet.reset(null, null);
+		if (lifecycle.kind === "exiting") this.#cameras.close();
+		else if (
+			lifecycle.kind === "logging-out" ||
+			lifecycle.kind === "character-selection"
+		) {
+			this.#cameras.reset();
+		}
 		// Social packets can hydrate before PlayerCreate; portal revelation must retain them.
-		if (lifecycle.kind !== "in-world" && lifecycle.kind !== "portal-space") {
-			this.#resetCharacterLists();
+		if (leavingCharacter) {
+			this.#retireCharacterSession({ emitPartyPresence: true });
+		} else if (retiresCharacterDescription) {
+			this.characterSheet.reset(null, null);
 		}
 		// Initial activation may arrive as portal-space without a separate entering-world event.
 		// Its completion supplies the new character baseline; teleports retain the current one.
@@ -2288,7 +2358,10 @@ export class ClientLifecycleSession {
 			(lifecycle.kind === "portal-space" && lifecycle.cause === "initial-entry")
 		)
 			this.entities.awaitSnapshot();
-		this.#emit({ type: "lifecycle", lifecycle });
+		const event: ClientLifecycleSessionEvent = { type: "lifecycle", lifecycle };
+		this.appraisals.receive(event);
+		this.#syncCharacterContext(false);
+		this.#emit(event);
 	}
 
 	#receiveCharacterMotionCapabilities(payload: unknown): void {
@@ -2328,12 +2401,18 @@ export class ClientLifecycleSession {
 	#receiveLocalPlayerEstablished(payload: unknown): void {
 		const identity = decodeClientLocalPlayerEstablished(payload);
 		this.#state = { ...this.#state, playerGuid: identity.playerGuid };
+		this.#syncCharacterContext(false);
 		this.#emit({ type: "local-player-established", identity });
 	}
 
 	#receiveServerTime(payload: unknown): void {
 		const { time } = decodeClientServerTime(payload);
-		this.#serverClock = { serverTime: time, receivedAtMs: performance.now() };
+		if (this.#active !== null) {
+			this.#active.serverClock = {
+				serverTime: time,
+				receivedAtMs: performance.now(),
+			};
+		}
 		this.#emit({ type: "server-time", time });
 	}
 
@@ -2401,84 +2480,79 @@ export class ClientLifecycleSession {
 			cause: exit.cause,
 		};
 		this.#state = { ...this.#state, lifecycle, exit, activeConfirmation: null };
-		this.#emit({ type: "lifecycle", lifecycle });
-		this.#emit({ type: "exit-requested", exit });
+		const lifecycleEvent: ClientLifecycleSessionEvent = {
+			type: "lifecycle",
+			lifecycle,
+		};
+		this.appraisals.receive(lifecycleEvent);
+		this.#syncCharacterContext(false);
+		this.#emit(lifecycleEvent);
+		const exitEvent: ClientLifecycleSessionEvent = {
+			type: "exit-requested",
+			exit,
+		};
+		this.appraisals.receive(exitEvent);
+		this.#emit(exitEvent);
 	}
 
-	/** Retire character-owned journal and social facts together; portals retain them. */
-	#resetCharacterLists(): void {
+	/** Retire character-owned snapshots, lists, and affinities together; portals retain them. */
+	#retireCharacterSession(options: {
+		readonly emitPartyPresence: boolean;
+	}): void {
+		const previousPresence = this.#character.partyPresence;
+		this.#character = emptyCharacterSessionData();
+		this.packAffinities.reset();
 		this.friends.reset();
 		this.contracts.reset();
 		this.squelch.reset();
 		this.allegiance.reset();
-		this.#party = null;
-		this.#updatePartyPresence();
+		this.characterSheet.reset(null, null);
+		if (
+			options.emitPartyPresence &&
+			(previousPresence.inParty || previousPresence.hudPresent)
+		) {
+			this.#emit({
+				type: "party-presence",
+				inParty: false,
+				hudPresent: false,
+			});
+		}
 	}
 
 	#updatePartyPresence(): void {
 		const player = this.#state.playerGuid;
-		const inParty = player !== null && this.#party !== null;
+		const party = this.#character.party;
+		const inParty = player !== null && party !== null;
 		const hudPresent =
 			player !== null &&
-			this.#party !== null &&
-			this.#party.members.some((member) => member.guid !== player);
+			party !== null &&
+			party.members.some((member) => member.guid !== player);
 		if (
-			inParty === this.#partyPresence.inParty &&
-			hudPresent === this.#partyPresence.hudPresent
+			inParty === this.#character.partyPresence.inParty &&
+			hudPresent === this.#character.partyPresence.hudPresent
 		)
 			return;
-		this.#partyPresence = { inParty, hudPresent };
+		this.#character.partyPresence = { inParty, hudPresent };
 		this.#emit({ type: "party-presence", inParty, hudPresent });
 	}
 
+	#syncCharacterContext(recoverPartyUpdates: boolean): void {
+		const lifecycleKind = this.#state.lifecycle?.kind ?? null;
+		const playerGuid = this.#state.playerGuid;
+		const inWorld = lifecycleKind === "in-world";
+		this.characterSheet.setContext(lifecycleKind);
+		this.#updatePartyPresence();
+		this.#partyUpdates.setActive(
+			playerGuid !== null && inWorld,
+			recoverPartyUpdates,
+		);
+		this.allegiance.setContext(playerGuid, inWorld);
+		this.squelch.setContext(playerGuid, inWorld);
+		this.contracts.setContext(playerGuid, inWorld);
+		this.friends.setContext(playerGuid, inWorld);
+	}
+
 	#emit(event: ClientLifecycleSessionEvent): void {
-		const phase =
-			event.type === "lifecycle"
-				? event.lifecycle.kind
-				: event.type === "current-state"
-					? event.state.lifecycle.kind
-					: null;
-		if (phase === "exiting") this.#cameras.close();
-		else if (phase === "logging-out" || phase === "character-selection")
-			this.#cameras.reset();
-		this.appraisals.receive(event);
-		if (event.type === "resyncing") {
-			this.#partyUpdates.setActive(false, true);
-			this.characterSheet.setContext(null);
-			this.friends.setContext(this.#state.playerGuid, false);
-			this.contracts.setContext(this.#state.playerGuid, false);
-			this.squelch.setContext(this.#state.playerGuid, false);
-			this.allegiance.setContext(this.#state.playerGuid, false);
-		}
-		if (
-			event.type === "lifecycle" ||
-			event.type === "current-state" ||
-			event.type === "local-player-established"
-		) {
-			this.characterSheet.setContext(this.#state.lifecycle?.kind ?? null);
-			this.#updatePartyPresence();
-			this.#partyUpdates.setActive(
-				this.#state.playerGuid !== null &&
-					this.#state.lifecycle?.kind === "in-world",
-				event.type === "current-state",
-			);
-			this.allegiance.setContext(
-				this.#state.playerGuid,
-				this.#state.lifecycle?.kind === "in-world",
-			);
-			this.squelch.setContext(
-				this.#state.playerGuid,
-				this.#state.lifecycle?.kind === "in-world",
-			);
-			this.contracts.setContext(
-				this.#state.playerGuid,
-				this.#state.lifecycle?.kind === "in-world",
-			);
-			this.friends.setContext(
-				this.#state.playerGuid,
-				this.#state.lifecycle?.kind === "in-world",
-			);
-		}
 		for (const listener of this.#listeners) listener(event);
 	}
 }

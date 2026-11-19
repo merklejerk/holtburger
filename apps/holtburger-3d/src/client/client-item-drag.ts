@@ -1,171 +1,94 @@
 import { dragEdgeScrollFactor } from "../app/drag-edge-scroll";
 import { pulseItemCell } from "../app/item-cell-pulse";
-import type { ClientSalvageState } from "./client-salvage-state";
-import { showUiDragGhost, positionUiDragGhost } from "../app/ui-drag-ghost";
-import { filterDraggedEquipment } from "./client-equipment-strip-filter";
-import {
-	EQUIPMENT_SLOTS,
-	equipmentSlotAvailability,
-} from "./client-inventory-equipment";
-import type { ClientTradeState } from "./client-trade-state";
-import type { ClientHouseCrystalState } from "./client-house-crystal-state";
-import type {
-	ClientViewportTargetPicker,
-	ClientViewportTargetResult,
-} from "./client-pointer-selection-controller";
 import { bindingAction } from "./client-action-item";
-import { nextInventoryPreviewSequence } from "./client-inventory-contract";
-import type { ClientLifecycleSession } from "./client-lifecycle-session";
-import type { ClientVendorState } from "./client-vendor-state";
-import type { ClientEntityRead } from "./client-entity-mirror";
-import type { ContentsSortMode } from "./client-container-contents";
-
-import type {
-	ClientInventoryIntent,
-	ClientInventoryPreviewResult,
-} from "./client-inventory-contract";
-import { CLIENT_TUNING } from "./client-tuning";
-
 import type {
 	ActionCellAddress,
 	ActionContent,
 } from "./client-action-bar-state";
-import { actionDigitIndex } from "./client-action-bar-state";
+import { filterDraggedEquipment } from "./client-equipment-strip-filter";
+import type { ClientHouseCrystalState } from "./client-house-crystal-state";
+import {
+	nextInventoryPreviewSequence,
+	type ClientInventoryIntent,
+	type ClientInventoryPreviewResult,
+} from "./client-inventory-contract";
+import {
+	canPayCrystal,
+	canQueueVendor,
+	canSalvageItem,
+	isEquipmentAvailable,
+	readContentsViews,
+	resolveActionCell,
+	resolveContentsSurface,
+	resolveHitTarget,
+	resolvePressedSource,
+	worldEntity,
+	type ActionDragBindings,
+	type BindingDragSource,
+	type ContentsDragView,
+	type DragFeatureAdapters,
+	type DragSource,
+	type DragTarget,
+	type InventoryDragTarget,
+	type ItemDragSession,
+	type PressedDragSource,
+	type ViewportDragTarget,
+} from "./client-item-drag-targets";
+import {
+	clearDimming,
+	clearDropHighlights,
+	hideDragGhost,
+	positionDragGhost,
+	retireActiveDragVisuals,
+	showDragGhost,
+} from "./client-item-drag-visuals";
+import type { ClientViewportTargetPicker } from "./client-pointer-selection-controller";
+import type { ClientSalvageState } from "./client-salvage-state";
+import type { ClientTradeState } from "./client-trade-state";
+import { CLIENT_TUNING } from "./client-tuning";
+import type { ClientVendorState } from "./client-vendor-state";
 
-/** Direct session authority shared by item gestures and action-bar activation. */
-export interface ItemDragSession extends Pick<
-	ClientLifecycleSession,
-	| "previewInventory"
-	| "submitInventory"
-	| "applyEquipmentSet"
-	| "subscribe"
-	| "state"
-> {
-	/** Coherent world facts; gestures never read retained display records. */
-	readonly entities: { read(): ClientEntityRead };
-}
-/** Current presentation policy of one mounted contents root. */
-export interface ContentsDragView {
-	/** Recovery disables all gestures on this surface. */
-	readonly pending: boolean;
-	/** Only native order admits positional destinations. */
-	readonly sortMode: ContentsSortMode;
-}
-/** Root and policy captured together for a particular preview destination. */
-interface ContentsSurface {
-	readonly root: number;
-	readonly view: ContentsDragView;
-}
+export type { ItemDragSession };
 
-/** Local binding edits supplied by the action-bar collection owner. */
-export interface ActionDragBindings {
-	readonly read: (cell: ActionCellAddress) => ActionContent | null;
-	readonly bind: (cell: ActionCellAddress, content: ActionContent) => void;
-	readonly transfer: (
-		source: ActionCellAddress,
-		target: ActionCellAddress | null,
-	) => void;
-}
-
-interface DragSource {
-	readonly item: number;
-	/** Gesture origin is fixed even if authoritative rendering moves or detaches the cell. */
-	readonly origin:
-		| "contents"
-		| "equipment"
-		| "pack"
-		| "main-pack"
-		| "vendor"
-		| ActionCellAddress;
-	/** Captured surface identity prevents root replacement from retargeting a gesture. */
-	readonly root: number | null;
-	readonly element: HTMLElement;
-}
-interface InventoryDragTarget {
-	readonly kind: "inventory";
-	readonly element: HTMLElement;
-	readonly intent: ClientInventoryIntent;
-	/** Destination context is checked again when asynchronous previews arrive. */
-	readonly surface: ContentsSurface | null;
-	readonly sequence: number;
-}
-/** Viewport resolution belongs to one exact pointer sample, never cached hover authority. */
-interface ViewportDragTarget {
-	readonly kind: "viewport";
-	readonly element: HTMLElement;
-	readonly x: number;
-	readonly y: number;
-	result: ClientViewportTargetResult | null;
-}
-type DragTarget =
-	| { readonly kind: "salvage"; readonly element: HTMLElement }
+type ActiveDragPhase =
+	| { readonly kind: "idle" }
 	| {
-			readonly kind: "housing";
-			readonly element: HTMLElement;
-			readonly crystal: number;
-			readonly wcid: number;
+			readonly kind: "pressed";
+			readonly pointer: number;
+			readonly x: number;
+			readonly y: number;
+			readonly press: PressedDragSource;
 	  }
 	| {
-			readonly kind: "trade";
+			readonly kind: "dragging-binding";
+			readonly pointer: number;
+			readonly source: ActionCellAddress | BindingDragSource;
+			readonly content: ActionContent;
 			readonly element: HTMLElement;
-			readonly partner: number;
-			readonly revision: number;
-	  }
-	| ViewportDragTarget
-	| InventoryDragTarget
-	| {
-			readonly kind: "vendor";
-			readonly element: HTMLElement;
-			readonly vendor: number;
-			/** The queue accepts purchase offers; the catalog accepts owned sales only. */
-			readonly acceptsPurchases: boolean;
+			highlightedCell: HTMLElement | null;
 	  }
 	| {
-			readonly kind: "action";
+			readonly kind: "dragging-draft";
+			readonly pointer: number;
+			readonly boundary: HTMLElement;
+			readonly remove: () => void;
 			readonly element: HTMLElement;
-			readonly cell: ActionCellAddress;
-	  };
-
-type Gesture =
-	| {
-			kind: "pressed";
-			source: DragSource;
-			pointer: number;
-			x: number;
-			y: number;
 	  }
 	| {
-			kind: "dragging";
-			source: DragSource;
-			pointer: number;
+			readonly kind: "dragging-item";
+			readonly pointer: number;
+			readonly source: DragSource;
+			cursor: { x: number; y: number };
 			target: DragTarget | null;
+			scrollFrame: number | null;
+			views: readonly unknown[];
+			readonly mergeHints: Map<number, HTMLElement>;
 	  }
-	| { kind: "released"; source: DragSource; target: DragTarget };
-
-/** Shortcut content has no inventory identity and cannot enter inventory targeting. */
-interface BindingDragSource {
-	/** Current immutable draft; identity changes invalidate an active gesture. */
-	readonly read: () => ActionContent | null;
-	/** Successful action-cell placement discards the originating draft. */
-	readonly placed: () => void;
-}
-
-/** Press-to-drag lifetime shared by builder snapshots and saved loadout cells. */
-interface BindingGesture {
-	/** Content identity captured at press, rechecked before every transfer. */
-	readonly content: ActionContent;
-	/** Original DOM source must remain connected. */
-	readonly element: HTMLElement;
-	/** A saved cell moves content; an unplaced draft binds a copy. */
-	readonly source: ActionCellAddress | BindingDragSource;
-	/** Only this pointer can continue the gesture. */
-	readonly pointer: number;
-	/** Press coordinates establish the ordinary drag threshold. */
-	readonly x: number;
-	readonly y: number;
-	/** Threshold crossing enables the ghost and suppresses activation on release. */
-	dragging: boolean;
-}
+	| {
+			readonly kind: "awaiting-release";
+			readonly source: DragSource;
+			target: DragTarget;
+	  };
 
 /** Imperative pointer owner: only semantic target changes cross the host boundary. */
 export class ClientItemDrag {
@@ -173,28 +96,10 @@ export class ClientItemDrag {
 	readonly #ghost: HTMLElement;
 	readonly #abort = new AbortController();
 	readonly #unsubscribe: () => void;
-	readonly #timer: ReturnType<typeof setInterval>;
-	#gesture: Gesture | null = null;
 	readonly #bindingSources = new Map<HTMLElement, BindingDragSource>();
-	#bindingGesture: BindingGesture | null = null;
-	/** Local draft removals never enter inventory targeting or physical item transfer. */
-	#draftGesture: {
-		/** Releasing outside this feature-owned area removes the captured draft entry. */
-		readonly boundary: HTMLElement;
-		readonly remove: () => void;
-		readonly element: HTMLElement;
-		readonly pointer: number;
-		readonly x: number;
-		readonly y: number;
-		dragging: boolean;
-	} | null = null;
-	#cursor = { x: 0, y: 0 };
-	/** Animation lifetime belongs to an active item drag, including stationary edge holds. */
-	#scrollFrame: number | null = null;
-	/** Last active gesture views; idle world clicks do not prepare contents sections. */
-	#views: readonly unknown[] = [];
-	/** Current host-owned merge eligibility queries, retired on view changes or drag end. */
-	readonly #mergeHints = new Map<number, HTMLElement>();
+	readonly #adapters: DragFeatureAdapters;
+	#timer: ReturnType<typeof setInterval> | null = null;
+	#phase: ActiveDragPhase = { kind: "idle" };
 	#suppressClick = false;
 	#suppressDoubleClickUntil = 0;
 
@@ -241,6 +146,7 @@ export class ClientItemDrag {
 		private readonly give: (source: number, recipient: number) => void,
 	) {
 		this.#root = root;
+		this.#adapters = { vendor, salvage, trade, houseCrystal };
 		this.#ghost = document.createElement("div");
 		this.#ghost.className = "item-drag-ghost ui-drag-ghost";
 		// The top layer escapes panel backdrop-filter containing blocks and clipping.
@@ -267,54 +173,40 @@ export class ClientItemDrag {
 					event.target.closest(
 						".item-grid-cell, .contents-header, [data-action-cell], [data-vendor-offer], [data-salvage-item]",
 					)
-				)
+				) {
 					event.preventDefault();
+				}
 			},
 			options,
 		);
 		this.#unsubscribe = this.session.subscribe((event) => {
-			if (event.type === "inventory-preview") this.#preview(event.result);
-			else if (event.type === "entities") {
-				this.#validateGesture();
+			if (event.type === "inventory-preview") {
+				this.#preview(event.result);
+			} else if (event.type === "entities") {
+				this.#validatePhase();
 			} else if (
 				event.type === "resyncing" ||
 				event.type === "current-state" ||
 				event.type === "exit-requested" ||
 				(event.type === "lifecycle" && event.lifecycle.kind !== "in-world")
-			)
+			) {
 				this.#cancel();
-		});
-		this.#timer = setInterval(() => {
-			if (this.#gesture === null) return;
-			if (!this.#validateGesture()) return;
-			const views = this.#readViews();
-			const changed =
-				views.length !== this.#views.length ||
-				views.some((view, index) => view !== this.#views[index]);
-			if (this.#gesture?.kind === "dragging") {
-				if (changed) this.#dimDropCandidates();
-				this.#target(changed);
 			}
-			this.#views = views;
-		}, CLIENT_TUNING.inventory.displayIntervalMs);
+		});
 	}
 
 	/** Cancel only a pointer gesture; the HUD owns fallback interaction cancellation. */
 	cancel(): boolean {
-		if (
-			this.#gesture === null &&
-			this.#draftGesture === null &&
-			this.#bindingGesture === null
-		)
-			return false;
+		if (this.#phase.kind === "idle") return false;
 		this.#cancel();
 		return true;
 	}
+
 	destroy(): void {
 		this.#cancel();
 		this.#abort.abort();
 		this.#unsubscribe();
-		clearInterval(this.#timer);
+		this.#stopItemPolling();
 		this.#ghost.remove();
 		this.#bindingSources.clear();
 	}
@@ -328,28 +220,28 @@ export class ClientItemDrag {
 		this.#bindingSources.set(element, { read, placed });
 		element.dataset.bindingSource = "true";
 		return () => {
-			if (this.#bindingGesture?.element === element) this.#cancel();
+			if (
+				(this.#phase.kind === "pressed" &&
+					this.#phase.press.kind === "binding" &&
+					this.#phase.press.element === element) ||
+				(this.#phase.kind === "dragging-binding" &&
+					this.#phase.element === element)
+			) {
+				this.#cancel();
+			}
 			this.#bindingSources.delete(element);
 			delete element.dataset.bindingSource;
 		};
 	}
 
-	/** All draft sources share one pointer lifetime; feature owners capture removal authority. */
-	#startDraftDrag(
-		event: PointerEvent,
-		element: HTMLElement,
-		boundary: HTMLElement,
-		remove: () => void,
-	): void {
+	#enterPressed(event: PointerEvent, press: PressedDragSource): void {
 		this.#cancel();
-		this.#draftGesture = {
-			boundary,
-			remove,
-			element,
+		this.#phase = {
+			kind: "pressed",
 			pointer: event.pointerId,
 			x: event.clientX,
 			y: event.clientY,
-			dragging: false,
+			press,
 		};
 		event.stopPropagation();
 	}
@@ -361,267 +253,175 @@ export class ClientItemDrag {
 			event.button !== 0 ||
 			!event.isPrimary ||
 			this.#root.querySelector('[data-inventory-modal="true"]') !== null
-		)
-			return;
-		const bindingElement =
-			event.target instanceof Element
-				? event.target.closest<HTMLElement>(
-						"[data-binding-source], [data-action-cell]:not([data-empty='true'])",
-					)
-				: null;
-		if (bindingElement !== null && this.#root.contains(bindingElement)) {
-			const cell = this.#actionCell(bindingElement);
-			const registered = this.#bindingSources.get(bindingElement);
-			const content =
-				cell === null ? registered?.read() : this.bindings.read(cell);
-			const source = cell ?? registered;
-			if (content?.kind === "loadout" && source !== undefined) {
-				this.#cancel();
-				this.#bindingGesture = {
-					content,
-					element: bindingElement,
-					source,
-					pointer: event.pointerId,
-					x: event.clientX,
-					y: event.clientY,
-					dragging: false,
-				};
-				event.stopPropagation();
-				return;
-			}
-		}
-		const queuedVendor =
-			event.target instanceof Element
-				? event.target.closest<HTMLElement>("[data-vendor-queue-key]")
-				: null;
-		if (queuedVendor !== null && this.#root.contains(queuedVendor)) {
-			const boundary = queuedVendor.closest<HTMLElement>("[data-vendor-queue]");
-			const key = queuedVendor.getAttribute("data-vendor-queue-key");
-			if (boundary === null || key === null) return;
-			const remove = this.vendor?.captureRemoval(key);
-			if (remove == null) return;
-			this.#startDraftDrag(event, queuedVendor, boundary, remove);
+		) {
 			return;
 		}
-		const queuedSalvage =
-			event.target instanceof Element
-				? event.target.closest<HTMLElement>("[data-salvage-item]")
-				: null;
-		if (queuedSalvage !== null && this.#root.contains(queuedSalvage)) {
-			const boundary = queuedSalvage.closest<HTMLElement>(
-				"[data-salvage-queue]",
-			);
-			const remove = this.salvage?.captureRemoval(
-				Number(queuedSalvage.dataset.salvageItem),
-			);
-			if (boundary === null || remove == null) return;
-			this.#startDraftDrag(event, queuedSalvage, boundary, remove);
-			return;
-		}
-		const requirement =
-			event.target instanceof Element
-				? event.target.closest<HTMLElement>(
-						"[data-housing-payment] .item-grid-cell",
-					)
-				: null;
-		if (requirement !== null && this.#root.contains(requirement)) {
-			const row = requirement.closest<HTMLElement>("[data-housing-wcid]");
-			if (row === null) return;
-			const identity = this.houseCrystal?.captureRow(
-				Number(row.dataset.housingWcid),
-			);
-			if (identity == null) return;
-			this.#startDraftDrag(event, requirement, requirement, () =>
-				this.houseCrystal?.clearRow(identity),
-			);
-			return;
-		}
-		const offer =
-			event.target instanceof Element
-				? event.target.closest<HTMLElement>(
-						"[data-vendor-offer]:not(:disabled)",
-					)
-				: null;
-		if (offer !== null && this.#root.contains(offer)) {
-			const item = Number(offer.dataset.vendorOffer);
-			const vendor = Number(offer.dataset.vendorGuid);
-			if (!this.vendor?.canDragOffer(vendor, item)) return;
-			this.#cancel();
-			this.#gesture = {
-				kind: "pressed",
-				source: { item, origin: "vendor", root: vendor, element: offer },
-				pointer: event.pointerId,
-				x: event.clientX,
-				y: event.clientY,
-			};
-			event.stopPropagation();
-			return;
-		}
-		const element =
-			event.target instanceof Element
-				? event.target.closest<HTMLElement>(
-						".item-grid-cell[data-item-guid]:not(:disabled), .contents-header[data-item-guid]:not(:disabled), [data-action-cell][data-action-item]",
-					)
-				: null;
-		if (element === null || !this.#root.contains(element)) return;
-		const read = this.session.entities.read();
-		if (read.kind !== "current") return;
-		const actionCell = this.#actionCell(element);
-		const surface = this.#surface(element);
-		if (
-			actionCell === null &&
-			surface === null &&
-			element.closest(".equipment-row") === null
-		)
-			return;
-		const bound = actionCell === null ? null : this.bindings.read(actionCell);
-		if (bound?.kind === "loadout") return;
-		if (actionCell !== null && bound === null) return;
-		const item = bound === null ? Number(element.dataset.itemGuid) : bound.item;
-		const origin =
-			actionCell !== null
-				? actionCell
-				: surface?.root === item && item === read.level.playerGuid
-					? "main-pack"
-					: element.closest(".contents-packs") !== null
-						? "pack"
-						: element.closest(".equipment-row") !== null
-							? "equipment"
-							: "contents";
-		if (actionCell === null) {
-			const facts = this.#worldEntity(item);
-			if (
-				facts?.description.kind !== "known" ||
-				!(
-					facts.ownedByPlayer ||
-					facts.worldContainerContent ||
-					origin === "main-pack"
-				)
-			)
-				return;
-			if (surface?.root === item && origin !== "main-pack") return;
-			if (
-				origin === "pack" &&
-				(facts.location.kind !== "contained" ||
-					facts.location.slot.kind !== "pack" ||
-					facts.location.slot.entryKind !== "container")
-			)
-				return;
-		}
-		this.#cancel();
-		this.#gesture = {
-			kind: "pressed",
-			source: { item, origin, element, root: surface?.root ?? null },
-			pointer: event.pointerId,
-			x: event.clientX,
-			y: event.clientY,
-		};
-		event.stopPropagation();
+		const targetNode = event.target instanceof Element ? event.target : null;
+		if (targetNode === null) return;
+		const press = resolvePressedSource({
+			targetNode,
+			root: this.#root,
+			session: this.session,
+			readContents: this.readContents,
+			bindings: this.bindings,
+			bindingSources: this.#bindingSources,
+			adapters: this.#adapters,
+		});
+		if (press !== null) this.#enterPressed(event, press);
 	};
 
 	#move = (event: PointerEvent): void => {
-		const binding = this.#bindingGesture;
-		if (binding !== null) {
-			if (event.pointerId !== binding.pointer) return;
-			if (!this.#bindingCurrent(binding)) {
-				this.#cancel();
-				return;
-			}
-			if (!binding.dragging) {
-				if (
-					Math.hypot(event.clientX - binding.x, event.clientY - binding.y) <
-					CLIENT_TUNING.inventory.dragThresholdCssPixels
-				)
-					return;
-				binding.dragging = true;
-				this.cancelInteraction();
-				this.#showGhost(binding.element);
-			}
-			positionUiDragGhost(this.#ghost, event);
-			this.#clearHighlight();
-			const target = document
-				.elementFromPoint(event.clientX, event.clientY)
-				?.closest<HTMLElement>("[data-action-cell]");
-			if (target != null && this.#root.contains(target))
-				target.dataset.inventoryDrop = "accepted";
-			event.preventDefault();
-			event.stopPropagation();
-			return;
-		}
-		const draft = this.#draftGesture;
-		if (draft !== null) {
-			if (draft.pointer !== event.pointerId) return;
-			if (!draft.element.isConnected) {
-				this.#cancel();
-				return;
-			}
-			if (
-				!draft.dragging &&
-				Math.hypot(event.clientX - draft.x, event.clientY - draft.y) <
-					CLIENT_TUNING.inventory.dragThresholdCssPixels
-			)
-				return;
-			if (!draft.dragging) {
-				draft.dragging = true;
-				this.cancelInteraction();
-				this.#showGhost(draft.element);
-			}
-			positionUiDragGhost(this.#ghost, event);
-			event.preventDefault();
-			event.stopPropagation();
-			return;
-		}
-		if (!this.#validateGesture()) return;
-		let gesture = this.#gesture;
+		if (!this.#validatePhase()) return;
+		const phase = this.#phase;
 		if (
-			gesture === null ||
-			gesture.kind === "released" ||
-			gesture.pointer !== event.pointerId
-		)
+			phase.kind === "idle" ||
+			phase.kind === "awaiting-release" ||
+			phase.pointer !== event.pointerId
+		) {
 			return;
-		this.#cursor = { x: event.clientX, y: event.clientY };
-		if (gesture.kind === "pressed") {
+		}
+		if (phase.kind === "pressed") {
 			if (
-				Math.hypot(event.clientX - gesture.x, event.clientY - gesture.y) <
+				Math.hypot(event.clientX - phase.x, event.clientY - phase.y) <
 				CLIENT_TUNING.inventory.dragThresholdCssPixels
-			)
+			) {
 				return;
+			}
 			this.cancelInteraction();
-			if (
-				typeof gesture.source.origin === "string" &&
-				gesture.source.origin !== "vendor"
-			)
-				this.selectDragItem(gesture.source.item);
-			gesture = {
-				kind: "dragging",
-				source: gesture.source,
-				pointer: gesture.pointer,
-				target: null,
-			};
-			this.#gesture = gesture;
-			this.#startEdgeScroll();
-			this.#showGhost(gesture.source.element);
-			// Initial hints already describe this view; the timer must not retire them as stale.
-			this.#views = this.#readViews();
-			this.#dimDropCandidates();
+			const nextPhase = this.#beginDragFromPress(phase, event);
+			event.preventDefault();
+			event.stopPropagation();
+			positionDragGhost(this.#ghost, event);
+			if (nextPhase.kind === "dragging-item") this.#target(nextPhase, false);
+			return;
 		}
 		event.preventDefault();
 		event.stopPropagation();
-		positionUiDragGhost(this.#ghost, event);
-		this.#target(false);
+		positionDragGhost(this.#ghost, event);
+		if (phase.kind === "dragging-binding") {
+			this.#highlightBindingTarget(phase, event);
+			return;
+		}
+		if (phase.kind === "dragging-item") {
+			phase.cursor = { x: event.clientX, y: event.clientY };
+			this.#target(phase, false);
+		}
 	};
 
+	#highlightBindingTarget(
+		phase: Extract<ActiveDragPhase, { kind: "dragging-binding" }>,
+		event: PointerEvent,
+	): void {
+		clearDropHighlights(this.#root);
+		const target = document
+			.elementFromPoint(event.clientX, event.clientY)
+			?.closest<HTMLElement>("[data-action-cell]");
+		if (target != null && this.#root.contains(target)) {
+			target.dataset.inventoryDrop = "accepted";
+			phase.highlightedCell = target;
+		} else {
+			phase.highlightedCell = null;
+		}
+	}
+
+	#beginDragFromPress(
+		pressed: Extract<ActiveDragPhase, { kind: "pressed" }>,
+		event: PointerEvent,
+	): ActiveDragPhase {
+		const { press, pointer } = pressed;
+		if (press.kind === "binding") {
+			const next: ActiveDragPhase = {
+				kind: "dragging-binding",
+				pointer,
+				source: press.source,
+				content: press.content,
+				element: press.element,
+				highlightedCell: null,
+			};
+			this.#phase = next;
+			showDragGhost(this.#root, this.#ghost, press.element);
+			this.#highlightBindingTarget(next, event);
+			return next;
+		}
+		if (press.kind === "draft") {
+			const next: ActiveDragPhase = {
+				kind: "dragging-draft",
+				pointer,
+				boundary: press.boundary,
+				remove: press.remove,
+				element: press.element,
+			};
+			this.#phase = next;
+			showDragGhost(this.#root, this.#ghost, press.element);
+			return next;
+		}
+		if (
+			typeof press.source.origin === "string" &&
+			press.source.origin !== "vendor"
+		) {
+			this.selectDragItem(press.source.item);
+		}
+		const next: Extract<ActiveDragPhase, { kind: "dragging-item" }> = {
+			kind: "dragging-item",
+			pointer,
+			source: press.source,
+			cursor: { x: event.clientX, y: event.clientY },
+			target: null,
+			scrollFrame: null,
+			views: readContentsViews(this.#root, this.session, this.readContents),
+			mergeHints: new Map(),
+		};
+		this.#phase = next;
+		this.#startItemPolling();
+		this.#startEdgeScroll(next);
+		showDragGhost(this.#root, this.#ghost, press.source.element);
+		this.#dimDropCandidates(next);
+		return next;
+	}
+
+	#startItemPolling(): void {
+		if (this.#timer !== null) return;
+		this.#timer = setInterval(() => {
+			if (this.#phase.kind !== "dragging-item") {
+				this.#stopItemPolling();
+				return;
+			}
+			if (!this.#validatePhase()) return;
+			const phase = this.#phase;
+			if (phase.kind !== "dragging-item") return;
+			const views = readContentsViews(
+				this.#root,
+				this.session,
+				this.readContents,
+			);
+			const changed =
+				views.length !== phase.views.length ||
+				views.some((view, index) => view !== phase.views[index]);
+			if (changed) this.#dimDropCandidates(phase);
+			this.#target(phase, changed);
+			if (this.#phase === phase) phase.views = views;
+		}, CLIENT_TUNING.inventory.displayIntervalMs);
+	}
+
+	#stopItemPolling(): void {
+		if (this.#timer === null) return;
+		clearInterval(this.#timer);
+		this.#timer = null;
+	}
+
 	/** Keep pointer-rate geometry imperative and re-hit-test cells as they scroll underneath it. */
-	#startEdgeScroll(): void {
+	#startEdgeScroll(
+		phase: Extract<ActiveDragPhase, { kind: "dragging-item" }>,
+	): void {
 		let previous = performance.now();
 		const frame = (now: number): void => {
-			this.#scrollFrame = null;
-			if (this.#gesture?.kind !== "dragging") return;
+			phase.scrollFrame = null;
+			if (this.#phase !== phase) return;
 			// A suspended frame must not jump through several packs when rendering resumes.
 			const elapsed = Math.min(now - previous, 50) / 1_000;
 			previous = now;
 			const scroll = document
-				.elementFromPoint(this.#cursor.x, this.#cursor.y)
+				.elementFromPoint(phase.cursor.x, phase.cursor.y)
 				?.closest<HTMLElement>(".client-inventory .contents-scroll");
 			if (scroll != null && this.#root.contains(scroll)) {
 				const box = scroll.getBoundingClientRect();
@@ -629,62 +429,67 @@ export class ClientItemDrag {
 				const before = scroll.scrollTop;
 				scroll.scrollTop +=
 					dragEdgeScrollFactor(
-						this.#cursor.y,
+						phase.cursor.y,
 						box.top,
 						box.bottom,
 						tuning.dragScrollEdgeCssPixels,
 					) *
 					tuning.dragScrollCssPixelsPerSecond *
 					elapsed;
-				if (scroll.scrollTop !== before) this.#target(false);
+				if (scroll.scrollTop !== before) this.#target(phase, false);
 			}
-			if (this.#gesture?.kind === "dragging")
-				this.#scrollFrame = requestAnimationFrame(frame);
+			if (this.#phase === phase) {
+				phase.scrollFrame = requestAnimationFrame(frame);
+			}
 		};
-		this.#scrollFrame = requestAnimationFrame(frame);
-	}
-
-	#stopEdgeScroll(): void {
-		if (this.#scrollFrame !== null) cancelAnimationFrame(this.#scrollFrame);
-		this.#scrollFrame = null;
+		phase.scrollFrame = requestAnimationFrame(frame);
 	}
 
 	/** Dim blocked contents targets and filter equipment using the drag source. */
-	#dimDropCandidates(): void {
-		const gesture = this.#gesture;
+	#dimDropCandidates(
+		phase: Extract<ActiveDragPhase, { kind: "dragging-item" }>,
+	): void {
 		if (
-			gesture?.kind !== "dragging" ||
-			gesture.source.origin === "vendor" ||
-			gesture.source.origin === "main-pack" ||
-			typeof gesture.source.origin !== "string"
-		)
+			phase.source.origin === "vendor" ||
+			phase.source.origin === "main-pack" ||
+			typeof phase.source.origin !== "string"
+		) {
 			return;
-		this.#mergeHints.clear();
+		}
+		phase.mergeHints.clear();
 		for (const cell of this.#root.querySelectorAll<HTMLElement>(
 			".contents-scroll .item-grid-cell[data-item-guid]:not(:disabled)",
 		)) {
+			const surface = resolveContentsSurface(
+				this.#root,
+				this.session,
+				this.readContents,
+				cell,
+			);
 			if (
-				gesture.source.origin !== "equipment" &&
-				this.#surface(cell)?.view.sortMode !== "native" &&
-				cell !== gesture.source.element
+				phase.source.origin !== "equipment" &&
+				surface?.view.sortMode !== "native" &&
+				cell !== phase.source.element
 			) {
 				cell.dataset.inventoryDimmed = "true";
 				const sequence = nextInventoryPreviewSequence();
-				this.#mergeHints.set(sequence, cell);
+				phase.mergeHints.set(sequence, cell);
 				void this.session
 					.previewInventory({
 						sequence,
 						intent: {
-							item: gesture.source.item,
+							item: phase.source.item,
 							target: { kind: "stack", guid: Number(cell.dataset.itemGuid) },
 						},
 					})
 					.catch((error: unknown) => {
-						if (this.#mergeHints.has(sequence)) this.#failure(error);
+						if (phase.mergeHints.has(sequence)) this.#failure(error);
 					});
-			} else delete cell.dataset.inventoryDimmed;
+			} else {
+				delete cell.dataset.inventoryDimmed;
+			}
 		}
-		const source = this.#worldEntity(gesture.source.item);
+		const source = worldEntity(this.session, phase.source.item);
 		filterDraggedEquipment(
 			this.#root,
 			source?.ownedByPlayer && source.description.kind === "known"
@@ -693,299 +498,96 @@ export class ClientItemDrag {
 		);
 	}
 
-	#clearDimming(): void {
-		this.#mergeHints.clear();
-		for (const row of this.#root.querySelectorAll<HTMLElement>(
-			"[data-inventory-dimmed]",
-		))
-			delete row.dataset.inventoryDimmed;
-	}
-
-	#target(force: boolean): void {
-		const gesture = this.#gesture;
-		if (gesture?.kind !== "dragging") return;
+	#target(
+		phase: Extract<ActiveDragPhase, { kind: "dragging-item" }>,
+		force: boolean,
+	): void {
 		// Removing the source bar cancels rather than committing a stale address.
 		if (
-			typeof gesture.source.origin !== "string" &&
-			!gesture.source.element.isConnected
+			typeof phase.source.origin !== "string" &&
+			!phase.source.element.isConnected
 		) {
 			this.#cancel();
 			return;
 		}
-		const hit = document.elementFromPoint(this.#cursor.x, this.#cursor.y);
-		// Main Pack represents the character, so its gesture can only contribute page contents.
-		if (
-			gesture.source.origin === "main-pack" &&
-			!hit?.closest(
-				"[data-trade-offer], [data-vendor-queue], [data-vendor-catalog]",
-			)
-		) {
-			this.#clearHighlight();
-			gesture.target = null;
+		const resolved = resolveHitTarget({
+			root: this.#root,
+			session: this.session,
+			readContents: this.readContents,
+			adapters: this.#adapters,
+			source: phase.source,
+			cursor: phase.cursor,
+		});
+		if (resolved.kind === "none") {
+			clearDropHighlights(this.#root);
+			phase.target = null;
 			return;
 		}
-		const payment = hit?.closest<HTMLElement>("[data-housing-payment]");
-		if (payment != null && this.#root.contains(payment)) {
-			this.#clearHighlight();
-			const crystal = Number(payment.dataset.housingPayment);
-			const wcid = Number(payment.dataset.housingWcid);
-			gesture.target = { kind: "housing", element: payment, crystal, wcid };
-			payment.dataset.inventoryDrop = this.#canPay(gesture.source, crystal)
-				? "accepted"
-				: "rejected";
+		if (resolved.kind === "immediate") {
+			clearDropHighlights(this.#root);
+			phase.target = resolved.target;
+			resolved.target.element.dataset.inventoryDrop = resolved.dropState;
 			return;
 		}
-
-		const salvageQueue = hit?.closest<HTMLElement>("[data-salvage-queue]");
-		if (
-			salvageQueue !== null &&
-			salvageQueue !== undefined &&
-			this.#root.contains(salvageQueue)
-		) {
-			this.#clearHighlight();
-			gesture.target = { kind: "salvage", element: salvageQueue };
-			salvageQueue.dataset.inventoryDrop = this.#canSalvage(gesture.source)
-				? "accepted"
-				: "rejected";
+		if (resolved.kind === "viewport") {
+			this.#worldTarget(phase, resolved.element, force);
 			return;
-		}
-		const offer = hit?.closest<HTMLElement>("[data-trade-offer]");
-		if (offer != null && this.#root.contains(offer)) {
-			this.#clearHighlight();
-			const partner = Number(offer.dataset.tradeOffer);
-			const revision = Number(offer.dataset.tradeRevision);
-			gesture.target = { kind: "trade", element: offer, partner, revision };
-			offer.dataset.inventoryDrop = this.#canOffer(
-				gesture.source,
-				partner,
-				revision,
-			)
-				? "accepted"
-				: "rejected";
-			return;
-		}
-		const vendorDrop = hit?.closest<HTMLElement>(
-			"[data-vendor-queue], [data-vendor-catalog]",
-		);
-		if (vendorDrop != null && this.#root.contains(vendorDrop)) {
-			this.#clearHighlight();
-			const acceptsPurchases = vendorDrop.hasAttribute("data-vendor-queue");
-			const target: Extract<DragTarget, { kind: "vendor" }> = {
-				kind: "vendor",
-				element: vendorDrop,
-				acceptsPurchases,
-				vendor: Number(
-					acceptsPurchases
-						? vendorDrop.dataset.vendorQueue
-						: vendorDrop.dataset.vendorCatalog,
-				),
-			};
-			gesture.target = target;
-			vendorDrop.dataset.inventoryDrop = this.#canQueue(gesture.source, target)
-				? "accepted"
-				: "rejected";
-			return;
-		}
-		if (gesture.source.origin === "vendor") {
-			this.#clearHighlight();
-			gesture.target = null;
-			return;
-		}
-		const actionElement = hit?.closest<HTMLElement>("[data-action-cell]");
-		const cell =
-			actionElement === undefined ||
-			actionElement === null ||
-			!this.#root.contains(actionElement)
-				? null
-				: this.#actionCell(actionElement);
-		if (
-			cell !== null &&
-			actionElement !== undefined &&
-			actionElement !== null
-		) {
-			this.#clearHighlight();
-			gesture.target = { kind: "action", element: actionElement, cell };
-			actionElement.dataset.inventoryDrop =
-				typeof gesture.source.origin !== "string" ||
-				this.#bindable(gesture.source.item)
-					? "accepted"
-					: "rejected";
-			return;
-		}
-		if (typeof gesture.source.origin !== "string") {
-			this.#clearHighlight();
-			gesture.target = null;
-			return;
-		}
-		let element: HTMLElement | null = null;
-		let target: ClientInventoryIntent["target"] | null = null;
-		if (hit !== null && this.#root.contains(hit)) {
-			const source = this.#worldEntity(gesture.source.item);
-			const surface = this.#surface(hit);
-			const equipment = hit.closest<HTMLElement>("[data-equipment-slot]");
-			const cell = hit.closest<HTMLElement>(
-				".item-grid-cell[data-item-guid]:not(:disabled)",
-			);
-			const header = hit.closest<HTMLElement>(
-				".contents-header[data-item-guid]:not(:disabled)",
-			);
-			if (
-				hit instanceof HTMLElement &&
-				hit.matches("[data-game-viewport]") &&
-				source?.ownedByPlayer
-			) {
-				this.#worldTarget(hit, force);
-				return;
-			} else if (equipment !== null && source?.ownedByPlayer) {
-				// Slot activation is independent of item coverage; locked/pending rows
-				// must not advertise an accepted drop or submit an equipment request.
-				if (this.#equipmentAvailable(Number(equipment.dataset.equipmentSlot))) {
-					element = equipment;
-					target = {
-						kind: "equipment",
-						mask: Number(equipment.dataset.equipmentSlot),
-					};
-				}
-			} else if (surface !== null && header !== null) {
-				element = header;
-				target = { kind: "container", guid: Number(header.dataset.itemGuid) };
-			} else if (surface !== null && cell !== null) {
-				element = cell;
-				const guid = Number(cell.dataset.itemGuid);
-				if (cell.closest(".contents-packs")) {
-					// Only rearranging carried pack-strip entries uses the two-command swap.
-					const read = this.session.entities.read();
-					const carriedSwap =
-						gesture.source.origin === "pack" &&
-						source?.ownedByPlayer &&
-						read.kind === "current" &&
-						surface.root === read.level.playerGuid;
-					target = { kind: carriedSwap ? "pack" : "container", guid };
-				} else {
-					const container = cell.closest<HTMLElement>("[data-container-guid]");
-					target =
-						surface.view.sortMode !== "native" &&
-						gesture.source.origin === "equipment" &&
-						container !== null
-							? {
-									kind: "container",
-									guid: Number(container.dataset.containerGuid),
-								}
-							: {
-									kind: surface.view.sortMode === "native" ? "item" : "stack",
-									guid,
-								};
-				}
-			} else if (surface !== null && hit.closest(".item-grid-cell") === null) {
-				// Section background uses automatic insertion regardless of display sorting.
-				// Disabled item cells still own their footprint; they must not become background targets.
-				const section = hit.closest<HTMLElement>(
-					".contents-scroll [data-container-guid]",
-				);
-				if (section !== null) {
-					element = section;
-					target = {
-						kind: "container",
-						guid: Number(section.dataset.containerGuid),
-					};
-				}
-			}
 		}
 		if (
 			!force &&
-			gesture.target?.kind === "inventory" &&
-			gesture.target.element === element &&
-			JSON.stringify(gesture.target.intent.target) === JSON.stringify(target)
-		)
-			return;
-		this.#clearHighlight();
-		if (element === null || target === null) {
-			gesture.target = null;
+			phase.target?.kind === "inventory" &&
+			phase.target.element === resolved.element &&
+			JSON.stringify(phase.target.intent.target) ===
+				JSON.stringify(resolved.intent.target)
+		) {
 			return;
 		}
-		gesture.target = this.#request(element, {
-			item: gesture.source.item,
-			target,
-		});
+		clearDropHighlights(this.#root);
+		phase.target = this.#request(resolved.element, resolved.intent);
 	}
 
-	#canPay(source: DragSource, crystal: number): boolean {
-		return (
-			typeof source.origin === "string" &&
-			source.origin !== "vendor" &&
-			this.houseCrystal?.acceptsDrop(crystal, source.item) === true
-		);
-	}
-
-	/** Only owned inventory gestures can contribute to the local salvage draft. */
-	#canSalvage(source: DragSource): boolean {
-		return (
-			typeof source.origin === "string" &&
-			source.origin !== "vendor" &&
-			this.salvage?.acceptsDrop(source.item) === true
-		);
-	}
-
-	/** Only owned inventory gestures can contribute to P2P offers. */
-	#canOffer(source: DragSource, partner: number, revision: number): boolean {
-		return (
-			typeof source.origin === "string" &&
-			source.origin !== "vendor" &&
-			this.trade?.acceptsDrop(partner, revision, source.item) === true
-		);
-	}
-	/** Surface ownership is local; exact price and sale eligibility are quoted by world. */
-	#canQueue(
-		source: DragSource,
-		target: Extract<DragTarget, { kind: "vendor" }>,
-	): boolean {
-		const vendor = target.vendor;
-		if (!this.vendor?.acceptsDrop(vendor)) return false;
-		if (source.origin === "vendor")
-			return (
-				target.acceptsPurchases &&
-				source.root === vendor &&
-				this.vendor.canDragOffer(vendor, source.item)
-			);
-		return (
-			typeof source.origin === "string" &&
-			this.vendor.acceptsSaleDrop(vendor, source.item)
-		);
-	}
-
-	/** Resolve presentation from its owner and access from the current session level. */
-	#surface(element: Element): ContentsSurface | null {
-		const owner = element.closest<HTMLElement>("[data-contents-root]");
-		if (owner === null || !owner.isConnected || !this.#root.contains(owner))
-			return null;
-		const root = Number(owner.dataset.contentsRoot);
-		const read = this.session.entities.read();
-		if (
-			read.kind !== "current" ||
-			(read.level.playerGuid !== root &&
-				(read.level.worldContainer.kind !== "open" ||
-					read.level.worldContainer.root !== root))
-		)
-			return null;
-		const view = this.readContents(root);
-		return view === null || view.pending ? null : { root, view };
-	}
-	#readViews(): readonly unknown[] {
-		const read = this.session.entities.read();
-		return [
-			read.kind === "current" ? read.level : null,
-			...Array.from(
-				this.#root.querySelectorAll("[data-contents-root]"),
-				(element) => this.#surface(element)?.view,
-			),
-		];
-	}
 	/** Closing/recovery invalidates unsent work even before the sampled DOM catches up. */
-	#validateGesture(): boolean {
-		const gesture = this.#gesture;
-		if (gesture === null) return false;
-		const source = gesture.source;
-		const facts = this.#worldEntity(source.item);
+	#validatePhase(): boolean {
+		const phase = this.#phase;
+		switch (phase.kind) {
+			case "idle":
+				return false;
+			case "pressed":
+				if (phase.press.kind === "binding") {
+					if (!this.#bindingCurrent(phase.press)) {
+						this.#cancel();
+						return false;
+					}
+					return true;
+				}
+				if (phase.press.kind === "draft") {
+					if (!phase.press.element.isConnected) {
+						this.#cancel();
+						return false;
+					}
+					return true;
+				}
+				return this.#validateItemSource(phase.press.source, null);
+			case "dragging-binding":
+				if (!this.#bindingCurrent(phase)) {
+					this.#cancel();
+					return false;
+				}
+				return true;
+			case "dragging-draft":
+				if (!phase.element.isConnected) {
+					this.#cancel();
+					return false;
+				}
+				return true;
+			case "dragging-item":
+			case "awaiting-release":
+				return this.#validateItemSource(phase.source, phase.target);
+		}
+	}
+
+	#validateItemSource(source: DragSource, target: DragTarget | null): boolean {
+		const facts = worldEntity(this.session, source.item);
 		const read = this.session.entities.read();
 		const mainPackCurrent =
 			source.origin === "main-pack" &&
@@ -1006,14 +608,23 @@ export class ClientItemDrag {
 						(source.origin === "equipment" && !facts.ownedByPlayer) ||
 						(source.origin === "main-pack" && !mainPackCurrent) ||
 						(source.root !== null &&
-							this.#surface(source.element)?.root !== source.root));
-		const target = gesture.kind === "pressed" ? null : gesture.target;
+							resolveContentsSurface(
+								this.#root,
+								this.session,
+								this.readContents,
+								source.element,
+							)?.root !== source.root));
 		const invalidTarget =
 			target?.kind === "inventory" &&
 			((target.surface !== null &&
-				this.#surface(target.element)?.root !== target.surface.root) ||
+				resolveContentsSurface(
+					this.#root,
+					this.session,
+					this.readContents,
+					target.element,
+				)?.root !== target.surface.root) ||
 				(target.intent.target.kind === "equipment" &&
-					!this.#equipmentAvailable(target.intent.target.mask)));
+					!isEquipmentAvailable(this.session, target.intent.target.mask)));
 		if (
 			invalidSource ||
 			invalidTarget ||
@@ -1028,101 +639,92 @@ export class ClientItemDrag {
 		return true;
 	}
 
-	/** Delayed previews and pointer release use current authority, independent of sampled DOM. */
-	#equipmentAvailable(mask: number): boolean {
-		const slot = EQUIPMENT_SLOTS.find((slot) => slot.mask === mask);
-		if (slot === undefined) throw new Error("Unknown equipment strip slot");
-		const read = this.session.entities.read();
-		return (
-			read.kind === "current" &&
-			equipmentSlotAvailability(slot, read.level) === "available"
-		);
-	}
-
-	#worldEntity(guid: number) {
-		const read = this.session.entities.read();
-		return read.kind === "current" ? read.level.entities.get(guid) : undefined;
-	}
-
-	#worldTarget(element: HTMLElement, force: boolean): void {
-		const gesture = this.#gesture;
-		if (gesture?.kind !== "dragging") return;
-		const current = gesture.target;
+	#worldTarget(
+		phase: Extract<ActiveDragPhase, { kind: "dragging-item" }>,
+		element: HTMLElement,
+		force: boolean,
+	): void {
+		const current = phase.target;
 		if (
 			!force &&
 			current?.kind === "viewport" &&
 			(current.result === null ||
-				(current.x === this.#cursor.x && current.y === this.#cursor.y))
-		)
+				(current.x === phase.cursor.x && current.y === phase.cursor.y))
+		) {
 			return;
-		this.#clearHighlight();
+		}
+		clearDropHighlights(this.#root);
 		const target: ViewportDragTarget = {
 			kind: "viewport",
 			element,
-			...this.#cursor,
+			...phase.cursor,
 			result: null,
 		};
-		gesture.target = target;
+		phase.target = target;
 		element.dataset.inventoryDrop = "pending";
 		this.pickWorldTarget(target.x, target.y, {
 			isCurrent: () => {
-				const active = this.#gesture;
+				const active = this.#phase;
 				return (
-					active !== null &&
-					active.kind !== "pressed" &&
+					(active.kind === "dragging-item" ||
+						active.kind === "awaiting-release") &&
 					active.target === target
 				);
 			},
 			commit: (result) => {
-				const active = this.#gesture;
+				const active = this.#phase;
 				if (
-					active === null ||
-					active.kind === "pressed" ||
+					(active.kind !== "dragging-item" &&
+						active.kind !== "awaiting-release") ||
 					active.target !== target
-				)
+				) {
 					return;
+				}
 				target.result = result;
 				// Keep one hover query in flight; refresh its newest point before highlighting the destination.
 				if (
-					active.kind === "dragging" &&
-					(target.x !== this.#cursor.x || target.y !== this.#cursor.y)
+					active.kind === "dragging-item" &&
+					(target.x !== active.cursor.x || target.y !== active.cursor.y)
 				) {
-					this.#target(false);
+					this.#target(active, false);
 					return;
 				}
 				const recipient =
-					result.kind === "entity" ? this.#worldEntity(result.guid) : null;
+					result.kind === "entity"
+						? worldEntity(this.session, result.guid)
+						: null;
 				element.dataset.inventoryDrop =
 					result.kind === "empty" || recipient?.canReceiveGive
 						? "accepted"
 						: "rejected";
-				if (active.kind === "released")
+				if (active.kind === "awaiting-release") {
 					this.#resolveWorldRelease(active, target);
+				}
 			},
 		});
 	}
 
 	#resolveWorldRelease(
-		gesture: Extract<Gesture, { kind: "released" }>,
+		phase: Extract<ActiveDragPhase, { kind: "awaiting-release" }>,
 		target: ViewportDragTarget,
 	): void {
 		const result = target.result;
 		if (result === null) return;
 		if (result.kind === "unavailable") {
-			this.#finishGesture();
+			this.#finishToIdle();
 			this.reportNotice(result.reason);
 			return;
 		}
 		if (
 			result.kind === "entity" &&
-			!this.#worldEntity(result.guid)?.canReceiveGive
+			!worldEntity(this.session, result.guid)?.canReceiveGive
 		) {
-			this.#finishGesture();
+			this.#finishToIdle();
 			this.reportNotice("This entity cannot receive an item.");
 			return;
 		}
-		gesture.target = this.#request(target.element, {
-			item: gesture.source.item,
+		phase.target = this.#request(target.element, {
+			item: phase.source.item,
 			target:
 				result.kind === "empty"
 					? { kind: "ground" }
@@ -1139,43 +741,56 @@ export class ClientItemDrag {
 			element,
 			intent,
 			sequence: nextInventoryPreviewSequence(),
-			surface: this.#surface(element),
+			surface: resolveContentsSurface(
+				this.#root,
+				this.session,
+				this.readContents,
+				element,
+			),
 		};
 		element.dataset.inventoryDrop = "pending";
 		void this.session
 			.previewInventory({ sequence: target.sequence, intent })
 			.catch((error: unknown) => {
-				const gesture = this.#gesture;
+				const active = this.#phase;
 				if (
-					gesture !== null &&
-					gesture.kind !== "pressed" &&
-					gesture.target?.kind === "inventory" &&
-					gesture.target.sequence === target.sequence
-				)
+					(active.kind === "dragging-item" ||
+						active.kind === "awaiting-release") &&
+					active.target?.kind === "inventory" &&
+					active.target.sequence === target.sequence
+				) {
 					this.#failure(error);
+				}
 			});
 		return target;
 	}
 
 	#preview(result: ClientInventoryPreviewResult): void {
-		const hint = this.#mergeHints.get(result.sequence);
-		if (hint !== undefined) {
-			this.#mergeHints.delete(result.sequence);
-			hint.dataset.inventoryDimmed = String(result.preview.kind !== "merge");
+		if (this.#phase.kind === "dragging-item") {
+			const hint = this.#phase.mergeHints.get(result.sequence);
+			if (hint !== undefined) {
+				this.#phase.mergeHints.delete(result.sequence);
+				hint.dataset.inventoryDimmed = String(result.preview.kind !== "merge");
+				return;
+			}
+		}
+		const phase = this.#phase;
+		if (
+			(phase.kind !== "dragging-item" && phase.kind !== "awaiting-release") ||
+			phase.target?.kind !== "inventory" ||
+			phase.target.sequence !== result.sequence
+		) {
 			return;
 		}
-		const gesture = this.#gesture;
-		if (
-			gesture === null ||
-			gesture.kind === "pressed" ||
-			gesture.target?.kind !== "inventory" ||
-			gesture.target.sequence !== result.sequence
-		)
-			return;
-		const target = gesture.target;
-		if (!this.#validateGesture()) return;
+		const target = phase.target;
+		if (!this.#validatePhase()) return;
 		if (target.surface !== null) {
-			const current = this.#surface(target.element);
+			const current = resolveContentsSurface(
+				this.#root,
+				this.session,
+				this.readContents,
+				target.element,
+			);
 			if (
 				current === null ||
 				current.root !== target.surface.root ||
@@ -1192,13 +807,16 @@ export class ClientItemDrag {
 			for (const element of this.#root.querySelectorAll<HTMLElement>(
 				".equipment-row [data-item-guid]",
 			)) {
-				if (result.preview.displaced.includes(Number(element.dataset.itemGuid)))
+				if (
+					result.preview.displaced.includes(Number(element.dataset.itemGuid))
+				) {
 					element.dataset.inventoryDisplaced = "true";
+				}
 			}
 		}
-		if (gesture.kind !== "released") return;
+		if (phase.kind !== "awaiting-release") return;
 		const intent = target.intent;
-		this.#finishGesture();
+		this.#finishToIdle();
 		if (result.preview.kind === "rejected") {
 			this.reportFailure(
 				`${result.preview.reason}${intent.target.kind === "stack" ? " Positional drops require Native sorting." : ""}`,
@@ -1228,59 +846,16 @@ export class ClientItemDrag {
 	}
 
 	#up = (event: PointerEvent): void => {
-		const binding = this.#bindingGesture;
-		if (binding !== null) {
-			if (binding.pointer !== event.pointerId) return;
-			if (!binding.dragging || !this.#bindingCurrent(binding)) {
-				this.#cancel();
-				return;
-			}
-			event.preventDefault();
-			event.stopPropagation();
-			this.#suppressClick = true;
-			this.#suppressDoubleClickUntil =
-				performance.now() + CLIENT_TUNING.inventory.doubleClickSuppressionMs;
-			const targetElement = document
-				.elementFromPoint(event.clientX, event.clientY)
-				?.closest<HTMLElement>("[data-action-cell]");
-			const target =
-				targetElement != null && this.#root.contains(targetElement)
-					? this.#actionCell(targetElement)
-					: null;
-			this.#finishGesture();
-			if ("bar" in binding.source)
-				this.bindings.transfer(binding.source, target);
-			else if (target !== null) {
-				this.bindings.bind(target, binding.content);
-				binding.source.placed();
-			}
-			return;
-		}
-		const draft = this.#draftGesture;
-		if (draft !== null) {
-			if (draft.pointer !== event.pointerId) return;
-			if (draft.dragging) {
-				event.preventDefault();
-				event.stopPropagation();
-				this.#suppressClick = true;
-				this.#suppressDoubleClickUntil =
-					performance.now() + CLIENT_TUNING.inventory.doubleClickSuppressionMs;
-				const hit = document.elementFromPoint(event.clientX, event.clientY);
-				const outside = !draft.boundary.contains(hit);
-				this.#finishGesture();
-				if (outside) draft.remove();
-			} else this.#finishGesture();
-			return;
-		}
-		if (!this.#validateGesture()) return;
-		const gesture = this.#gesture;
+		if (!this.#validatePhase()) return;
+		const phase = this.#phase;
 		if (
-			gesture === null ||
-			gesture.kind === "released" ||
-			gesture.pointer !== event.pointerId
-		)
+			phase.kind === "idle" ||
+			phase.kind === "awaiting-release" ||
+			phase.pointer !== event.pointerId
+		) {
 			return;
-		if (gesture.kind === "pressed") {
+		}
+		if (phase.kind === "pressed") {
 			this.#cancel();
 			return;
 		}
@@ -1289,151 +864,180 @@ export class ClientItemDrag {
 		this.#suppressClick = true;
 		this.#suppressDoubleClickUntil =
 			performance.now() + CLIENT_TUNING.inventory.doubleClickSuppressionMs;
-		this.#stopEdgeScroll();
-		this.#ghost.hidden = true;
-		this.#ghost.hidePopover();
-		this.#clearDimming();
-		this.#cursor = { x: event.clientX, y: event.clientY };
-		this.#target(true);
-		if (this.#gesture !== gesture) return;
-		if (gesture.target?.kind === "housing") {
-			const { source, target } = gesture;
-			const accepted = this.#canPay(source, target.crystal);
-			this.#finishGesture();
-			if (accepted)
-				this.houseCrystal?.add(target.crystal, target.wcid, source.item);
-			else
-				this.reportNotice(
-					"Drag a carried inventory item into this payment draft.",
-				);
+
+		if (phase.kind === "dragging-binding") {
+			const targetElement = document
+				.elementFromPoint(event.clientX, event.clientY)
+				?.closest<HTMLElement>("[data-action-cell]");
+			const target =
+				targetElement != null && this.#root.contains(targetElement)
+					? resolveActionCell(targetElement)
+					: null;
+			this.#finishToIdle();
+			if ("bar" in phase.source) {
+				this.bindings.transfer(phase.source, target);
+			} else if (target !== null) {
+				this.bindings.bind(target, phase.content);
+				phase.source.placed();
+			}
 			return;
 		}
 
-		if (gesture.target?.kind === "salvage") {
-			const source = gesture.source;
-			const accepted = this.#canSalvage(source);
-			this.#finishGesture();
+		if (phase.kind === "dragging-draft") {
+			const hit = document.elementFromPoint(event.clientX, event.clientY);
+			const outside = !phase.boundary.contains(hit);
+			this.#finishToIdle();
+			if (outside) phase.remove();
+			return;
+		}
+
+		this.#stopItemPolling();
+		if (phase.scrollFrame !== null) {
+			cancelAnimationFrame(phase.scrollFrame);
+			phase.scrollFrame = null;
+		}
+		hideDragGhost(this.#ghost);
+		clearDimming(this.#root, phase.mergeHints);
+		phase.cursor = { x: event.clientX, y: event.clientY };
+		this.#target(phase, true);
+		if (this.#phase !== phase) return;
+
+		if (phase.target?.kind === "housing") {
+			const { source, target } = phase;
+			const accepted = canPayCrystal(this.#adapters, source, target.crystal);
+			this.#finishToIdle();
+			if (accepted) {
+				this.houseCrystal?.add(target.crystal, target.wcid, source.item);
+			} else {
+				this.reportNotice(
+					"Drag a carried inventory item into this payment draft.",
+				);
+			}
+			return;
+		}
+
+		if (phase.target?.kind === "salvage") {
+			const source = phase.source;
+			const accepted = canSalvageItem(this.#adapters, source);
+			this.#finishToIdle();
 			if (accepted) this.salvage?.add(source.item);
 			else this.reportNotice("That item cannot join the salvage queue.");
 			return;
 		}
-		if (gesture.target?.kind === "trade") {
-			const { source, target } = gesture;
-			this.#finishGesture();
-			if (typeof source.origin === "string" && source.origin !== "vendor")
+
+		if (phase.target?.kind === "trade") {
+			const { source, target } = phase;
+			this.#finishToIdle();
+			if (typeof source.origin === "string" && source.origin !== "vendor") {
 				this.trade?.add(target.partner, target.revision, source.item);
-			else this.trade?.reportFailure("That item cannot join this trade.");
-			return;
-		}
-		if (gesture.target?.kind === "vendor") {
-			const { source, target } = gesture;
-			const accepted = this.#canQueue(source, target);
-			this.#finishGesture();
-			if (source.origin === "vendor" && accepted)
-				this.vendor?.queueBuy(source.item);
-			else if (
-				typeof source.origin === "string" &&
-				source.origin !== "vendor" &&
-				this.vendor?.acceptsDrop(target.vendor)
-			)
-				this.vendor.queueSell(source.item);
-			else this.reportNotice("That vendor is not accepting this drop.");
+			} else {
+				this.trade?.reportFailure("That item cannot join this trade.");
+			}
 			return;
 		}
 
-		if (typeof gesture.source.origin !== "string") {
-			const target =
-				gesture.target?.kind === "action" ? gesture.target.cell : null;
-			const source = gesture.source.origin;
+		if (phase.target?.kind === "vendor") {
+			const { source, target } = phase;
+			const accepted = canQueueVendor(this.#adapters, source, target);
+			this.#finishToIdle();
+			if (source.origin === "vendor" && accepted) {
+				this.vendor?.queueBuy(source.item);
+			} else if (
+				typeof source.origin === "string" &&
+				source.origin !== "vendor" &&
+				this.vendor?.acceptsDrop(target.vendor)
+			) {
+				this.vendor.queueSell(source.item);
+			} else {
+				this.reportNotice("That vendor is not accepting this drop.");
+			}
+			return;
+		}
+
+		if (typeof phase.source.origin !== "string") {
+			const target = phase.target?.kind === "action" ? phase.target.cell : null;
+			const source = phase.source.origin;
 			// Automatic supply replacement may change the binding during this pointer gesture.
 			const current = this.bindings.read(source);
 			if (
 				current === null ||
 				current.kind === "loadout" ||
-				current.item !== gesture.source.item
+				current.item !== phase.source.item
 			) {
 				this.#cancel();
 				this.reportFailure("The action cell changed while dragging.");
 				return;
 			}
-			this.#finishGesture();
+			this.#finishToIdle();
 			this.bindings.transfer(source, target);
 			return;
 		}
-		if (gesture.target?.kind === "action") {
-			const target = gesture.target.cell;
-			const item = gesture.source.item;
-			this.#finishGesture();
-			const content = bindingAction(this.#worldEntity(item));
-			if (content !== null) this.bindings.bind(target, content);
-			else
+
+		if (phase.target?.kind === "action") {
+			const target = phase.target.cell;
+			const item = phase.source.item;
+			this.#finishToIdle();
+			const content = bindingAction(worldEntity(this.session, item));
+			if (content !== null) {
+				this.bindings.bind(target, content);
+			} else {
 				this.reportFailure(
 					"Only owned equippable or usable items can be bound to an action cell.",
 				);
+			}
 			return;
 		}
-		if (gesture.target === null) {
+
+		if (phase.target === null) {
 			this.#cancel();
 			return;
 		}
-		const released: Extract<Gesture, { kind: "released" }> = {
-			kind: "released",
-			source: gesture.source,
-			target: gesture.target,
+
+		retireActiveDragVisuals(this.#root, this.#ghost, {
+			scrollFrame: phase.scrollFrame,
+			mergeHints: phase.mergeHints,
+			clearHighlights: false,
+		});
+		const awaiting: Extract<ActiveDragPhase, { kind: "awaiting-release" }> = {
+			kind: "awaiting-release",
+			source: phase.source,
+			target: phase.target,
 		};
-		this.#gesture = released;
-		if (released.target.kind === "viewport")
-			this.#resolveWorldRelease(released, released.target);
+		this.#phase = awaiting;
+		if (awaiting.target.kind === "viewport") {
+			this.#resolveWorldRelease(awaiting, awaiting.target);
+		}
 	};
 
-	/** DOM labels carry stable cell addresses independently of remappable key bindings. */
-	#actionCell(element: HTMLElement): ActionCellAddress | null {
-		if (!element.hasAttribute("data-action-cell")) return null;
-		const slot = actionDigitIndex(element.dataset.actionCell ?? "");
-		const bar = Number(element.dataset.actionBar);
-		if (slot === null || !Number.isSafeInteger(bar))
-			throw new Error("Invalid action cell address");
-		return { bar, slot };
-	}
-	#bindable(item: number): boolean {
-		return bindingAction(this.#worldEntity(item)) !== null;
+	#finishToIdle(): void {
+		this.#stopItemPolling();
+		const phase = this.#phase;
+		this.#phase = { kind: "idle" };
+		retireActiveDragVisuals(this.#root, this.#ghost, {
+			scrollFrame: phase.kind === "dragging-item" ? phase.scrollFrame : null,
+			mergeHints: phase.kind === "dragging-item" ? phase.mergeHints : undefined,
+			clearHighlights: true,
+		});
 	}
 
-	#clearHighlight(): void {
-		for (const element of this.#root.querySelectorAll<HTMLElement>(
-			"[data-inventory-drop], [data-inventory-displaced]",
-		)) {
-			delete element.dataset.inventoryDrop;
-			delete element.dataset.inventoryDisplaced;
-		}
-	}
-	#finishGesture(): void {
-		this.#stopEdgeScroll();
-		filterDraggedEquipment(this.#root, null);
-		this.#clearDimming();
-		this.#gesture = null;
-		this.#draftGesture = null;
-		this.#bindingGesture = null;
-		this.#views = [];
-		this.#ghost.hidden = true;
-		this.#ghost.hidePopover();
-		delete this.#root.dataset.itemDragging;
-		this.#clearHighlight();
-	}
 	#cancel = (): void => {
 		if (
-			this.#gesture?.kind === "dragging" ||
-			this.#bindingGesture?.dragging === true ||
-			this.#draftGesture?.dragging === true
+			this.#phase.kind === "dragging-item" ||
+			this.#phase.kind === "dragging-binding" ||
+			this.#phase.kind === "dragging-draft"
 		) {
 			this.#suppressClick = true;
 			this.#suppressDoubleClickUntil =
 				performance.now() + CLIENT_TUNING.inventory.doubleClickSuppressionMs;
 		}
-		this.#finishGesture();
+		this.#finishToIdle();
 	};
 
-	#bindingCurrent(binding: BindingGesture): boolean {
+	#bindingCurrent(binding: {
+		readonly element: HTMLElement;
+		readonly source: ActionCellAddress | BindingDragSource;
+		readonly content: ActionContent;
+	}): boolean {
 		if (
 			!binding.element.isConnected ||
 			this.session.state().lifecycle?.kind !== "in-world"
@@ -1447,40 +1051,21 @@ export class ClientItemDrag {
 		return content === binding.content;
 	}
 
-	/** Reuse authored artwork for all shortcut/item drags without another display lease. */
-	#showGhost(source: HTMLElement): void {
-		let visual = source;
-		if (source.matches(".contents-header[data-item-guid]")) {
-			// Headers share the displayed icon and its size with their navigation/grid cell.
-			const cell = source
-				.closest("[data-contents-root]")
-				?.querySelector<HTMLElement>(
-					`.item-grid-cell[data-item-guid="${source.dataset.itemGuid}"]`,
-				);
-			if (cell == null)
-				throw new Error("Contents header has no corresponding item cell");
-			visual = cell;
-		}
-		showUiDragGhost(
-			this.#ghost,
-			visual,
-			visual.getAttribute("aria-label") ?? visual.textContent?.trim() ?? "",
-		);
-		this.#root.dataset.itemDragging = "true";
-	}
 	#failure(error: unknown): void {
 		this.#cancel();
 		this.reportFailure(`Inventory request failed: ${String(error)}`);
 	}
+
 	#cancelPointer = (event: PointerEvent): void => {
-		if (this.#bindingGesture?.pointer === event.pointerId) this.#cancel();
-		if (this.#draftGesture?.pointer === event.pointerId) this.#cancel();
 		if (
-			this.#gesture?.kind !== "released" &&
-			this.#gesture?.pointer === event.pointerId
-		)
+			this.#phase.kind !== "idle" &&
+			this.#phase.kind !== "awaiting-release" &&
+			this.#phase.pointer === event.pointerId
+		) {
 			this.#cancel();
+		}
 	};
+
 	#click = (event: MouseEvent): void => {
 		if (this.#suppressClick) {
 			this.#suppressClick = false;
@@ -1488,6 +1073,7 @@ export class ClientItemDrag {
 			event.preventDefault();
 		}
 	};
+
 	#doubleClick = (event: MouseEvent): void => {
 		if (performance.now() < this.#suppressDoubleClickUntil) {
 			event.stopImmediatePropagation();

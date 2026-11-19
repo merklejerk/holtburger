@@ -32,7 +32,10 @@ import {
 } from "./client-housing-contract";
 import { ClientVendorState } from "./client-vendor-state";
 import { UiIconRepository } from "../app/ui-icon-repository";
-import { vendorRequestSchema } from "./client-vendor-contract";
+import {
+	vendorRequestSchema,
+	vendorSnapshotSchema,
+} from "./client-vendor-contract";
 import { baselineCurrentState } from "./client-host-contract.test-support";
 import {
 	emptyPlayerSummary,
@@ -246,7 +249,7 @@ describe("ClientLifecycleSession", () => {
 		expect(startAuthority).toHaveBeenCalledOnce();
 		session.stop();
 	});
-	it("retires every listener when explicit authority startup fails", async () => {
+	it("retires every listener and closes camera registration when explicit authority startup fails", async () => {
 		const transport = new FakeClientTransport();
 		const session = new ClientLifecycleSession(transport);
 		await expect(
@@ -258,6 +261,23 @@ describe("ClientLifecycleSession", () => {
 		).rejects.toThrow("Launch failed");
 		expect(transport.handlers.size).toBe(0);
 		expect(transport.invocations).toHaveLength(0);
+		await expect(
+			session.registerCamera(
+				{
+					playerGuid: 1,
+					entityGeneration: 1,
+					initialReach: 3,
+					minimumReach: 1,
+					maximumReach: 10,
+					inputSequence: 0,
+					viewDirection: [0, 1, 0],
+					cumulativeZoomDisplacement: 0,
+					projectionRevision: 1,
+					clearanceRadius: 0.2,
+				},
+				new AbortController().signal,
+			),
+		).rejects.toThrow("Camera authority is closing.");
 	});
 
 	it("forwards a one-time equipped visual delta and recovers it after stream loss without another gameplay change", async () => {
@@ -2245,11 +2265,14 @@ describe("ClientLifecycleSession", () => {
 	it("submits one exact character identity for an explicit enter action", async () => {
 		const transport = new FakeClientTransport();
 		const session = new ClientLifecycleSession(transport);
+		await session.start();
+		transport.calls.length = 0;
 
 		await session.enterWorld(0x5000_0002);
 		await session.enterWorld(0x5000_0002);
 
 		expect(transport.calls).toEqual(["invoke:select_client_character"]);
+		session.stop();
 	});
 
 	it("publishes membership and HUD presence independently without publishing vital churn", async () => {
@@ -2649,7 +2672,7 @@ describe("ClientLifecycleSession", () => {
 			refill: null,
 			processedIntentSequence: 31,
 		});
-		expect(session.state().combat.processedIntentSequence).toBe(32);
+		expect(session.state().combat.processedIntentSequence).toBe(0);
 		expect(receipts).toEqual([31, 32]);
 		const replacementSession = new ClientLifecycleSession(transport);
 		expect(replacementSession.state().combat.processedIntentSequence).toBe(0);
@@ -3056,5 +3079,126 @@ it.each(["incremental", "snapshot"])(
 			),
 		).toHaveLength(2);
 		await session.stop();
+	},
+);
+
+it.each(["stop", "logging-out", "character-selection"] as const)(
+	"clears vendor, trade, barber, housing, and pack affinities on %s while retaining them across teleport",
+	async (retirement) => {
+		const player = 0x5000_0001;
+		const pack = 7;
+		const item = 91;
+		const state = currentState(player);
+		const carried = entityFacts(item, {
+			ownedByPlayer: true,
+			location: {
+				kind: "contained",
+				parentGuid: pack,
+				slot: { kind: "item", index: 0 },
+			},
+		});
+		const housing = housingSnapshotSchema.parse(housingWireFixture);
+		const barber = barberSnapshotSchema.parse(barberFixture.snapshot);
+		const trade = {
+			trade: {
+				revision: 1,
+				partner_guid: 55,
+				initiator_guid: player,
+				self_side: { guid: player, accepted: false, items: [] },
+				partner_side: { guid: 55, accepted: false, items: [] },
+			},
+			pending_items: [item],
+		};
+		const vendor = vendorSnapshotSchema.parse(vendorFixture.snapshot.payload);
+		const transport = new FakeClientTransport();
+		transport.setCurrentState({
+			...state,
+			vendor,
+			housing,
+			barber,
+			trade,
+			entities: {
+				...state.entities,
+				entities: [
+					...state.entities.entities,
+					entityFacts(pack, {
+						ownedByPlayer: true,
+						location: {
+							kind: "contained",
+							parentGuid: player,
+							slot: { kind: "pack", entryKind: "container", index: 0 },
+						},
+					}),
+					carried,
+				],
+			},
+		});
+		const session = new ClientLifecycleSession(transport);
+		await session.start();
+		transport.emit("client-entity-facts-changed", {
+			projectileSupply: null,
+			player: null,
+			worldContainer: null,
+			removed: [],
+			upserts: [
+				{
+					...carried,
+					location: {
+						kind: "equipped",
+						wearerGuid: player,
+						mask: EQUIPMENT_SLOTS[0].mask,
+					},
+				},
+			],
+		});
+		expect(session.vendorSnapshot()).toEqual(vendorFixture.snapshot.payload);
+		expect(session.tradeSnapshot()).toEqual(trade);
+		expect(session.barberSnapshot()).toEqual(barber);
+		expect(session.housingSnapshot()).toEqual(housing);
+		expect(session.packAffinities.storage(session.entities.read())).toEqual({
+			preferred: { [item]: pack },
+			fallback: [player, pack],
+		});
+
+		// Portal teleport preserves all character-scoped snapshots and pack affinities.
+		transport.emit("client-lifecycle-changed", {
+			kind: "portal-space",
+			worldGeneration: state.worldGeneration + 1,
+			cause: "teleport",
+		});
+		expect(session.vendorSnapshot()).toEqual(vendorFixture.snapshot.payload);
+		expect(session.tradeSnapshot()).toEqual(trade);
+		expect(session.barberSnapshot()).toEqual(barber);
+		expect(session.housingSnapshot()).toEqual(housing);
+		expect(session.packAffinities.storage(session.entities.read())).toEqual({
+			preferred: { [item]: pack },
+			fallback: [player, pack],
+		});
+
+		if (retirement === "stop") {
+			session.stop();
+		} else if (retirement === "logging-out") {
+			transport.emit("client-lifecycle-changed", { kind: "logging-out" });
+		} else {
+			transport.emit("client-lifecycle-changed", {
+				kind: "character-selection",
+				rejection: null,
+				maxSlots: 11,
+				characters: [],
+			});
+		}
+		expect(session.vendorSnapshot()).toBeNull();
+		expect(session.tradeSnapshot()).toEqual({ trade: null, pending_items: [] });
+		expect(session.barberSnapshot()).toEqual({
+			interaction: null,
+			result: null,
+			particles: null,
+		});
+		expect(session.housingSnapshot()).toEqual(emptyHousing());
+		expect(session.packAffinities.storage(session.entities.read())).toEqual({
+			preferred: {},
+			fallback: retirement === "stop" ? [] : [player, pack],
+		});
+		if (retirement !== "stop") session.stop();
 	},
 );

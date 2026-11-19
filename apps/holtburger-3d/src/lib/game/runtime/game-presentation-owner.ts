@@ -1,4 +1,4 @@
-import type { WebGL2FailureReport } from "../renderer/webgl2-failure-diagnostics";
+import type { WebGL2FailureReport } from "../renderer/webgl2/webgl2-failure-diagnostics";
 import type { HostPresentationResources } from "./host-presentation-assets";
 import { optionalPresentationContent } from "../../assets/optional-presentation-content";
 import { PresentationTeardownStack } from "./presentation-teardown";
@@ -14,12 +14,12 @@ import { WebAudioDevice } from "../../assets/web-audio-device";
 import type { ActiveRegionSource } from "../../assets/active-region-source";
 import type { HostTransport } from "../../host/host-transport";
 import { StandardCommitPipeline } from "../commit/pipeline";
-import { WebGL2Device } from "../renderer/webgl2-device";
+import { WebGL2Device } from "../renderer/webgl2/webgl2-device";
 import type { FrameSettings } from "../renderer/renderer";
 import { ActiveRegionStaticDetailOwner } from "../resolution/active-region-static-detail";
 import { GamePresentationRuntime } from "./game-presentation-runtime";
-import type { TextureFilteringCapabilities } from "../renderer/texture-filtering-policy";
-import type { PortalWarpDriveTuning } from "../renderer/portal-warp-drive-tuning";
+import type { TextureFilteringCapabilities } from "../renderer/webgl2/texture-filtering-policy";
+import type { PortalWarpDriveTuning } from "../renderer/portal/portal-warp-drive-tuning";
 import type { LandblockSourceBatchSource } from "../../assets/landblock-source-batch";
 import type { AmbientRegionFacts } from "../systems/ambient-region";
 import {

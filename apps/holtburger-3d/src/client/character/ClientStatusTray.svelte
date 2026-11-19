@@ -1,0 +1,157 @@
+<script lang="ts">
+	import { hudAttention } from "../hud/hud-attention";
+	import type { EnchantmentTrayPresentation } from "../magic/enchantments-view";
+	import { untrack } from "svelte";
+	import { presentClientBurden } from "../inventory/burden-presentation";
+	import type { ClientInventoryState } from "../inventory/inventory-state";
+	import { CLIENT_TUNING } from "../settings/tuning";
+	import ClientHudTray from "../hud/ClientHudTray.svelte";
+	import ClientHudIcon, {
+		type ClientHudIconName,
+	} from "../hud/ClientHudIcon.svelte";
+	import type {
+		ClientHudPlacement,
+		ClientHudViewport,
+	} from "../hud/hud-layout";
+
+	interface Props {
+		/** Saved position and long-axis orientation of the fixed-size tray. */
+		readonly placement: ClientHudPlacement;
+		readonly editable: boolean;
+		/** Keep the tray mounted for HUD previews without enabling layout controls. */
+		readonly preview?: boolean;
+		readonly viewport: ClientHudViewport;
+		readonly onPlacementChange: (placement: ClientHudPlacement) => void;
+		/** Visibility and change identities for effective ordinary spells and the vitae penalty. */
+		readonly enchantments: EnchantmentTrayPresentation;
+		/** Session owner supplies world burden even while Inventory is closed. */
+		readonly inventory: ClientInventoryState | null;
+		readonly onOpenInventory: () => void;
+		readonly onOpenEnchantments: (kind: "beneficial" | "harmful") => void;
+	}
+
+	const {
+		placement,
+		editable,
+		preview = false,
+		viewport,
+		onPlacementChange,
+		enchantments,
+		onOpenEnchantments,
+		inventory,
+		onOpenInventory,
+	}: Props = $props();
+	/** Only the bounded warning display enters the reactive graph. */
+	let burden = $state<number | null>(null);
+	const burdenPresentation = $derived(presentClientBurden(burden));
+	$effect(() => {
+		const owner = inventory;
+		const sample = () => {
+			burden = owner?.readBurden() ?? null;
+		};
+		// The initial display read must not make producer facts own the timer lifetime.
+		untrack(sample);
+		if (owner === null) return;
+		const timer = setInterval(
+			sample,
+			CLIENT_TUNING.inventory.displayIntervalMs,
+		);
+		return () => clearInterval(timer);
+	});
+	const statuses = $derived<
+		readonly {
+			name: ClientHudIconName;
+			label: string;
+			kind: "beneficial" | "harmful";
+			/** Category-local registry identity used only to restart its pulse. */
+			identity: string;
+		}[]
+	>([
+		...(enchantments.beneficial.visible
+			? [
+					{
+						name: "buffed" as const,
+						label: "Beneficial enchantments",
+						kind: "beneficial" as const,
+						identity: enchantments.beneficial.identity,
+					},
+				]
+			: []),
+		...(enchantments.harmful.visible
+			? [
+					{
+						name: "debuffed" as const,
+						label: "Harmful enchantments",
+						kind: "harmful" as const,
+						identity: enchantments.harmful.identity,
+					},
+				]
+			: []),
+	]);
+</script>
+
+{#if editable || preview || statuses.length > 0 || burdenPresentation.warning !== null}
+	<ClientHudTray
+		label="Status tray"
+		{placement}
+		gapCount={0}
+		{editable}
+		{viewport}
+		{onPlacementChange}
+	>
+		{#each statuses as status (status.kind)}
+			<button
+				type="button"
+				class="status-icon ui-hud-button ui-icon-button"
+				use:hudAttention={status.identity}
+				title={status.label}
+				aria-label={status.label}
+				onclick={() => onOpenEnchantments(status.kind)}
+			>
+				<ClientHudIcon name={status.name} />
+			</button>
+		{/each}
+		{#if burdenPresentation.warning !== null}
+			<button
+				type="button"
+				class="status-icon burden-icon ui-hud-button ui-icon-button"
+				use:hudAttention={burdenPresentation.level}
+				data-level={burdenPresentation.level}
+				title={burdenPresentation.warning.tooltip}
+				aria-label={`${burdenPresentation.warning.label} — ${burdenPresentation.percent} burden. Open Inventory`}
+				onclick={onOpenInventory}
+			>
+				<ClientHudIcon name="encumbered" />
+				{#if burdenPresentation.level === "overburdened"}
+					<span class="burden-severity" aria-hidden="true">!</span>
+				{/if}
+			</button>
+		{/if}
+	</ClientHudTray>
+{/if}
+
+<style>
+	@layer components {
+		.burden-icon {
+			position: relative;
+			color: var(--ui-color-warning);
+		}
+		.burden-icon[data-level="overburdened"] {
+			color: var(--ui-color-danger);
+		}
+		.burden-severity {
+			position: absolute;
+			right: 2px;
+			top: 0;
+			font-weight: 700;
+			font-size: calc(var(--ui-status-badge-font-size) * var(--ui-text-scale));
+		}
+		.status-icon {
+			box-sizing: border-box;
+			flex: 0 0 32px;
+			width: 32px;
+			height: 32px;
+			pointer-events: auto;
+		}
+	}
+</style>

@@ -4,11 +4,11 @@ import { join } from "node:path";
 import {
 	characterVisualFileSchema,
 	type CharacterVisualRead,
-} from "../src/client/client-visual-cache-contract.js";
+} from "../src/client/character/visual-cache-contract.js";
 import {
 	playerVisualCaptureSchema,
 	type PlayerVisualCapture,
-} from "../src/client/client-object-preview-contract.js";
+} from "../src/client/character/object-preview-contract.js";
 import type { ClientLaunchConfiguration } from "./client-launch.js";
 import { clientCharacterProfileKey } from "./client-profile-key.js";
 import { replaceLocalFile } from "./replace-local-file.js";

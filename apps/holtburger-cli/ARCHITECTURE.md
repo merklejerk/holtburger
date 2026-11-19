@@ -24,7 +24,7 @@ cell to an unrelated position or snap Z at arrival. Local gravity/jumping/stairs
 remote prediction uses shared room-shell/terrain solving without furniture or peer collision.
 
 Gameplay requests whose physical eligibility cannot be evaluated in this reduced composition
-are delegated to ACE. This allows missile requests without inventing local ground contact;
+are delegated to the server. This allows missile requests without inventing local ground contact;
 known target/range/ownership/busy checks remain shared. h3d retains its physical composition.
 
 - **`src/bin/tui.rs`**: The main executable entry point. Orchestrates terminal lifecycle, logging, and the core event loop.

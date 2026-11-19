@@ -1,4 +1,4 @@
-import type { MinimapFrame } from "../../../app/minimap-frame";
+import type { MinimapFrame } from "../../../app/minimap/frame";
 import { SHARED_FRONTEND_TUNING } from "../../frontend-tuning";
 import type { WorldMapBounds, WorldMapView } from "./types";
 

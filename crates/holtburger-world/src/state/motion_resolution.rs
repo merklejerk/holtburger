@@ -1269,7 +1269,8 @@ impl WorldState {
         );
     }
 
-    /// Selects one target frame for both directed approach and its sticky handoff.
+    /// Selects the target frame for MoveTo/TurnTo and sticky handoff: local actors use the last
+    /// received server position while remote bodies target runtime pose.
     fn target_relative_pose(
         &self,
         actor: Guid,

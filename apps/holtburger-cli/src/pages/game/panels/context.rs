@@ -179,7 +179,7 @@ pub fn build_context_panel_content(data: &GameData, view: &ViewState) -> Vec<Lin
                         attributes: &data.attributes,
                         vitals: &data.vitals,
                         skills: &data.skills,
-                        enchantments: &data.player_enchantments,
+                        enchantments: data.resolved_enchantments.as_ref(),
                     })
                 }
                 _ => None,
@@ -217,17 +217,35 @@ pub fn build_context_panel_content(data: &GameData, view: &ViewState) -> Vec<Lin
             let spell_catalog = data.spell_catalog();
             debug::get_spell_details_info(spell_id, spell_catalog.as_deref())
         }
-        ContextView::Enchantment(enchant) => {
+        ContextView::Enchantment(key) => {
+            let Some((enchant, remaining_seconds)) = data
+                .resolved_enchantments
+                .as_ref()
+                .and_then(|enchantments| enchantments.find_instance(key))
+            else {
+                return vec![Line::from("Enchantment is no longer active.")];
+            };
             let spell_catalog = data.spell_catalog();
-            debug::get_enchantment_details_info(&enchant, spell_catalog.as_deref())
+            debug::get_enchantment_details_info(
+                enchant,
+                remaining_seconds,
+                spell_catalog.as_deref(),
+            )
         }
         ContextView::DebugSpell(spell_id) => {
             let spell_catalog = data.spell_catalog();
             debug::get_spell_debug_info(spell_id, spell_catalog.as_deref())
         }
-        ContextView::DebugEnchantment(enchant) => {
+        ContextView::DebugEnchantment(key) => {
+            let Some((enchant, remaining_seconds)) = data
+                .resolved_enchantments
+                .as_ref()
+                .and_then(|enchantments| enchantments.find_instance(key))
+            else {
+                return vec![Line::from("Enchantment is no longer active.")];
+            };
             let spell_catalog = data.spell_catalog();
-            debug::get_enchantment_debug_info(&enchant, spell_catalog.as_deref())
+            debug::get_enchantment_debug_info(enchant, remaining_seconds, spell_catalog.as_deref())
         }
         ContextView::Book(guid) => {
             if let Some(entity) = data.entities.get(&guid)
@@ -316,22 +334,12 @@ mod tests {
             pages: vec![
                 BookPage {
                     index: 0,
-                    author_id: 1,
                     author_name: "A. Writer".to_string(),
-                    author_account: "acct".to_string(),
-                    flags: 0,
-                    text_included: true,
-                    ignore_author: false,
                     page_text: Some("First page".to_string()),
                 },
                 BookPage {
                     index: 1,
-                    author_id: 1,
                     author_name: "A. Writer".to_string(),
-                    author_account: "acct".to_string(),
-                    flags: 0,
-                    text_included: true,
-                    ignore_author: false,
                     page_text: Some("Second page".to_string()),
                 },
             ],

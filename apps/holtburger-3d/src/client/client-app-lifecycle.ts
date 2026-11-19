@@ -1,16 +1,16 @@
-import type { ClientLoadingPageState } from "./client-loading-page";
+import type { ClientLoadingPageState } from "./pregame/loading-page";
 import { formatError } from "../lib/format-error";
 import {
 	abortError,
 	isAbortError,
 	awaitWithAbort,
 } from "../lib/async-lifetime";
-import type { ClientPresentationRootFrame } from "./client-presentation-root";
-import type { ClientLifecycleSession } from "./client-lifecycle-session";
+import type { ClientPresentationRootFrame } from "./session/presentation-root";
+import type { ClientLifecycleSession } from "./session/lifecycle-session";
 import type {
 	ClientExitRequested,
 	ClientLifecycle,
-} from "./client-host-contract";
+} from "./session/host-contract";
 
 /** Session recovery carries an admitted retry action in addition to display-only page content. */
 type ClientSessionLoadingPageState =

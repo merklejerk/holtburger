@@ -3,7 +3,7 @@ import type {
 	FrameInput,
 	FrameViewInput,
 } from "../../lib/game/renderer/renderer";
-import type { WebGL2Renderer } from "../../lib/game/renderer/webgl2-renderer";
+import type { WebGL2Renderer } from "../../lib/game/renderer/webgl2/webgl2-renderer";
 
 /** Capture a real runtime publication without changing its camera, tick, or renderer feedback. */
 function nextFrame(renderer: WebGL2Renderer): Promise<FrameInput> {

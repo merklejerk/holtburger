@@ -1,5 +1,5 @@
-import { APP_PERSISTENCE_TUNING } from "../src/app/app-tuning.js";
-import type { ClientWindowSettings } from "../src/app/window-settings-contract.js";
+import { APP_PERSISTENCE_TUNING } from "../src/app/desktop/app-tuning.js";
+import type { ClientWindowSettings } from "../src/app/desktop/window-settings-contract.js";
 
 /** The geometry owner supplies the complete persistence snapshot; tests can hold writes independently. */
 interface GeometryWindow {

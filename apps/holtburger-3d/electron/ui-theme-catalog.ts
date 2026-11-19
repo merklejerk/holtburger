@@ -5,7 +5,7 @@ import { z } from "zod";
 import {
 	UI_THEME_SCHEME,
 	uiThemeIdSchema,
-} from "../src/app/ui-theme-contract.js";
+} from "../src/app/theme/ui-theme-contract.js";
 
 /** Browser-supported theme resource types; no executable documents are served. */
 const resourceTypes = new Map([

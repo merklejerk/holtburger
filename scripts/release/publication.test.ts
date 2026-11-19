@@ -29,7 +29,7 @@ import {
 import { publishFrozenRelease } from "./publishing.ts";
 import { createManifestFixture, createSourceFixture } from "./test-fixtures.ts";
 import { NIGHTLY_HASH_LENGTH, bumpVersion } from "./version.ts";
-import { RELEASE_HISTORY_LIMIT } from "../../apps/holtburger-3d/src/app/release-history-contract.ts";
+import { RELEASE_HISTORY_LIMIT } from "../../apps/holtburger-3d/src/app/desktop/release-history-contract.ts";
 import { TARGETS } from "./contracts.ts";
 
 /** Complete synthetic GitHub inventory over an independently constructed release manifest. */

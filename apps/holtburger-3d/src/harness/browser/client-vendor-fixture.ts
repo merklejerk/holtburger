@@ -1,16 +1,15 @@
-import { offerPackFixture } from "./client-offer-pack-fixture";
-import { CLIENT_TUNING } from "../../client/client-tuning";
-import type { ClientEntityFacts } from "../../client/client-entity-mirror";
-import { entityFacts } from "../../client/client-entity-mirror.test-support";
+import { CLIENT_TUNING } from "../../client/settings/tuning";
+import type { ClientEntityFacts } from "../../client/world/entity-mirror";
+import { entityFacts } from "../../client/world/entity-mirror.test-support";
 import {
 	vendorPreviewSchema,
 	vendorRequestSchema,
-	vendorResultSchema,
+	type VendorCategory,
 	type VendorQuote,
 	type VendorSnapshot,
-} from "../../client/client-vendor-contract";
+} from "../../client/inventory/vendor-state";
 
-/** Controlled authority replies exercise production session decoding and HUD gestures. */
+/** Synthetic vendor session data for the interactive UI showcase. */
 export function createVendorFixture(options: {
 	readonly emit: (event: string, payload: unknown) => void;
 	readonly baseline: () => void;
@@ -25,12 +24,14 @@ export function createVendorFixture(options: {
 		guid: number,
 		name: string,
 		item_type: number,
+		category: VendorCategory,
 		stack_count: number,
 	) => ({
 		guid,
 		wcid: guid,
 		name,
 		item_type,
+		category,
 		stack_count,
 		stackable: stack_count > 1,
 		supply: null,
@@ -52,19 +53,17 @@ export function createVendorFixture(options: {
 		vendor,
 		currency: { wcid: 38234, name: "Trade Tokens" },
 		offers: [
-			offer(7001, "Lead Scarabs", 0x1000, 10),
-			// Host projects zero-count non-stackables as one purchasable item.
-			{ ...offer(7002, "Steel Sword", 1, 1), supply: 1 },
+			offer(7001, "Lead Scarabs", 0x1000, "spell-components", 10),
+			{ ...offer(7002, "Steel Sword", 1, "weapons", 1), supply: 1 },
 			{
-				...offer(7003, "Garnet of Excess", 0x800, 1),
+				...offer(7003, "Garnet of Excess", 0x800, "gems", 1),
 				price: { kind: "quoted", amount: 600, quantity: 1 },
 			},
 			...Array.from({ length: 36 }, (_, i) =>
-				offer(7100 + i, `Garnet ${i + 1}`, 0x800, 1),
+				offer(7100 + i, `Garnet ${i + 1}`, 0x800, "gems", 1),
 			),
 		],
 	};
-	const approach = () => emit("client-vendor-approached", snapshot);
 	function named(
 		guid: number,
 		name: string,
@@ -95,18 +94,12 @@ export function createVendorFixture(options: {
 			},
 		}),
 	);
-	const request = (command: string) => {
-		const args = commands.findLast((entry) => entry.command === command)?.args;
-		if (args === undefined)
-			throw new Error(`Vendor fixture has no ${command} request`);
-		return vendorRequestSchema.parse(args.request);
-	};
 	const currencies: VendorQuote["currencies"] = [
 		{ wcid: 38234, name: "Trade Tokens", current: 500, projected: 400 },
 		{ wcid: 273, name: "Pyreals", current: 3000, projected: 10000 },
 	];
 	return {
-		gestureCooldownMs: CLIENT_TUNING.inventory.doubleClickSuppressionMs,
+		currencies,
 		settle: () =>
 			new Promise<void>((resolve) =>
 				window.setTimeout(
@@ -114,32 +107,24 @@ export function createVendorFixture(options: {
 					CLIENT_TUNING.inventory.displayIntervalMs * 2,
 				),
 			),
-		packs() {
-			options.emit("client-entity-facts-changed", {
-				projectileSupply: null,
-				salvage: null,
-				worldContainer: null,
-				removed: [],
-				upserts: offerPackFixture(vendor),
-			});
-		},
 		begin() {
 			baseline();
 			emit("client-entity-facts-changed", {
 				projectileSupply: null,
-				salvage: null,
+				player: null,
 				worldContainer: null,
 				upserts: [named(vendor, "Festival Merchant", {}), ...sources],
 				removed: [],
 			});
-			approach();
-		},
-		approach,
-		refresh() {
-			emit("client-vendor-snapshot", snapshot);
+			emit("client-vendor-approached", snapshot);
 		},
 		reply(quote: VendorQuote) {
-			const pending = request("preview_client_vendor");
+			const args = commands.findLast(
+				(entry) => entry.command === "preview_client_vendor",
+			)?.args;
+			if (args === undefined)
+				throw new Error("Vendor fixture has no preview_client_vendor request");
+			const pending = vendorRequestSchema.parse(args.request);
 			emit(
 				"client-vendor-preview",
 				vendorPreviewSchema.parse({
@@ -148,30 +133,6 @@ export function createVendorFixture(options: {
 					outcome: { kind: "ready", quote },
 				}),
 			);
-		},
-		finishBuyFailure() {
-			const submitted = request("submit_client_vendor");
-			emit("client-vendor-phase", "buying");
-			emit(
-				"client-vendor-result",
-				vendorResultSchema.parse({
-					sequence: submitted.sequence,
-					vendor,
-					sold: submitted.draft.sells,
-					sale_issue: null,
-					outcome: {
-						kind: "failed",
-						phase: "buying",
-						message: "Fixture purchase refused",
-					},
-				}),
-			);
-		},
-		pending: () => request("preview_client_vendor"),
-		submitted: () => request("submit_client_vendor"),
-		currencies,
-		close() {
-			emit("client-vendor-snapshot", null);
 		},
 	};
 }

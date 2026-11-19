@@ -13,7 +13,7 @@ import {
 	stripClientLaunchArguments,
 } from "./entry-paths.mjs";
 import { parseVitePort, resolveVitePort } from "./dev-port.mjs";
-import { clientDebugEnabled } from "../src/client/client-debug";
+import { clientDebugEnabled } from "../src/client/hud/debug";
 import { join, resolve } from "node:path";
 
 describe("desktop entry selection", () => {

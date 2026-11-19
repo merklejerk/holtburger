@@ -417,7 +417,6 @@ mod tests {
             revision: 1,
             partner_guid: trade_partner_guid,
             initiator_guid: Guid(0x303),
-            trade_stamp: 0.0,
             self_side: TradeSide {
                 guid: Guid(0x304),
                 accepted: false,

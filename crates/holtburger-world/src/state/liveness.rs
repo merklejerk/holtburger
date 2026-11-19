@@ -343,9 +343,9 @@ impl WorldState {
         self.entity_lifecycle.get(guid)
     }
 
-    /// Retail behavior is to withdraw inventory access immediately and retain descriptions for
-    /// 25 seconds. The following instance delete must find the old description rather than queue
-    /// against a future create which can reuse the same instance sequence.
+    /// Retail behavior is to withdraw inventory access immediately, clear stale owner property
+    /// references, and retain descriptions for the 25-second grace window so a following instance
+    /// delete finds the old description rather than queueing against a future create.
     pub(crate) fn remove_inventory_object(&mut self, guid: Guid, events: &mut Vec<WorldEvent>) {
         let removed: Vec<_> = std::iter::once(guid)
             .chain(self.storage.owned_items(guid))

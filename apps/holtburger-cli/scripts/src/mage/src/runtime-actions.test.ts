@@ -651,7 +651,7 @@ test("combat victim notifications resolve attack casts", () => {
 	const handled = resolveSpellcastFromCombatFeedback(state, {
 		kind: "victim_notification",
 		data: {
-			death_message: "Olthoi Noble is shattered by your assault!",
+			deathMessage: "Olthoi Noble is shattered by your assault!",
 		},
 	});
 
@@ -677,7 +677,7 @@ test("combat killer notifications resolve attack casts", () => {
 	const handled = resolveSpellcastFromCombatFeedback(state, {
 		kind: "killer_notification",
 		data: {
-			death_message: "Olthoi Noble is shattered by your assault!",
+			deathMessage: "Olthoi Noble is shattered by your assault!",
 		},
 	});
 

@@ -2,6 +2,7 @@
 
 pub mod classification;
 
+use holtburger_common::stats::SpellSchool;
 use holtburger_dat::file_type::{SpellTable, spell_table::component_power_tier};
 
 const PROJECTILE_SPELL_TYPE: u32 = 2;
@@ -17,12 +18,12 @@ pub struct SpellReference<'a> {
     /// Authored inspection description.
     pub description: &'a str,
     /// Authored school identity.
-    pub school: u32,
+    pub school: SpellSchool,
     /// Authored spell category, preserved for app-owned presentation policy.
     pub category: u32,
     /// Authored spell power, preserved without interpreting its category-specific scale.
     pub power: u32,
-    /// Whether ACE executes this spell through one of its projectile handlers.
+    /// Whether the server executes this spell through one of its projectile handlers.
     pub uses_projectile_handler: bool,
     /// Authored base mana, before casting economy adjustments.
     pub base_mana: u32,
@@ -46,7 +47,7 @@ pub fn spell_reference(table: &SpellTable, id: u32) -> Option<SpellReference<'_>
         classification: classification::classify(id, spell),
         name: &spell.name,
         description: &spell.description,
-        school: spell.school,
+        school: SpellSchool::from_raw(spell.school),
         category: spell.category,
         power: spell.power,
         uses_projectile_handler: matches!(
@@ -131,7 +132,7 @@ mod tests {
             assert_eq!(reference.description, "Authored description");
             assert_eq!(
                 (reference.school, reference.base_mana, reference.mana_mod),
-                (3, 10, 2)
+                (SpellSchool::from_raw(3), 10, 2)
             );
             assert_eq!(reference.duration_seconds, expected);
         }

@@ -8,18 +8,19 @@ import { fileURLToPath } from "node:url";
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const shaderSourcePath = join(
 	scriptDirectory,
-	"../src/lib/game/renderer/webgl2-terrain-program.ts",
+	"../src/lib/game/renderer/webgl2/webgl2-terrain-program.ts",
 );
 const farShaderSourcePath = join(
 	scriptDirectory,
-	"../src/lib/game/renderer/webgl2-far-terrain-program.ts",
+	"../src/lib/game/renderer/webgl2/webgl2-far-terrain-program.ts",
 );
 /** Shared GLSL blocks the shaders interpolate, by exported constant name. */
 const sharedGlslModules = {
-	WEBGL2_DISTANCE_FOG_GLSL: "../src/lib/game/renderer/webgl2-fog.ts",
-	WEBGL2_SCENE_LIGHTING_GLSL: "../src/lib/game/renderer/webgl2-lighting.ts",
+	WEBGL2_DISTANCE_FOG_GLSL: "../src/lib/game/renderer/passes/webgl2-fog.ts",
+	WEBGL2_SCENE_LIGHTING_GLSL:
+		"../src/lib/game/renderer/passes/webgl2-lighting.ts",
 	WEBGL2_DIRECTIONAL_LIGHTING_GLSL:
-		"../src/lib/game/renderer/webgl2-lighting.ts",
+		"../src/lib/game/renderer/passes/webgl2-lighting.ts",
 	POINT_LIGHT_FALLOFF_GLSL:
 		"../src/lib/game/environment/point-light-falloff.ts",
 };
@@ -28,7 +29,7 @@ const sharedConstantModules = [
 	"../src/lib/game/environment/point-light-falloff.ts",
 	"../src/lib/game/environment/runtime-lights.ts",
 	"../src/lib/game/landblocks.ts",
-	"../src/lib/game/renderer/webgl2-lighting.ts",
+	"../src/lib/game/renderer/passes/webgl2-lighting.ts",
 	"../src/lib/game/terrain/pcode.ts",
 ];
 const source = await readFile(shaderSourcePath, "utf8");

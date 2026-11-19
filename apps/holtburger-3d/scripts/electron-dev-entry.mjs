@@ -16,7 +16,7 @@ import {
 } from "./entry-paths.mjs";
 import { resolveVitePort } from "./dev-port.mjs";
 import { parseClientLaunchArguments } from "../dist-electron/electron/client-launch.js";
-import { DEV_RESTART_EXIT_CODE } from "../dist-electron/src/app/desktop-restart-contract.js";
+import { DEV_RESTART_EXIT_CODE } from "../dist-electron/src/app/desktop/desktop-restart-contract.js";
 
 const [entryName, ...allArgs] = process.argv.slice(2);
 let rawArgs;

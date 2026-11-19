@@ -20,7 +20,7 @@ use crate::types::{
 use crate::utils::{
     format_item_name, fuzzy_subsequence_match, normalize_filter_tokens, retain_matching_hierarchy,
 };
-use holtburger_world::crafting::salvage::SalvageEvaluation;
+use holtburger_core::client::salvage::SalvagePreviewEvaluation;
 
 #[derive(Debug, Clone)]
 struct SplitSession {
@@ -324,7 +324,7 @@ impl TabController for InventoryTab {
                         if is_queued && !session.queued_items.is_empty() {
                             if matches!(
                                 session.phase,
-                                SalvagingPhase::Reviewed(SalvageEvaluation::Ready { .. })
+                                SalvagingPhase::Reviewed(SalvagePreviewEvaluation::Ready { .. })
                             ) {
                                 verbs.push(Verb::new(
                                     AppAction::ConfirmSalvage,
@@ -559,7 +559,10 @@ impl TabController for InventoryTab {
             if let Some(trade) = &data.trade {
                 if !is_equipped
                     && !trade.self_side.items.contains(&cur_entity.guid)
-                    && data.can_add_to_trade(cur_entity.guid)
+                    && data
+                        .entity_facts
+                        .get(&cur_entity.guid)
+                        .is_some_and(|facts| facts.can_offer_trade)
                 {
                     verbs.push(Verb::new(
                         vec![AppAction::AddToTrade {
@@ -570,13 +573,16 @@ impl TabController for InventoryTab {
                     ));
                 }
             } else if let Some(vendor) = &view.vendor
-                && data.can_sell_to_vendor(cur_entity.guid, view.vendor.as_ref())
+                && data
+                    .entity_facts
+                    .get(&cur_entity.guid)
+                    .and_then(|facts| facts.vendor_sale.as_ref())
+                    .is_some_and(|sale| sale.vendor == vendor.vendor_guid && sale.accepted)
             {
                 verbs.push(Verb::new(
                     vec![AppAction::SellToVendor {
                         vendor: vendor.vendor_guid,
                         item: cur_entity.guid,
-                        amount: 1,
                     }],
                     's',
                     "Sell",

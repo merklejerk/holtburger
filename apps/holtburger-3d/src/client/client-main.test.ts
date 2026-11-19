@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { TRAVELERS_KIT_THEME_ID } from "../app/ui-theme-contract";
-import { createDefaultClientUserSettings } from "./client-settings-defaults";
+import { TRAVELERS_KIT_THEME_ID } from "../app/theme/ui-theme-contract";
+import { createDefaultClientUserSettings } from "./settings/settings-defaults";
 
 // Vitest stubs CSS modules; the native probe verifies Vite's emitted asset URL.
-vi.mock("../app/themes/travelers-kit.css?url&no-inline", () => ({
+vi.mock("../app/theme/travelers-kit.css?url&no-inline", () => ({
 	default: "/assets/travelers-kit.css",
 }));
 
@@ -40,14 +40,14 @@ vi.mock("svelte", async (original) => ({
 	mount: mountGame,
 }));
 vi.mock("./ClientApp.svelte", () => ({ default: {} }));
-vi.mock("../app/ContentStartup.svelte", () => ({ default: {} }));
-vi.mock("./ClientShortcutDock.svelte", () => ({
+vi.mock("../app/desktop/ContentStartup.svelte", () => ({ default: {} }));
+vi.mock("./hud/ClientShortcutDock.svelte", () => ({
 	createClientShortcuts: () => [],
 }));
-vi.mock("./client-settings-transport", () => ({
+vi.mock("./settings/settings-transport", () => ({
 	createElectronClientSettingsTransport: () => bridge,
 }));
-vi.mock("../app/ui-theme-transport", () => ({
+vi.mock("../app/theme/ui-theme-transport", () => ({
 	createElectronUiThemeTransport: () => themes,
 }));
 beforeEach(() => {

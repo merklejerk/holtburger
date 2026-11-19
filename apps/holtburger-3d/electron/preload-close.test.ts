@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
 import ts from "typescript";
 import { describe, expect, it, vi } from "vitest";
-import type { ClientClosePreparation } from "../src/client/client-close-contract";
+import type { ClientClosePreparation } from "../src/client/session/close-contract";
 
 interface ClientBridge {
 	quit(): Promise<void>;

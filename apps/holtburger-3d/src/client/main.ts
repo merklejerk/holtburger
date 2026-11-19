@@ -1,17 +1,17 @@
 import { detectInputPlatform } from "../lib/input/input-platform";
-import { createElectronVisualCacheTransport } from "./client-visual-cache-transport";
-import { createElectronEquipmentCacheTransport } from "./client-equipment-cache-transport";
+import { createElectronVisualCacheTransport } from "./character/visual-cache-transport";
+import { createElectronEquipmentCacheTransport } from "./inventory/equipment-cache-transport";
 import "../app/base.css";
-import ContentStartup from "../app/ContentStartup.svelte";
+import ContentStartup from "../app/desktop/ContentStartup.svelte";
 import ClientApp from "./ClientApp.svelte";
 import { mount } from "svelte";
-import { UiThemeSelection } from "../app/ui-theme-selection";
-import { createElectronUiThemeTransport } from "../app/ui-theme-transport";
-import { withBundledUiThemes } from "../app/ui-bundled-themes";
+import { UiThemeSelection } from "../app/theme/ui-theme-selection";
+import { createElectronUiThemeTransport } from "../app/theme/ui-theme-transport";
+import { withBundledUiThemes } from "../app/theme/ui-bundled-themes";
 import { uiThemes, mountEntryWithProps } from "../app/mount";
-import { clientDebugEnabled } from "./client-debug";
-import { createClientShortcuts } from "./ClientShortcutDock.svelte";
-import { createElectronClientSettingsTransport } from "./client-settings-transport";
+import { clientDebugEnabled } from "./hud/debug";
+import { createClientShortcuts } from "./hud/ClientShortcutDock.svelte";
+import { createElectronClientSettingsTransport } from "./settings/settings-transport";
 
 async function startGame(
 	target: HTMLElement,

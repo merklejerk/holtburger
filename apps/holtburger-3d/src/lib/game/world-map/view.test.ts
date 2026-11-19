@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { MinimapFrame, MinimapSubject } from "../../../app/minimap-frame";
+import type { MinimapFrame, MinimapSubject } from "../../../app/minimap/frame";
 import { worldMapPlayer } from "./view";
 
 const view = { centerX: 120, centerZ: -240, spanMeters: 600 };

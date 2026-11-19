@@ -6,7 +6,7 @@ import { HostCommandError } from "../../host/host-command-result";
 import { onTestFinished, describe, expect, it, vi } from "vitest";
 import { PresentationAssetService } from "./presentation-asset-service";
 import { DynamicEntitySystem } from "../systems/dynamic-entity-system";
-import type { EntityOverlayPresentation } from "../renderer/entity-overlay-policy";
+import type { EntityOverlayPresentation } from "../renderer/overlays/entity-overlay-policy";
 import { EffectSystem } from "../systems/effect-system";
 import { nameplateIconId } from "../systems/dynamic-presentation-source";
 import { WorkerTexturePreparer } from "../textures/texture-preparer";
@@ -65,7 +65,7 @@ import { compileTerrainCompositionTable } from "../terrain/composition-table";
 import {
 	CLIENT_COMBAT_EFFECTS_TUNING,
 	CLIENT_SUMMON_TUNING,
-} from "../../../client/client-tuning";
+} from "../../../client/settings/tuning";
 import type { CombatEffectInstance } from "../systems/combat-effects-system";
 import { SceneGraph, type SceneNodeId, type SceneScope } from "../scene";
 import { sceneNodeIdOf } from "../scene/utils";
@@ -151,6 +151,85 @@ function scalePhysicsScriptSource(
 			};
 		},
 	};
+}
+
+function scriptSource(
+	loadPhysicsScript: PhysicsScriptSource["loadPhysicsScript"],
+): PhysicsScriptSource {
+	return { destroy() {}, loadPhysicsScript };
+}
+
+function particleScriptSource(
+	id: DatAssetId,
+	emitterInfoId: DatAssetId,
+	options: { emitterId?: number; partIndex?: number } = {},
+): PhysicsScriptSource {
+	return scriptSource(async () => ({
+		id,
+		lengthSeconds: 0,
+		records: [
+			{
+				authoredOrder: 0,
+				emitterId: options.emitterId ?? 1,
+				emitterInfoId,
+				kind: "create-particle",
+				offsetOrigin: acVector3([0, 0, 0]),
+				partIndex: options.partIndex ?? 0,
+				startTime: 0,
+			},
+		],
+	}));
+}
+
+function scriptTableSource(
+	id: DatAssetId,
+	entries: ReadonlyArray<readonly [number, DatAssetId]>,
+): PhysicsScriptTableSource {
+	return {
+		destroy() {},
+		async loadPhysicsScriptTable() {
+			return {
+				id,
+				cues: new Map(
+					entries.map(([cue, scriptId]) => [
+						cue,
+						[{ maximumIntensity: 1, scriptId }],
+					]),
+				),
+			};
+		},
+	};
+}
+
+function emitterSource(
+	loadParticleEmitter: ParticleEmitterSource["loadParticleEmitter"],
+): ParticleEmitterSource {
+	return { destroy() {}, loadParticleEmitter };
+}
+
+function singleEmitterSource(
+	emitterId: DatAssetId,
+	meshId: DatAssetId,
+): ParticleEmitterSource {
+	return emitterSource(async () => particleEmitterInfo(emitterId, meshId));
+}
+
+function meshSource(
+	loadParticleMeshes: ParticleMeshSource["loadParticleMeshes"],
+): ParticleMeshSource {
+	return { destroy() {}, loadParticleMeshes };
+}
+
+function singleMeshSource(
+	meshId: DatAssetId,
+	presentation: DecodedStaticPresentation = spawnedVisual(),
+): ParticleMeshSource {
+	return meshSource(async () => ({
+		presentations: new Map([
+			[meshId, { orientation: "authored", presentation }],
+		]),
+		textureDependencies: [],
+	}));
 }
 
 const ANIMATION_SOURCE: AnimationAssetSource = {
@@ -241,11 +320,11 @@ describe("GamePresentationRuntime retirement", () => {
 				throw failure;
 			}),
 		});
-		const runtime = await buildSpawnRuntime(
-			{ load: async () => spawnedVisual() },
-			ANIMATION_SOURCE,
-			renderer,
-		);
+		const runtime = await buildSpawnRuntime({
+			setupVisualSource: { load: async () => spawnedVisual() },
+			renderer: renderer,
+			autoDestroy: false,
+		});
 		const releaseDynamics = vi.spyOn(DynamicEntitySystem.prototype, "destroy");
 		onTestFinished(() => releaseDynamics.mockRestore());
 		const retirement = runtime.destroy();
@@ -287,7 +366,6 @@ describe("realized selection volume population", () => {
 				};
 			},
 		});
-		onTestFinished(() => runtime.destroy());
 		const parent = spawnedEntity(7, 1);
 		await runtime.replaceDynamicEntitySnapshot([
 			parent,
@@ -325,7 +403,6 @@ describe("realized selection volume population", () => {
 				},
 			}),
 		});
-		onTestFinished(() => runtime.destroy());
 		await runtime.upsertDynamicEntity(spawnedEntity(7, 1));
 		expect(runtime.dynamicEntityPresentationState(7).kind).toBe("realized");
 		expect(realizedBoundsEvidence(runtime)).toEqual([]);
@@ -336,8 +413,8 @@ describe("realized selection volume population", () => {
 		const scriptId: DatAssetId = "0x33000001";
 		const emitterId: DatAssetId = "0x32000001";
 		const meshId: DatAssetId = "0x01000001";
-		const runtime = await buildSpawnRuntime(
-			{
+		const runtime = await buildSpawnRuntime({
+			setupVisualSource: {
 				load: async () => ({
 					...visual,
 					behavior: {
@@ -350,42 +427,10 @@ describe("realized selection volume population", () => {
 					},
 				}),
 			},
-			ANIMATION_SOURCE,
-			undefined,
-			{
-				destroy() {},
-				loadPhysicsScript: async () => ({
-					id: scriptId,
-					lengthSeconds: 0,
-					records: [
-						{
-							kind: "create-particle",
-							emitterInfoId: emitterId,
-							emitterId: 1,
-							partIndex: 0,
-							offsetOrigin: acVector3([0, 0, 0]),
-							startTime: 0,
-							authoredOrder: 0,
-						},
-					],
-				}),
-			},
-			PHYSICS_SCRIPT_TABLE_SOURCE,
-			{
-				destroy() {},
-				loadParticleEmitter: async () => particleEmitterInfo(emitterId, meshId),
-			},
-			{
-				destroy() {},
-				loadParticleMeshes: async () => ({
-					presentations: new Map([
-						[meshId, { orientation: "authored", presentation: visual }],
-					]),
-					textureDependencies: [],
-				}),
-			},
-		);
-		onTestFinished(() => runtime.destroy());
+			physicsScriptSource: particleScriptSource(scriptId, emitterId),
+			particleEmitterSource: singleEmitterSource(emitterId, meshId),
+			particleMeshSource: singleMeshSource(meshId, visual),
+		});
 		await runtime.upsertDynamicEntity(
 			spawnedEntity(7, 1, { defaultScript: true }),
 		);
@@ -420,7 +465,6 @@ describe("realized selection volume population", () => {
 					? delayed.promise
 					: Promise.resolve(appearanceVisual(0)),
 		});
-		onTestFinished(() => runtime.destroy());
 		await runtime.upsertDynamicEntity(spawnedEntity(7, 1));
 		expect(realizedBoundsEvidence(runtime).map((r) => r.guid)).toEqual([7]);
 		const replacement = spawnedEntity(7, 1);
@@ -441,7 +485,6 @@ describe("realized selection volume population", () => {
 					? delayed.promise
 					: Promise.resolve(appearanceVisual(0)),
 		});
-		onTestFinished(() => runtime.destroy());
 		await runtime.upsertDynamicEntity(spawnedEntity(7, 1));
 		const replacement = spawnedEntity(7, 2);
 		replacement.presentation.appearance.paletteDid = 2;
@@ -524,7 +567,6 @@ describe("GamePresentationRuntime view and interest control", () => {
 					? heldVisual()
 					: appearanceVisual(appearance.paletteDid),
 		});
-		onTestFinished(() => runtime.destroy());
 		const parent = spawnedEntity(20, 1);
 		await runtime.upsertDynamicEntity(parent);
 		const createGeometry = TEST_RESOURCES.createGeometry;
@@ -569,11 +611,10 @@ describe("GamePresentationRuntime view and interest control", () => {
 
 	it("presents a real opaque loading receipt when authored portal assets are unavailable", async () => {
 		const clear = vi.fn();
-		const runtime = await buildSpawnRuntime(
-			{ load: async () => spawnedVisual() },
-			ANIMATION_SOURCE,
-			testRenderer({ clearPresentation: clear }),
-		);
+		const runtime = await buildSpawnRuntime({
+			setupVisualSource: { load: async () => spawnedVisual() },
+			renderer: testRenderer({ clearPresentation: clear }),
+		});
 		await runtime.installPortalTransitionAssets(null);
 		runtime.setPortalTransition({ kind: "tunnel-only", generation: 4 });
 		expect(
@@ -595,36 +636,24 @@ describe("GamePresentationRuntime view and interest control", () => {
 		};
 		const tableId: DatAssetId = "0x34000001";
 		const scriptId: DatAssetId = "0x33000001";
-		const runtime = await buildSpawnRuntime(
-			{ load: async () => spawnedVisual() },
-			ANIMATION_SOURCE,
-			undefined,
-			{
-				destroy() {},
-				loadPhysicsScript: async () => ({
-					id: scriptId,
-					lengthSeconds: 0,
-					records: [
-						{
-							kind: "transparent",
-							start: 1,
-							end: 0,
-							durationSeconds: 1,
-							startTime: 0,
-							authoredOrder: 0,
-						},
-					],
-				}),
-			},
-			{
-				destroy() {},
-				loadPhysicsScriptTable: async () => ({
-					id: tableId,
-					cues: new Map([[7, [{ maximumIntensity: 1, scriptId }]]]),
-				}),
-			},
-		);
-		onTestFinished(() => runtime.destroy());
+		const runtime = await buildSpawnRuntime({
+			setupVisualSource: { load: async () => spawnedVisual() },
+			physicsScriptSource: scriptSource(async () => ({
+				id: scriptId,
+				lengthSeconds: 0,
+				records: [
+					{
+						kind: "transparent",
+						start: 1,
+						end: 0,
+						durationSeconds: 1,
+						startTime: 0,
+						authoredOrder: 0,
+					},
+				],
+			})),
+			physicsScriptTableSource: scriptTableSource(tableId, [[7, scriptId]]),
+		});
 		await runtime.installPortalTransitionAssets(null);
 		await runtime.upsertDynamicEntity(
 			withPhysicsEffectTable(spawnedEntity(7, 3), tableId),
@@ -878,19 +907,11 @@ describe("GamePresentationRuntime view and interest control", () => {
 			buildRenderer: async () => renderer,
 			resources: TEST_RESOURCES,
 		};
-		const runtime = await buildGamePresentationRuntimeForTest(
-			device,
-			pipeline,
-			{} as TexturePixelSource,
-			ANIMATION_SOURCE,
-			PHYSICS_SCRIPT_SOURCE,
-			// No runtime test triggers authored audio; a refusing device keeps that visible.
-			{ playOneShot: () => null, prepare: async () => {} },
-			PARTICLE_EMITTER_SOURCE,
-			SOUND_TABLE_SOURCE,
-			PARTICLE_MESH_SOURCE,
-			null,
-		);
+		const runtime = await buildTestRuntime({
+			device: device,
+			commitPipeline: pipeline,
+			setupVisualSource: null,
+		});
 
 		runtime.updateSceneInterest({
 			ambientOutdoorEnvCellOwners: new Set(),
@@ -1072,19 +1093,11 @@ describe("GamePresentationRuntime view and interest control", () => {
 			buildRenderer: async () => testRenderer(),
 			resources: TEST_RESOURCES,
 		};
-		const runtime = await buildGamePresentationRuntimeForTest(
-			device,
-			pipeline,
-			{} as TexturePixelSource,
-			ANIMATION_SOURCE,
-			PHYSICS_SCRIPT_SOURCE,
-			// No runtime test triggers authored audio; a refusing device keeps that visible.
-			{ playOneShot: () => null, prepare: async () => {} },
-			PARTICLE_EMITTER_SOURCE,
-			SOUND_TABLE_SOURCE,
-			PARTICLE_MESH_SOURCE,
-			null,
-		);
+		const runtime = await buildTestRuntime({
+			device: device,
+			commitPipeline: pipeline,
+			setupVisualSource: null,
+		});
 
 		runtime.updateSceneInterest(sceneInterest("0x1010ffff"));
 		runtime.updateSceneInterest(sceneInterest("0x2020ffff"));
@@ -1101,19 +1114,11 @@ describe("GamePresentationRuntime view and interest control", () => {
 			buildRenderer: async () => testRenderer(),
 			resources: TEST_RESOURCES,
 		};
-		const runtime = await buildGamePresentationRuntimeForTest(
-			device,
-			pipeline,
-			{} as TexturePixelSource,
-			ANIMATION_SOURCE,
-			PHYSICS_SCRIPT_SOURCE,
-			// No runtime test triggers authored audio; a refusing device keeps that visible.
-			{ playOneShot: () => null, prepare: async () => {} },
-			PARTICLE_EMITTER_SOURCE,
-			SOUND_TABLE_SOURCE,
-			PARTICLE_MESH_SOURCE,
-			null,
-		);
+		const runtime = await buildTestRuntime({
+			device: device,
+			commitPipeline: pipeline,
+			setupVisualSource: null,
+		});
 		const events: SceneAvailabilityEvent[] = [];
 		const unsubscribe = runtime.subscribeSceneAvailability((event) =>
 			events.push(event),
@@ -1143,19 +1148,11 @@ describe("GamePresentationRuntime view and interest control", () => {
 			buildRenderer: async () => testRenderer(),
 			resources: TEST_RESOURCES,
 		};
-		const runtime = await buildGamePresentationRuntimeForTest(
-			device,
-			pipeline,
-			{} as TexturePixelSource,
-			ANIMATION_SOURCE,
-			PHYSICS_SCRIPT_SOURCE,
-			// No runtime test triggers authored audio; a refusing device keeps that visible.
-			{ playOneShot: () => null, prepare: async () => {} },
-			PARTICLE_EMITTER_SOURCE,
-			SOUND_TABLE_SOURCE,
-			PARTICLE_MESH_SOURCE,
-			null,
-		);
+		const runtime = await buildTestRuntime({
+			device: device,
+			commitPipeline: pipeline,
+			setupVisualSource: null,
+		});
 		const events: SceneAvailabilityEvent[] = [];
 		const unsubscribe = runtime.subscribeSceneAvailability((event) =>
 			events.push(event),
@@ -1182,19 +1179,11 @@ describe("GamePresentationRuntime view and interest control", () => {
 			buildRenderer: async () => testRenderer(),
 			resources: TEST_RESOURCES,
 		};
-		const runtime = await buildGamePresentationRuntimeForTest(
-			device,
-			pipeline,
-			{} as TexturePixelSource,
-			ANIMATION_SOURCE,
-			PHYSICS_SCRIPT_SOURCE,
-			// No runtime test triggers authored audio; a refusing device keeps that visible.
-			{ playOneShot: () => null, prepare: async () => {} },
-			PARTICLE_EMITTER_SOURCE,
-			SOUND_TABLE_SOURCE,
-			PARTICLE_MESH_SOURCE,
-			null,
-		);
+		const runtime = await buildTestRuntime({
+			device: device,
+			commitPipeline: pipeline,
+			setupVisualSource: null,
+		});
 
 		runtime.updateSceneInterest(sceneInterest("0x1010ffff"));
 		pipeline.resolveNext([staleTerrainArtifact("0x1010ffff")]);
@@ -1214,18 +1203,15 @@ describe("GamePresentationRuntime view and interest control", () => {
 		const nearby = "0x8a020283";
 		const scriptId = "0x33000c01";
 		const pipeline = new DeferredCommitPipeline();
-		const runtime = await buildGamePresentationRuntimeForTest(
-			{ buildRenderer: async () => testRenderer(), resources: TEST_RESOURCES },
-			pipeline,
-			{} as TexturePixelSource,
-			ANIMATION_SOURCE,
-			scalePhysicsScriptSource(scriptId, 1),
-			{ playOneShot: () => null, prepare: async () => {} },
-			PARTICLE_EMITTER_SOURCE,
-			SOUND_TABLE_SOURCE,
-			PARTICLE_MESH_SOURCE,
-			null,
-		);
+		const runtime = await buildTestRuntime({
+			device: {
+				buildRenderer: async () => testRenderer(),
+				resources: TEST_RESOURCES,
+			},
+			commitPipeline: pipeline,
+			physicsScriptSource: scalePhysicsScriptSource(scriptId, 1),
+			setupVisualSource: null,
+		});
 		const enter = (envCellId: string) =>
 			runtime.updateSceneInterest({
 				...sceneInterest(landblockId),
@@ -1309,21 +1295,13 @@ describe("GamePresentationRuntime view and interest control", () => {
 			buildRenderer: async () => testRenderer(),
 			resources: TEST_RESOURCES,
 		};
-		const runtime = await buildGamePresentationRuntimeForTest(
-			device,
-			pipeline,
-			{} as TexturePixelSource,
-			ANIMATION_SOURCE,
-			PHYSICS_SCRIPT_SOURCE,
-			// No runtime test triggers authored audio; a refusing device keeps that visible.
-			{ playOneShot: () => null, prepare: async () => {} },
-			PARTICLE_EMITTER_SOURCE,
-			SOUND_TABLE_SOURCE,
-			PARTICLE_MESH_SOURCE,
-			null,
-		);
+		const runtime = await buildTestRuntime({
+			device: device,
+			commitPipeline: pipeline,
+			setupVisualSource: null,
+		});
 
-		runtime.updateSceneInterest(buildingSceneInterest("0xda55ffff"));
+		runtime.updateSceneInterest(sceneInterest("0xda55ffff", "buildings"));
 		pipeline.resolveNext([promotedBuildingArtifact("0xda55ffff")]);
 		await new Promise((resolve) => setTimeout(resolve, 0));
 		runtime.tick(0);
@@ -1357,22 +1335,16 @@ describe("GamePresentationRuntime view and interest control", () => {
 	it("keeps promoted authored script scale in the browser effect domain", async () => {
 		const scriptId = "0x33000002" as DatAssetId;
 		const pipeline = new DeferredCommitPipeline();
-		const runtime = await buildGamePresentationRuntimeForTest(
-			{
+		const runtime = await buildTestRuntime({
+			device: {
 				buildRenderer: async () => testRenderer(),
 				resources: TEST_RESOURCES,
 			},
-			pipeline,
-			{} as TexturePixelSource,
-			ANIMATION_SOURCE,
-			scalePhysicsScriptSource(scriptId, 2),
-			{ playOneShot: () => null, prepare: async () => {} },
-			PARTICLE_EMITTER_SOURCE,
-			SOUND_TABLE_SOURCE,
-			PARTICLE_MESH_SOURCE,
-			null,
-		);
-		runtime.updateSceneInterest(buildingSceneInterest("0xda55ffff"));
+			commitPipeline: pipeline,
+			physicsScriptSource: scalePhysicsScriptSource(scriptId, 2),
+			setupVisualSource: null,
+		});
+		runtime.updateSceneInterest(sceneInterest("0xda55ffff", "buildings"));
 		pipeline.resolveNext([promotedBuildingArtifact("0xda55ffff", scriptId)]);
 		await new Promise((resolve) => setTimeout(resolve, 0));
 		runtime.tick(0);
@@ -1393,12 +1365,13 @@ describe("GamePresentationRuntime view and interest control", () => {
 	it("publishes the authored companion body when its optional script source is refused", async () => {
 		const scriptId: DatAssetId = "0x33000002";
 		const pipeline = new DeferredCommitPipeline();
-		const runtime = await buildGamePresentationRuntimeForTest(
-			{ buildRenderer: async () => testRenderer(), resources: TEST_RESOURCES },
-			pipeline,
-			{} as TexturePixelSource,
-			ANIMATION_SOURCE,
-			{
+		const runtime = await buildTestRuntime({
+			device: {
+				buildRenderer: async () => testRenderer(),
+				resources: TEST_RESOURCES,
+			},
+			commitPipeline: pipeline,
+			physicsScriptSource: {
 				destroy() {},
 				async loadPhysicsScript() {
 					throw new HostCommandError({
@@ -1412,13 +1385,9 @@ describe("GamePresentationRuntime view and interest control", () => {
 					});
 				},
 			},
-			{ playOneShot: () => null, prepare: async () => {} },
-			PARTICLE_EMITTER_SOURCE,
-			SOUND_TABLE_SOURCE,
-			PARTICLE_MESH_SOURCE,
-			null,
-		);
-		runtime.updateSceneInterest(buildingSceneInterest("0xda55ffff"));
+			setupVisualSource: null,
+		});
+		runtime.updateSceneInterest(sceneInterest("0xda55ffff", "buildings"));
 		pipeline.resolveNext([promotedBuildingArtifact("0xda55ffff", scriptId)]);
 		await vi.waitFor(() => {
 			runtime.tick(0);
@@ -1442,23 +1411,15 @@ describe("GamePresentationRuntime view and interest control", () => {
 			buildRenderer: async () => testRenderer(),
 			resources: TEST_RESOURCES,
 		};
-		const runtime = await buildGamePresentationRuntimeForTest(
-			device,
-			pipeline,
-			{} as TexturePixelSource,
-			ANIMATION_SOURCE,
-			PHYSICS_SCRIPT_SOURCE,
-			// No runtime test triggers authored audio; a refusing device keeps that visible.
-			{ playOneShot: () => null, prepare: async () => {} },
-			PARTICLE_EMITTER_SOURCE,
-			SOUND_TABLE_SOURCE,
-			PARTICLE_MESH_SOURCE,
-			null,
-		);
+		const runtime = await buildTestRuntime({
+			device: device,
+			commitPipeline: pipeline,
+			setupVisualSource: null,
+		});
 		const availability: SceneAvailabilityEvent[] = [];
 		runtime.subscribeSceneAvailability((event) => availability.push(event));
 
-		runtime.updateSceneInterest(objectSceneInterest("0xda55ffff"));
+		runtime.updateSceneInterest(sceneInterest("0xda55ffff", "objects"));
 		pipeline.resolveNext([promotedObjectArtifact("0xda55ffff")]);
 		await new Promise((resolve) => setTimeout(resolve, 0));
 		runtime.tick(0);
@@ -1490,23 +1451,15 @@ describe("GamePresentationRuntime view and interest control", () => {
 			buildRenderer: async () => testRenderer(),
 			resources: TEST_RESOURCES,
 		};
-		const runtime = await buildGamePresentationRuntimeForTest(
-			device,
-			pipeline,
-			{} as TexturePixelSource,
-			ANIMATION_SOURCE,
-			PHYSICS_SCRIPT_SOURCE,
-			// No runtime test triggers authored audio; a refusing device keeps that visible.
-			{ playOneShot: () => null, prepare: async () => {} },
-			PARTICLE_EMITTER_SOURCE,
-			SOUND_TABLE_SOURCE,
-			PARTICLE_MESH_SOURCE,
-			null,
-		);
+		const runtime = await buildTestRuntime({
+			device: device,
+			commitPipeline: pipeline,
+			setupVisualSource: null,
+		});
 		const availability: SceneAvailabilityEvent[] = [];
 		runtime.subscribeSceneAvailability((event) => availability.push(event));
 
-		runtime.updateSceneInterest(generatedSceneInterest("0xda55ffff"));
+		runtime.updateSceneInterest(sceneInterest("0xda55ffff", "generated"));
 		pipeline.resolveNext([promotedGeneratedArtifact("0xda55ffff")]);
 		await new Promise((resolve) => setTimeout(resolve, 0));
 		runtime.tick(0);
@@ -1542,19 +1495,18 @@ async function buildSoundRuntime(
 	const tableId = "0x20000001" as DatAssetId;
 	const entity = spawnedEntity(7, 3);
 	const visual = spawnedVisual();
-	const runtime = await buildGamePresentationRuntimeForTest(
-		{ buildRenderer: async () => testRenderer(), resources: TEST_RESOURCES },
-		{
+	const runtime = await buildTestRuntime({
+		device: {
+			buildRenderer: async () => testRenderer(),
+			resources: TEST_RESOURCES,
+		},
+		commitPipeline: {
 			async prepareLandblockLayers(layers) {
 				return [...layers].map(({ id }) => terrainArtifact(id));
 			},
 		},
-		new EchoTexturePixelSource(),
-		ANIMATION_SOURCE,
-		PHYSICS_SCRIPT_SOURCE,
-		audioDevice,
-		PARTICLE_EMITTER_SOURCE,
-		{
+		audioDevice: audioDevice,
+		soundTableSource: {
 			destroy() {},
 			async loadSoundTable(id) {
 				if (id !== tableId) throw new Error(`Unexpected sound table ${id}`);
@@ -1567,14 +1519,13 @@ async function buildSoundRuntime(
 				};
 			},
 		},
-		PARTICLE_MESH_SOURCE,
-		{
+		setupVisualSource: {
 			load: async () => ({
 				...visual,
 				behavior: { ...visual.behavior, soundTableId: tableId },
 			}),
 		},
-	);
+	});
 	await activateSpawnScene(runtime, "0x0001ffff", 1);
 	await runtime.upsertDynamicEntity(entity);
 	const origin = runtime.dynamicEntityOrigin(7);
@@ -1600,17 +1551,15 @@ async function settleSoundCues(): Promise<void> {
 describe("GamePresentationRuntime local scene models", () => {
 	it("keeps scene-driver lights independent from the viewer headlamp and clears their input", async () => {
 		const frames: FrameInput[] = [];
-		const runtime = await buildSpawnRuntime(
-			{ load: async () => spawnedVisual() },
-			ANIMATION_SOURCE,
-			testRenderer({
+		const runtime = await buildSpawnRuntime({
+			setupVisualSource: { load: async () => spawnedVisual() },
+			renderer: testRenderer({
 				drawFrame: (frame) => {
 					frames.push(frame);
 					return EMPTY_RENDERER_FRAME_FEEDBACK;
 				},
 			}),
-		);
-		onTestFinished(() => runtime.destroy());
+		});
 		const fill = {
 			position: sceneVec3(new Vec3(10, 3, -20)),
 			color: { red: 1, green: 0.9, blue: 0.8 },
@@ -1690,8 +1639,8 @@ describe("GamePresentationRuntime local scene models", () => {
 		const emitterId: DatAssetId = "0x32000001";
 		const meshId: DatAssetId = "0x01000001";
 		let particleRangeCount = 0;
-		const runtime = await buildGamePresentationRuntimeForTest(
-			{
+		const runtime = await buildTestRuntime({
+			device: {
 				resources: TEST_RESOURCES,
 				buildRenderer: async (world) =>
 					testRenderer({
@@ -1718,13 +1667,11 @@ describe("GamePresentationRuntime local scene models", () => {
 						},
 					}),
 			},
-			{
+			commitPipeline: {
 				prepareLandblockLayers: async (layers) =>
 					[...layers].map(({ id }) => terrainArtifact(id)),
 			},
-			new EchoTexturePixelSource(),
-			ANIMATION_SOURCE,
-			{
+			physicsScriptSource: {
 				destroy() {},
 				loadPhysicsScript: async () => ({
 					id: scriptId,
@@ -1763,31 +1710,17 @@ describe("GamePresentationRuntime local scene models", () => {
 					],
 				}),
 			},
-			{ playOneShot, prepare: async () => {} },
-			{
-				destroy() {},
-				loadParticleEmitter: async () => particleEmitterInfo(emitterId, meshId),
-			},
-			{
+			audioDevice: { playOneShot, prepare: async () => {} },
+			particleEmitterSource: singleEmitterSource(emitterId, meshId),
+			soundTableSource: {
 				destroy() {},
 				loadSoundTable: async () => ({
 					id: tableId,
 					entries: new Map([[0x94, [{ soundId, probability: 1, volume: 1 }]]]),
 				}),
 			},
-			{
-				destroy() {},
-				loadParticleMeshes: async () => ({
-					presentations: new Map([
-						[
-							meshId,
-							{ orientation: "authored" as const, presentation: visual },
-						],
-					]),
-					textureDependencies: [],
-				}),
-			},
-			{
+			particleMeshSource: singleMeshSource(meshId, visual),
+			setupVisualSource: {
 				load: async () => ({
 					...visual,
 					behavior: {
@@ -1813,8 +1746,7 @@ describe("GamePresentationRuntime local scene models", () => {
 					},
 				}),
 			},
-		);
-		onTestFinished(() => runtime.destroy());
+		});
 		await activateSpawnScene(runtime, "0x0001ffff", 1);
 		const block = createLandblockWorldOrigin("0x0001ffff");
 		runtime.setAudioListener({
@@ -2011,9 +1943,9 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 			const raisedFrame = Mat4.identity();
 			raisedFrame.m42 = envelopeHeight;
 			let instances: readonly CombatEffectInstance[] = [];
-			const runtime = await buildSpawnRuntime(
-				{ load: async () => appearanceVisual(meshHeight) },
-				{
+			const runtime = await buildSpawnRuntime({
+				setupVisualSource: { load: async () => appearanceVisual(meshHeight) },
+				animationSource: {
 					...ANIMATION_SOURCE,
 					async loadAnimation(id) {
 						return {
@@ -2026,7 +1958,7 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 						};
 					},
 				},
-				testRenderer({
+				renderer: testRenderer({
 					combatEffects: {
 						create: () => ({
 							setAppearance: vi.fn(),
@@ -2039,8 +1971,7 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 						}),
 					},
 				}),
-			);
-			onTestFinished(() => runtime.destroy());
+			});
 			const publishedHeights: number[] = [];
 			const updateBounds = SceneGraph.prototype.updateBounds;
 			const publishBounds = vi
@@ -2089,22 +2020,20 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 			},
 			release,
 		}));
-		const runtime = await buildSpawnRuntime(
-			{
+		const runtime = await buildSpawnRuntime({
+			setupVisualSource: {
 				load: async () => ({
 					...spawnedVisual(),
 					localBounds: new AABB3(new Vec3(-1, -1, 0), new Vec3(1, 1, 2)),
 				}),
 			},
-			ANIMATION_SOURCE,
-			testRenderer({
+			renderer: testRenderer({
 				combatEffects: { create },
 				destroy: async () => {
 					expect(release).toHaveBeenCalledTimes(1);
 				},
 			}),
-		);
-		onTestFinished(() => runtime.destroy());
+		});
 		expect(create).not.toHaveBeenCalled();
 		const entity = spawnedEntity(7, 3);
 		await runtime.replaceDynamicEntitySnapshot([entity]);
@@ -2163,12 +2092,10 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 	it("resolves and executes a live script cue for the installed generation", async () => {
 		const tableId = "0x34000001" as DatAssetId;
 		const scriptId = "0x33000001" as DatAssetId;
-		const runtime = await buildSpawnRuntime(
-			{ load: async () => spawnedVisual() },
-			ANIMATION_SOURCE,
-			undefined,
-			scalePhysicsScriptSource(scriptId, 2),
-			{
+		const runtime = await buildSpawnRuntime({
+			setupVisualSource: { load: async () => spawnedVisual() },
+			physicsScriptSource: scalePhysicsScriptSource(scriptId, 2),
+			physicsScriptTableSource: {
 				destroy() {},
 				async loadPhysicsScriptTable(requestedId) {
 					if (requestedId !== tableId)
@@ -2179,8 +2106,7 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 					};
 				},
 			},
-		);
-		const baseEntity = spawnedEntity(7, 3);
+		});
 		runtime.playDynamicEntityScriptCue({
 			guid: 7,
 			generation: 3,
@@ -2188,16 +2114,7 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 			intensity: 0.5,
 		});
 		await runtime.replaceDynamicEntitySnapshot([
-			{
-				...baseEntity,
-				presentation: {
-					...baseEntity.presentation,
-					content: {
-						...baseEntity.presentation.content,
-						physicsEffectTableDid: Number.parseInt(tableId.slice(2), 16),
-					},
-				},
-			},
+			withPhysicsEffectTable(spawnedEntity(7, 3), tableId),
 		]);
 		await vi.waitFor(() =>
 			expect(
@@ -2245,59 +2162,27 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 							},
 						},
 			);
-			const runtime = await buildSpawnRuntime(
-				{ load: async () => spawnedVisual() },
-				ANIMATION_SOURCE,
-				undefined,
-				{
-					destroy() {},
-					loadPhysicsScript: async () => ({
-						id: scriptId,
-						lengthSeconds: 0,
-						records: [
-							{
-								kind: "create-particle",
-								emitterInfoId: emitterId,
-								emitterId: 1,
-								partIndex: 0,
-								offsetOrigin: acVector3([0, 0, 0]),
-								startTime: 0,
-								authoredOrder: 0,
-							},
-						],
-					}),
-				},
-				{
-					destroy() {},
-					loadPhysicsScriptTable: async () => ({
-						id: tableId,
-						cues: new Map([[7, [{ maximumIntensity: 1, scriptId }]]]),
-					}),
-				},
-				{
-					destroy() {},
-					async loadParticleEmitter() {
-						if (broken && failedSource === "emitter") throw refusal;
-						return particleEmitterInfo(emitterId, meshId);
-					},
-				},
-				{
-					destroy() {},
-					async loadParticleMeshes() {
-						if (broken && failedSource === "mesh") throw refusal;
-						return {
-							presentations: new Map([
-								[
-									meshId,
-									{ orientation: "authored", presentation: spawnedVisual() },
-								],
-							]),
-							textureDependencies: [],
-						};
-					},
-				},
-			);
-			onTestFinished(() => runtime.destroy());
+			const runtime = await buildSpawnRuntime({
+				setupVisualSource: { load: async () => spawnedVisual() },
+				physicsScriptSource: particleScriptSource(scriptId, emitterId),
+				physicsScriptTableSource: scriptTableSource(tableId, [[7, scriptId]]),
+				particleEmitterSource: emitterSource(async () => {
+					if (broken && failedSource === "emitter") throw refusal;
+					return particleEmitterInfo(emitterId, meshId);
+				}),
+				particleMeshSource: meshSource(async () => {
+					if (broken && failedSource === "mesh") throw refusal;
+					return {
+						presentations: new Map([
+							[
+								meshId,
+								{ orientation: "authored", presentation: spawnedVisual() },
+							],
+						]),
+						textureDependencies: [],
+					};
+				}),
+			});
 			await runtime.upsertDynamicEntity(
 				withPhysicsEffectTable(spawnedEntity(7, 3), tableId),
 			);
@@ -2360,54 +2245,16 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 					clear() {},
 				},
 			});
-			const runtime = await buildSpawnRuntime(
-				{ load: async () => spawnedVisual() },
-				ANIMATION_SOURCE,
-				renderer,
-				{
-					destroy() {},
-					loadPhysicsScript: async () => ({
-						id: scriptId,
-						lengthSeconds: 0,
-						records: [
-							{
-								kind: "create-particle",
-								emitterInfoId: emitterId,
-								emitterId: 1,
-								partIndex: 0,
-								offsetOrigin: acVector3([0, 0, 0]),
-								startTime: 0,
-								authoredOrder: 0,
-							},
-						],
-					}),
-				},
-				{
-					destroy() {},
-					loadPhysicsScriptTable: async () => ({
-						id: tableId,
-						cues: new Map([[explodeCue, [{ maximumIntensity: 1, scriptId }]]]),
-					}),
-				},
-				{
-					destroy() {},
-					loadParticleEmitter: async () =>
-						particleEmitterInfo(emitterId, meshId),
-				},
-				{
-					destroy() {},
-					loadParticleMeshes: async () => ({
-						presentations: new Map([
-							[
-								meshId,
-								{ orientation: "authored", presentation: spawnedVisual() },
-							],
-						]),
-						textureDependencies: [],
-					}),
-				},
-			);
-			onTestFinished(() => runtime.destroy());
+			const runtime = await buildSpawnRuntime({
+				setupVisualSource: { load: async () => spawnedVisual() },
+				renderer: renderer,
+				physicsScriptSource: particleScriptSource(scriptId, emitterId),
+				physicsScriptTableSource: scriptTableSource(tableId, [
+					[explodeCue, scriptId],
+				]),
+				particleEmitterSource: singleEmitterSource(emitterId, meshId),
+				particleMeshSource: singleMeshSource(meshId),
+			});
 			const entity = withPhysicsEffectTable(
 				spawnedEntity(7, 3, { [flag]: true }),
 				tableId,
@@ -2461,30 +2308,14 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 				);
 			throw new Error(`Unexpected physics script ${scriptId}.`);
 		});
-		const runtime = await buildSpawnRuntime(
-			{ load: async () => spawnedVisual() },
-			ANIMATION_SOURCE,
-			undefined,
-			{ destroy() {}, loadPhysicsScript: loadScript },
-			{
-				destroy() {},
-				async loadPhysicsScriptTable() {
-					return {
-						id: tableId,
-						cues: new Map([
-							[
-								RETAIL_UNHIDE_PHYSICS_SCRIPT_CUE,
-								[{ maximumIntensity: 1, scriptId: unhideScriptId }],
-							],
-							[
-								RETAIL_HIDDEN_PHYSICS_SCRIPT_CUE,
-								[{ maximumIntensity: 1, scriptId: hiddenScriptId }],
-							],
-						]),
-					};
-				},
-			},
-		);
+		const runtime = await buildSpawnRuntime({
+			setupVisualSource: { load: async () => spawnedVisual() },
+			physicsScriptSource: scriptSource(loadScript),
+			physicsScriptTableSource: scriptTableSource(tableId, [
+				[RETAIL_UNHIDE_PHYSICS_SCRIPT_CUE, unhideScriptId],
+				[RETAIL_HIDDEN_PHYSICS_SCRIPT_CUE, hiddenScriptId],
+			]),
+		});
 		const entity = (hidden: boolean): DynamicEntityView => {
 			return withPhysicsEffectTable(spawnedEntity(7, 3, { hidden }), tableId);
 		};
@@ -2564,8 +2395,8 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 				);
 			});
 			const startupVisual = controlledPromise<DecodedStaticPresentation>();
-			const runtime = await buildSpawnRuntime(
-				{
+			const runtime = await buildSpawnRuntime({
+				setupVisualSource: {
 					load: async (setup) => {
 						if (scenario === "startup") return startupVisual.promise;
 						if (scenario === "layout" && setup === 0x02000002) {
@@ -2585,29 +2416,13 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 						return spawnedVisual();
 					},
 				},
-				ANIMATION_SOURCE,
-				undefined,
-				{ destroy() {}, loadPhysicsScript: loadScript },
-				{
-					destroy() {},
-					async loadPhysicsScriptTable() {
-						return {
-							id: tableId,
-							cues: new Map([
-								[0x74, [{ maximumIntensity: 1, scriptId: hideScriptId }]],
-								[
-									RETAIL_HIDDEN_PHYSICS_SCRIPT_CUE,
-									[{ maximumIntensity: 1, scriptId: hiddenScriptId }],
-								],
-								[
-									RETAIL_UNHIDE_PHYSICS_SCRIPT_CUE,
-									[{ maximumIntensity: 1, scriptId: unhideScriptId }],
-								],
-							]),
-						};
-					},
-				},
-			);
+				physicsScriptSource: scriptSource(loadScript),
+				physicsScriptTableSource: scriptTableSource(tableId, [
+					[0x74, hideScriptId],
+					[RETAIL_HIDDEN_PHYSICS_SCRIPT_CUE, hiddenScriptId],
+					[RETAIL_UNHIDE_PHYSICS_SCRIPT_CUE, unhideScriptId],
+				]),
+			});
 			onTestFinished(async () => {
 				startupVisual.resolve(spawnedVisual());
 				delayed.resolve(
@@ -2729,21 +2544,21 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 				"samplePresentation",
 			);
 			onTestFinished(() => materialSamples.mockRestore());
-			const runtime = await buildSpawnRuntime(
-				{
+			const runtime = await buildSpawnRuntime({
+				setupVisualSource: {
 					load: async (setup) => ({
 						...spawnedVisual(),
 						setupId: setup === 0x02000002 ? "0x02000002" : "0x02000001",
 					}),
 				},
-				{
+				animationSource: {
 					...ANIMATION_SOURCE,
 					async loadAnimation(id) {
 						await animationReady.promise;
 						return ANIMATION_SOURCE.loadAnimation(id);
 					},
 				},
-				testRenderer({
+				renderer: testRenderer({
 					drawFrame: () => ({
 						...EMPTY_RENDERER_FRAME_FEEDBACK,
 						selectedDynamicNodeIds: selectedNodes,
@@ -2759,7 +2574,7 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 						clear() {},
 					},
 				}),
-				{
+				physicsScriptSource: {
 					destroy() {},
 					async loadPhysicsScript(id) {
 						if (id === hiddenId)
@@ -2812,40 +2627,13 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 						};
 					},
 				},
-				{
-					destroy() {},
-					loadPhysicsScriptTable: async () => ({
-						id: tableId,
-						cues: new Map([
-							[
-								RETAIL_HIDDEN_PHYSICS_SCRIPT_CUE,
-								[{ maximumIntensity: 1, scriptId: hiddenId }],
-							],
-							[
-								RETAIL_UNHIDE_PHYSICS_SCRIPT_CUE,
-								[{ maximumIntensity: 1, scriptId: unhideId }],
-							],
-						]),
-					}),
-				},
-				{
-					destroy() {},
-					loadParticleEmitter: async () =>
-						particleEmitterInfo(emitterId, meshId),
-				},
-				{
-					destroy() {},
-					loadParticleMeshes: async () => ({
-						presentations: new Map([
-							[
-								meshId,
-								{ orientation: "authored", presentation: spawnedVisual() },
-							],
-						]),
-						textureDependencies: [],
-					}),
-				},
-			);
+				physicsScriptTableSource: scriptTableSource(tableId, [
+					[RETAIL_HIDDEN_PHYSICS_SCRIPT_CUE, hiddenId],
+					[RETAIL_UNHIDE_PHYSICS_SCRIPT_CUE, unhideId],
+				]),
+				particleEmitterSource: singleEmitterSource(emitterId, meshId),
+				particleMeshSource: singleMeshSource(meshId),
+			});
 			onTestFinished(async () => {
 				animationReady.resolve();
 				unhideReady.resolve();
@@ -2927,8 +2715,8 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 			await animation.promise;
 			return ANIMATION_SOURCE.loadAnimation(id);
 		});
-		const runtime = await buildSpawnRuntime(
-			{
+		const runtime = await buildSpawnRuntime({
+			setupVisualSource: {
 				load: async (_setup, appearance) => {
 					const visual = spawnedVisual();
 					return appearance.paletteDid === 1
@@ -2945,22 +2733,12 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 						: visual;
 				},
 			},
-			{ ...ANIMATION_SOURCE, loadAnimation },
-			undefined,
-			scalePhysicsScriptSource(scriptId, 2),
-			{
-				destroy() {},
-				loadPhysicsScriptTable: async () => ({
-					id: tableId,
-					cues: new Map([
-						[
-							RETAIL_HIDDEN_PHYSICS_SCRIPT_CUE,
-							[{ maximumIntensity: 1, scriptId }],
-						],
-					]),
-				}),
-			},
-		);
+			animationSource: { ...ANIMATION_SOURCE, loadAnimation },
+			physicsScriptSource: scalePhysicsScriptSource(scriptId, 2),
+			physicsScriptTableSource: scriptTableSource(tableId, [
+				[RETAIL_HIDDEN_PHYSICS_SCRIPT_CUE, scriptId],
+			]),
+		});
 		onTestFinished(async () => {
 			animation.resolve();
 			await runtime.destroy();
@@ -3011,8 +2789,8 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 			const loadScript = vi.fn(
 				scalePhysicsScriptSource(scriptId, 2).loadPhysicsScript,
 			);
-			const runtime = await buildSpawnRuntime(
-				{
+			const runtime = await buildSpawnRuntime({
+				setupVisualSource: {
 					load: async () => {
 						const visual = spawnedVisual();
 						return {
@@ -3027,17 +2805,19 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 						};
 					},
 				},
-				{
+				animationSource: {
 					...ANIMATION_SOURCE,
 					async loadAnimation(id) {
 						await animationReady.promise;
 						return ANIMATION_SOURCE.loadAnimation(id);
 					},
 				},
-				undefined,
-				{ destroy() {}, loadPhysicsScript: loadScript },
-				{ destroy() {}, loadPhysicsScriptTable: loadTable },
-			);
+				physicsScriptSource: scriptSource(loadScript),
+				physicsScriptTableSource: {
+					destroy() {},
+					loadPhysicsScriptTable: loadTable,
+				},
+			});
 			const cue = { guid: 7, generation: 3, cue: 7, intensity: 0.5 };
 			runtime.playDynamicEntityScriptCue(cue);
 			const installation = runtime.replaceDynamicEntitySnapshot([
@@ -3089,11 +2869,9 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 				Awaited<ReturnType<PhysicsScriptSource["loadPhysicsScript"]>>
 			>();
 		const requestedScripts: DatAssetId[] = [];
-		const runtime = await buildSpawnRuntime(
-			{ load: async () => spawnedVisual() },
-			ANIMATION_SOURCE,
-			undefined,
-			{
+		const runtime = await buildSpawnRuntime({
+			setupVisualSource: { load: async () => spawnedVisual() },
+			physicsScriptSource: {
 				destroy() {},
 				async loadPhysicsScript(scriptId) {
 					requestedScripts.push(scriptId);
@@ -3105,31 +2883,13 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 					);
 				},
 			},
-			{
-				destroy() {},
-				async loadPhysicsScriptTable() {
-					return {
-						id: tableId,
-						cues: new Map([
-							[7, [{ maximumIntensity: 1, scriptId: firstScriptId }]],
-							[8, [{ maximumIntensity: 1, scriptId: secondScriptId }]],
-						]),
-					};
-				},
-			},
-		);
-		const baseEntity = spawnedEntity(7, 3);
+			physicsScriptTableSource: scriptTableSource(tableId, [
+				[7, firstScriptId],
+				[8, secondScriptId],
+			]),
+		});
 		await runtime.replaceDynamicEntitySnapshot([
-			{
-				...baseEntity,
-				presentation: {
-					...baseEntity.presentation,
-					content: {
-						...baseEntity.presentation.content,
-						physicsEffectTableDid: Number.parseInt(tableId.slice(2), 16),
-					},
-				},
-			},
+			withPhysicsEffectTable(spawnedEntity(7, 3), tableId),
 		]);
 
 		runtime.playDynamicEntityScriptCue({
@@ -3186,40 +2946,16 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 				Awaited<ReturnType<PhysicsScriptSource["loadPhysicsScript"]>>
 			>();
 		let scriptRequested = false;
-		const runtime = await buildSpawnRuntime(
-			{ load: async () => spawnedVisual() },
-			ANIMATION_SOURCE,
-			undefined,
-			{
-				destroy() {},
-				loadPhysicsScript: () => {
-					scriptRequested = true;
-					return delayedScript.promise;
-				},
-			},
-			{
-				destroy() {},
-				async loadPhysicsScriptTable() {
-					return {
-						id: tableId,
-						cues: new Map([[7, [{ maximumIntensity: 1, scriptId }]]]),
-					};
-				},
-			},
-		);
-		const withTable = (generation: number): DynamicEntityView => {
-			const entity = spawnedEntity(7, generation);
-			return {
-				...entity,
-				presentation: {
-					...entity.presentation,
-					content: {
-						...entity.presentation.content,
-						physicsEffectTableDid: Number.parseInt(tableId.slice(2), 16),
-					},
-				},
-			};
-		};
+		const runtime = await buildSpawnRuntime({
+			setupVisualSource: { load: async () => spawnedVisual() },
+			physicsScriptSource: scriptSource(() => {
+				scriptRequested = true;
+				return delayedScript.promise;
+			}),
+			physicsScriptTableSource: scriptTableSource(tableId, [[7, scriptId]]),
+		});
+		const withTable = (generation: number): DynamicEntityView =>
+			withPhysicsEffectTable(spawnedEntity(7, generation), tableId);
 		await runtime.replaceDynamicEntitySnapshot([withTable(3)]);
 		runtime.playDynamicEntityScriptCue({
 			guid: 7,
@@ -3272,9 +3008,9 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 				]),
 				textureDependencies: [],
 			}));
-			const runtime = await buildSpawnRuntime(
-				{ load: async () => spawnedVisual() },
-				{
+			const runtime = await buildSpawnRuntime({
+				setupVisualSource: { load: async () => spawnedVisual() },
+				animationSource: {
 					...MOTION_TABLE_ANIMATION_SOURCE,
 					async loadAnimation(id) {
 						const animation = await ANIMATION_SOURCE.loadAnimation(id);
@@ -3297,7 +3033,7 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 						};
 					},
 				},
-				testRenderer({
+				renderer: testRenderer({
 					drawFrame(frame) {
 						return {
 							...EMPTY_RENDERER_FRAME_FEEDBACK,
@@ -3315,11 +3051,11 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 						clear() {},
 					},
 				}),
-				undefined,
-				undefined,
-				{ destroy() {}, loadParticleEmitter: loadEmitter },
-				{ destroy() {}, loadParticleMeshes: loadMeshes },
-			);
+				physicsScriptSource: undefined,
+				physicsScriptTableSource: undefined,
+				particleEmitterSource: emitterSource(loadEmitter),
+				particleMeshSource: meshSource(loadMeshes),
+			});
 			const entity =
 				lane === "default"
 					? spawnedEntity(1, 1)
@@ -3407,8 +3143,8 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 			const meshId = "0x01000001" as DatAssetId;
 			const delayedEmitter = controlledPromise<DecodedParticleEmitterInfo>();
 			let emitterRequested = false;
-			const runtime = await buildSpawnRuntime(
-				{
+			const runtime = await buildSpawnRuntime({
+				setupVisualSource: {
 					load: async (setup, appearance) => {
 						const visual = appearanceVisual(
 							appearance.paletteDid === 2 ? 2 : 1,
@@ -3423,62 +3159,17 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 						};
 					},
 				},
-				ANIMATION_SOURCE,
-				undefined,
-				{
-					destroy() {},
-					async loadPhysicsScript() {
-						return {
-							id: scriptId,
-							lengthSeconds: 0,
-							records: [
-								{
-									authoredOrder: 0,
-									emitterId: 0,
-									emitterInfoId: emitterId,
-									kind: "create-particle" as const,
-									offsetOrigin: acVector3([0, 0, 0]),
-									partIndex,
-									startTime: 0,
-								},
-							],
-						};
-					},
-				},
-				{
-					destroy() {},
-					async loadPhysicsScriptTable() {
-						return {
-							id: tableId,
-							cues: new Map([[7, [{ maximumIntensity: 1, scriptId }]]]),
-						};
-					},
-				},
-				{
-					destroy() {},
-					loadParticleEmitter: () => {
-						emitterRequested = true;
-						return delayedEmitter.promise;
-					},
-				},
-				{
-					destroy() {},
-					async loadParticleMeshes() {
-						return {
-							presentations: new Map([
-								[
-									meshId,
-									{
-										orientation: "authored" as const,
-										presentation: spawnedVisual(),
-									},
-								],
-							]),
-							textureDependencies: [],
-						};
-					},
-				},
-			);
+				physicsScriptSource: particleScriptSource(scriptId, emitterId, {
+					emitterId: 0,
+					partIndex,
+				}),
+				physicsScriptTableSource: scriptTableSource(tableId, [[7, scriptId]]),
+				particleEmitterSource: emitterSource(() => {
+					emitterRequested = true;
+					return delayedEmitter.promise;
+				}),
+				particleMeshSource: singleMeshSource(meshId),
+			});
 			const baseEntity = spawnedEntity(7, 3);
 			await runtime.replaceDynamicEntitySnapshot([
 				{
@@ -3570,12 +3261,10 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 				soundTableId: null,
 			},
 		};
-		const runtime = await buildSpawnRuntime(
-			{ load: async () => scriptedVisual },
-			ANIMATION_SOURCE,
-			undefined,
-			scalePhysicsScriptSource(scriptId, 8),
-		);
+		const runtime = await buildSpawnRuntime({
+			setupVisualSource: { load: async () => scriptedVisual },
+			physicsScriptSource: scalePhysicsScriptSource(scriptId, 8),
+		});
 		const baseEntity = spawnedEntity(7, 1);
 		const entity: DynamicEntityView = {
 			...baseEntity,
@@ -3599,16 +3288,15 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 
 	it("publishes the installed generation identity of the viewer-driven entity", async () => {
 		const frames: FrameInput[] = [];
-		const runtime = await buildSpawnRuntime(
-			{ load: async () => spawnedVisual() },
-			ANIMATION_SOURCE,
-			testRenderer({
+		const runtime = await buildSpawnRuntime({
+			setupVisualSource: { load: async () => spawnedVisual() },
+			renderer: testRenderer({
 				drawFrame(input) {
 					frames.push(input);
 					return EMPTY_RENDERER_FRAME_FEEDBACK;
 				},
 			}),
-		);
+		});
 		await runtime.replaceDynamicEntitySnapshot([spawnedEntity(7, 3)]);
 		runtime.setViewerEntity(7);
 		setTestCamera(runtime, {
@@ -3636,16 +3324,15 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 
 	it("resolves the selected GUID to its current installed node at draw time", async () => {
 		const frames: FrameInput[] = [];
-		const runtime = await buildSpawnRuntime(
-			{ load: async () => spawnedVisual() },
-			ANIMATION_SOURCE,
-			testRenderer({
+		const runtime = await buildSpawnRuntime({
+			setupVisualSource: { load: async () => spawnedVisual() },
+			renderer: testRenderer({
 				drawFrame(input) {
 					frames.push(input);
 					return EMPTY_RENDERER_FRAME_FEEDBACK;
 				},
 			}),
-		);
+		});
 		const portalBase = spawnedEntity(8, 3);
 		const portal = {
 			...portalBase,
@@ -3768,12 +3455,12 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 
 	it("installs an outdoor player that also reaches an unloaded EnvCell", async () => {
 		const landblockId = "0x0001ffff";
-		const runtime = await buildGamePresentationRuntimeForTest(
-			{
+		const runtime = await buildTestRuntime({
+			device: {
 				buildRenderer: async () => testRenderer(),
 				resources: TEST_RESOURCES,
 			},
-			{
+			commitPipeline: {
 				async prepareLandblockLayers(layers) {
 					return [...layers].map(({ id: requested, layer }) => {
 						if (layer !== LandblockLayerKind.Terrain)
@@ -3782,15 +3469,8 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 					});
 				},
 			},
-			new EchoTexturePixelSource(),
-			ANIMATION_SOURCE,
-			PHYSICS_SCRIPT_SOURCE,
-			{ playOneShot: () => null, prepare: async () => {} },
-			PARTICLE_EMITTER_SOURCE,
-			SOUND_TABLE_SOURCE,
-			PARTICLE_MESH_SOURCE,
-			{ load: async () => spawnedVisual() },
-		);
+			setupVisualSource: { load: async () => spawnedVisual() },
+		});
 		const receipt = await runtime.activateScene({
 			generation: 7,
 			target: sceneInterest(landblockId),
@@ -3868,10 +3548,10 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 	/// misses every transition that happened while its visual was decoding, so realization has to
 	/// be able to ask what it is playing rather than wait to be told that it changed.
 	it("plays the clip its view states when the entity is realized", async () => {
-		const runtime = await buildSpawnRuntime(
-			{ load: async () => spawnedVisual() },
-			MOTION_TABLE_ANIMATION_SOURCE,
-		);
+		const runtime = await buildSpawnRuntime({
+			setupVisualSource: { load: async () => spawnedVisual() },
+			animationSource: MOTION_TABLE_ANIMATION_SOURCE,
+		});
 
 		await runtime.replaceDynamicEntitySnapshot([
 			motionDrivenEntity(1, {
@@ -3901,9 +3581,9 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 	] as const)(
 		"preserves independent locomotion through $change and snapshots for $entityClass",
 		async ({ change, entityClass }) => {
-			const runtime = await buildSpawnRuntime(
-				{ load: async () => humanoidVisual() },
-				{
+			const runtime = await buildSpawnRuntime({
+				setupVisualSource: { load: async () => humanoidVisual() },
+				animationSource: {
 					...MOTION_TABLE_ANIMATION_SOURCE,
 					async loadAnimation(id) {
 						return {
@@ -3922,7 +3602,7 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 						};
 					},
 				},
-			);
+			});
 			// The test renderer reports no visible nodes. Use full sampling cadence so assertions
 			// after same-time snapshots inspect the newly selected pose rather than an offscreen cache.
 			runtime.setOffscreenAnimationSampleIntervalSeconds(0);
@@ -4077,10 +3757,10 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 	/// The control for the test above: playback comes from the stated level and nothing else, so an
 	/// entity stating none is realized silent rather than incidentally animated.
 	it("realizes an entity stating no clip without any playback", async () => {
-		const runtime = await buildSpawnRuntime(
-			{ load: async () => spawnedVisual() },
-			MOTION_TABLE_ANIMATION_SOURCE,
-		);
+		const runtime = await buildSpawnRuntime({
+			setupVisualSource: { load: async () => spawnedVisual() },
+			animationSource: MOTION_TABLE_ANIMATION_SOURCE,
+		});
 
 		await runtime.replaceDynamicEntitySnapshot([motionDrivenEntity(1, null)]);
 		setTestCamera(runtime, SPAWN_TEST_CAMERA);
@@ -4137,8 +3817,8 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 	);
 
 	it("keeps advancing animation in phase with an unchanged entity through appearance replacement", async () => {
-		const runtime = await buildSpawnRuntime(
-			{
+		const runtime = await buildSpawnRuntime({
+			setupVisualSource: {
 				load: async (_setup, appearance) => {
 					const visual = appearanceVisual(1);
 					return {
@@ -4150,7 +3830,7 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 					};
 				},
 			},
-			{
+			animationSource: {
 				...ANIMATION_SOURCE,
 				async loadAnimation(id) {
 					const partFrames = Array.from({ length: 120 }, (_, index) => {
@@ -4168,7 +3848,7 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 					};
 				},
 			},
-		);
+		});
 		await runtime.replaceDynamicEntitySnapshot([
 			spawnedEntity(7, 1),
 			spawnedEntity(8, 1),
@@ -4227,46 +3907,12 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 		const scriptId = "0x33000001" as DatAssetId;
 		const emitterId = "0x32000001" as DatAssetId;
 		const meshId = "0x01000001" as DatAssetId;
-		const runtime = await buildSpawnRuntime(
-			{ load: async () => spawnedVisual() },
-			ANIMATION_SOURCE,
-			undefined,
-			{
-				destroy() {},
-				loadPhysicsScript: async () => ({
-					id: scriptId,
-					lengthSeconds: 0,
-					records: [
-						{
-							kind: "create-particle",
-							emitterInfoId: emitterId,
-							emitterId: 1,
-							partIndex: 0,
-							offsetOrigin: acVector3([0, 0, 0]),
-							startTime: 0,
-							authoredOrder: 0,
-						},
-					],
-				}),
-			},
-			PHYSICS_SCRIPT_TABLE_SOURCE,
-			{
-				destroy() {},
-				loadParticleEmitter: async () => particleEmitterInfo(emitterId, meshId),
-			},
-			{
-				destroy() {},
-				loadParticleMeshes: async () => ({
-					presentations: new Map([
-						[
-							meshId,
-							{ orientation: "authored", presentation: spawnedVisual() },
-						],
-					]),
-					textureDependencies: [],
-				}),
-			},
-		);
+		const runtime = await buildSpawnRuntime({
+			setupVisualSource: { load: async () => spawnedVisual() },
+			physicsScriptSource: particleScriptSource(scriptId, emitterId),
+			particleEmitterSource: singleEmitterSource(emitterId, meshId),
+			particleMeshSource: singleMeshSource(meshId),
+		});
 		try {
 			const entity = spawnedEntity(7, 1);
 			await runtime.upsertDynamicEntity(entity);
@@ -4371,7 +4017,6 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 			const runtime = await buildSpawnRuntime({
 				load: async () => heldVisual(),
 			});
-			onTestFinished(() => runtime.destroy());
 			const parent = spawnedEntity(7, 1);
 			const child = attachedEntity(8, 1, 7);
 			await runtime.replaceDynamicEntitySnapshot([
@@ -4419,8 +4064,8 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 		"prepares one continuous leash across %s endpoint scopes",
 		async (boundary) => {
 			const frames: FrameInput[] = [];
-			const runtime = await buildSpawnRuntime(
-				{
+			const runtime = await buildSpawnRuntime({
+				setupVisualSource: {
 					load: async () => {
 						const visual = heldVisual();
 						for (const part of visual.presentation.parts) {
@@ -4433,15 +4078,13 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 						return visual;
 					},
 				},
-				ANIMATION_SOURCE,
-				testRenderer({
+				renderer: testRenderer({
 					drawFrame: (input) => {
 						frames.push(input);
 						return EMPTY_RENDERER_FRAME_FEEDBACK;
 					},
 				}),
-			);
-			onTestFinished(() => runtime.destroy());
+			});
 			setTestCamera(runtime, SPAWN_TEST_CAMERA);
 			const source = spawnedEntity(7, 1);
 			const summon = {
@@ -4522,7 +4165,6 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 			const runtime = await buildSpawnRuntime({
 				load: async () => heldVisual(),
 			});
-			onTestFinished(() => runtime.destroy());
 			setTestCamera(runtime, SPAWN_TEST_CAMERA);
 			await runtime.replaceDynamicEntitySnapshot([
 				spawnedEntity(7, 1),
@@ -4576,7 +4218,6 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 				setupId: `0x${setup.toString(16).padStart(8, "0")}` as DatAssetId,
 			}),
 		});
-		onTestFinished(() => runtime.destroy());
 		const parent = spawnedEntity(7, 1, { hidden: true });
 		await runtime.replaceDynamicEntitySnapshot([parent, spawnedEntity(10, 1)]);
 		await runtime.upsertDynamicEntity(attachedEntity(8, 1, 7));
@@ -4907,10 +4548,9 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 	it("resolves overlay frames by generation without triggering nameplate texture re-rasterization", async () => {
 		const delayed = controlledPromise<DecodedStaticPresentation>();
 		const observedPresentations: Array<EntityOverlayPresentation | null> = [];
-		const runtime = await buildSpawnRuntime(
-			{ load: () => delayed.promise },
-			ANIMATION_SOURCE,
-			testRenderer({
+		const runtime = await buildSpawnRuntime({
+			setupVisualSource: { load: () => delayed.promise },
+			renderer: testRenderer({
 				drawFrame(input) {
 					const nodeId = input.selectionTarget?.nodeId;
 					observedPresentations.push(
@@ -4921,7 +4561,7 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 					return EMPTY_RENDERER_FRAME_FEEDBACK;
 				},
 			}),
-		);
+		});
 		const updateContent = vi.spyOn(
 			DynamicEntitySystem.prototype,
 			"updateNameplateContent",
@@ -5056,10 +4696,12 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 
 	it("keeps hydration desired-only until its exact terrain residency publishes", async () => {
 		let visualLoads = 0;
-		const runtime = await buildUnscopedSpawnRuntime({
-			async load() {
-				visualLoads += 1;
-				return spawnedVisual();
+		const runtime = await buildTestRuntime({
+			setupVisualSource: {
+				async load() {
+					visualLoads += 1;
+					return spawnedVisual();
+				},
 			},
 		});
 		const entity = spawnedEntity(7, 1);
@@ -5328,26 +4970,19 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 
 	it("replaces outdoor demand with dungeon demand and reacquires it when returning", async () => {
 		const requests: LandblockIdLayer[][] = [];
-		const runtime = await buildGamePresentationRuntimeForTest(
-			{
+		const runtime = await buildTestRuntime({
+			device: {
 				buildRenderer: async () => testRenderer(),
 				resources: TEST_RESOURCES,
 			},
-			{
+			commitPipeline: {
 				async prepareLandblockLayers(layers) {
 					requests.push([...layers]);
 					return [];
 				},
 			},
-			{} as TexturePixelSource,
-			ANIMATION_SOURCE,
-			PHYSICS_SCRIPT_SOURCE,
-			{ playOneShot: () => null, prepare: async () => {} },
-			PARTICLE_EMITTER_SOURCE,
-			SOUND_TABLE_SOURCE,
-			PARTICLE_MESH_SOURCE,
-			null,
-		);
+			setupVisualSource: null,
+		});
 		const outdoor = sceneInterest("0xda55ffff");
 		const outdoorWithEnv = {
 			...outdoor,
@@ -5452,25 +5087,18 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 	});
 
 	it("filters ambient EnvCells for outdoor intent and replaces it with explicit dungeon demand", async () => {
-		const runtime = await buildGamePresentationRuntimeForTest(
-			{
+		const runtime = await buildTestRuntime({
+			device: {
 				buildRenderer: async () => testRenderer(),
 				resources: TEST_RESOURCES,
 			},
-			{
+			commitPipeline: {
 				async prepareLandblockLayers() {
 					return [];
 				},
 			},
-			{} as TexturePixelSource,
-			ANIMATION_SOURCE,
-			PHYSICS_SCRIPT_SOURCE,
-			{ playOneShot: () => null, prepare: async () => {} },
-			PARTICLE_EMITTER_SOURCE,
-			SOUND_TABLE_SOURCE,
-			PARTICLE_MESH_SOURCE,
-			null,
-		);
+			setupVisualSource: null,
+		});
 		const radii = {
 			buildingRadius: 0,
 			envCellRadius: 0,
@@ -5548,8 +5176,8 @@ describe("opt-in distant animation sampling", () => {
 		onTestFinished(() => publication.mockRestore());
 		let selectedNodeIds: readonly SceneNodeId[] = [];
 		let rendererShowsRoot = true;
-		const runtime = await buildSpawnRuntime(
-			{
+		const runtime = await buildSpawnRuntime({
+			setupVisualSource: {
 				load: async () => {
 					const visual = spawnedVisual();
 					return {
@@ -5570,8 +5198,8 @@ describe("opt-in distant animation sampling", () => {
 					};
 				},
 			},
-			MOTION_TABLE_ANIMATION_SOURCE,
-			testRenderer({
+			animationSource: MOTION_TABLE_ANIMATION_SOURCE,
+			renderer: testRenderer({
 				drawFrame: () => {
 					if (selectedNodeIds.length === 0) {
 						const samples = publication.mock.calls.at(-1)?.[0];
@@ -5585,7 +5213,7 @@ describe("opt-in distant animation sampling", () => {
 					};
 				},
 			}),
-		);
+		});
 		runtime.setDistantAnimationSampling(null);
 		runtime.setOffscreenAnimationSampleIntervalSeconds(1);
 		const entity = motionDrivenEntity(7, {
@@ -5799,63 +5427,96 @@ describe("opt-in distant animation sampling", () => {
 	});
 });
 
-async function buildSpawnRuntime(
-	setupVisualSource: SetupVisualSource,
-	animationSource: AnimationAssetSource = ANIMATION_SOURCE,
-	renderer?: Renderer,
-	physicsScriptSource: PhysicsScriptSource = PHYSICS_SCRIPT_SOURCE,
-	physicsScriptTableSource: PhysicsScriptTableSource = PHYSICS_SCRIPT_TABLE_SOURCE,
-	particleEmitterSource: ParticleEmitterSource = PARTICLE_EMITTER_SOURCE,
-	particleMeshSource: ParticleMeshSource = PARTICLE_MESH_SOURCE,
+interface TestRuntimeOptions {
+	readonly device?: GamePresentationRuntimeRenderDevice;
+	readonly renderer?: Renderer;
+	readonly commitPipeline?: CommitPipeline;
+	readonly texturePixelSource?: TexturePixelSource;
+	readonly animationSource?: AnimationAssetSource;
+	readonly physicsScriptSource?: PhysicsScriptSource;
+	readonly physicsScriptTableSource?: PhysicsScriptTableSource;
+	readonly audioDevice?: GamePresentationRuntimeDependencies["audioDevice"];
+	readonly particleEmitterSource?: ParticleEmitterSource;
+	readonly soundTableSource?: SoundTableSource;
+	readonly particleMeshSource?: ParticleMeshSource;
+	readonly setupVisualSource?: SetupVisualSource | null;
+	readonly activateLandblock?: LandblockOwnerId | null;
+	readonly autoDestroy?: boolean;
+}
+
+async function buildTestRuntime(
+	options: TestRuntimeOptions = {},
 ): Promise<GamePresentationRuntime> {
-	const runtime = await buildUnscopedSpawnRuntime(
-		setupVisualSource,
+	const animationSource = options.animationSource ?? ANIMATION_SOURCE;
+	const physicsScriptSource =
+		options.physicsScriptSource ?? PHYSICS_SCRIPT_SOURCE;
+	const particleEmitterSource =
+		options.particleEmitterSource ?? PARTICLE_EMITTER_SOURCE;
+	const setupVisualSource =
+		options.setupVisualSource === undefined ? null : options.setupVisualSource;
+	const texturePixelSource =
+		options.texturePixelSource ?? new EchoTexturePixelSource();
+	const presentationAssets = new PresentationAssetService({
 		animationSource,
-		renderer,
 		physicsScriptSource,
-		physicsScriptTableSource,
 		particleEmitterSource,
-		particleMeshSource,
+		setupVisualSource,
+		texturePreparer: await WorkerTexturePreparer.build(texturePixelSource),
+	});
+	// Tests own composition assets; runtime destruction must only release its borrowed leases.
+	onTestFinished(() => presentationAssets.destroy());
+	const device: GamePresentationRuntimeRenderDevice = options.device ?? {
+		buildRenderer: async () => options.renderer ?? testRenderer(),
+		resources: TEST_RESOURCES,
+	};
+	const commitPipeline: CommitPipeline = options.commitPipeline ?? {
+		async prepareLandblockLayers(layers) {
+			return [...layers].map(({ id, layer }) => {
+				if (layer !== LandblockLayerKind.Terrain)
+					throw new Error(`Unexpected spawn-test layer ${layer}.`);
+				return terrainArtifact(id);
+			});
+		},
+	};
+	const runtime = await GamePresentationRuntime.build(
+		device,
+		commitPipeline,
+		presentationAssets,
+		options.physicsScriptTableSource ?? PHYSICS_SCRIPT_TABLE_SOURCE,
+		options.audioDevice ?? { playOneShot: () => null, prepare: async () => {} },
+		options.soundTableSource ?? SOUND_TABLE_SOURCE,
+		options.particleMeshSource ?? PARTICLE_MESH_SOURCE,
+		SHARED_FRAME_SETTINGS,
+		undefined,
+		{ createTerrainWorker: () => new TestTerrainWorkerPort() },
 	);
-	await activateSpawnScene(runtime, "0x0001ffff", 1);
+	if (options.autoDestroy ?? true) {
+		onTestFinished(() => runtime.destroy());
+	}
+	if (options.activateLandblock) {
+		await activateSpawnScene(runtime, options.activateLandblock, 1);
+	}
 	return runtime;
 }
 
-/** Build the dynamic-capable runtime without granting any implicit residency capability. */
-async function buildUnscopedSpawnRuntime(
-	setupVisualSource: SetupVisualSource,
-	animationSource: AnimationAssetSource = ANIMATION_SOURCE,
-	renderer?: Renderer,
-	physicsScriptSource: PhysicsScriptSource = PHYSICS_SCRIPT_SOURCE,
-	physicsScriptTableSource: PhysicsScriptTableSource = PHYSICS_SCRIPT_TABLE_SOURCE,
-	particleEmitterSource: ParticleEmitterSource = PARTICLE_EMITTER_SOURCE,
-	particleMeshSource: ParticleMeshSource = PARTICLE_MESH_SOURCE,
+function isSetupVisualSource(
+	value: SetupVisualSource | TestRuntimeOptions,
+): value is SetupVisualSource {
+	return "load" in value;
+}
+
+async function buildSpawnRuntime(
+	setupOrOptions: SetupVisualSource | TestRuntimeOptions = {
+		load: async () => spawnedVisual(),
+	},
 ): Promise<GamePresentationRuntime> {
-	const device: GamePresentationRuntimeRenderDevice = {
-		buildRenderer: async () => renderer ?? testRenderer(),
-		resources: TEST_RESOURCES,
-	};
-	return buildGamePresentationRuntimeForTest(
-		device,
-		{
-			async prepareLandblockLayers(layers) {
-				return [...layers].map(({ id, layer }) => {
-					if (layer !== LandblockLayerKind.Terrain)
-						throw new Error(`Unexpected spawn-test layer ${layer}.`);
-					return terrainArtifact(id);
-				});
-			},
-		},
-		new EchoTexturePixelSource(),
-		animationSource,
-		physicsScriptSource,
-		{ playOneShot: () => null, prepare: async () => {} },
-		particleEmitterSource,
-		SOUND_TABLE_SOURCE,
-		particleMeshSource,
-		setupVisualSource,
-		physicsScriptTableSource,
-	);
+	const options: TestRuntimeOptions = isSetupVisualSource(setupOrOptions)
+		? { setupVisualSource: setupOrOptions }
+		: setupOrOptions;
+	return buildTestRuntime({
+		activateLandblock: "0x0001ffff",
+		...options,
+	});
 }
 
 function particleEmitterInfo(
@@ -5975,42 +5636,6 @@ function motionDrivenEntity(
 			},
 		},
 	};
-}
-
-async function buildGamePresentationRuntimeForTest(
-	device: GamePresentationRuntimeRenderDevice,
-	commitPipeline: CommitPipeline,
-	texturePixelSource: TexturePixelSource,
-	animationSource: AnimationAssetSource,
-	physicsScriptSource: PhysicsScriptSource,
-	audioDevice: GamePresentationRuntimeDependencies["audioDevice"],
-	particleEmitterSource: ParticleEmitterSource,
-	soundTableSource: SoundTableSource,
-	particleMeshSource: ParticleMeshSource,
-	setupVisualSource: SetupVisualSource | null,
-	physicsScriptTableSource: PhysicsScriptTableSource = PHYSICS_SCRIPT_TABLE_SOURCE,
-): Promise<GamePresentationRuntime> {
-	const presentationAssets = new PresentationAssetService({
-		animationSource,
-		physicsScriptSource,
-		particleEmitterSource,
-		setupVisualSource,
-		texturePreparer: await WorkerTexturePreparer.build(texturePixelSource),
-	});
-	// Tests own composition assets; runtime destruction must only release its borrowed leases.
-	onTestFinished(() => presentationAssets.destroy());
-	return GamePresentationRuntime.build(
-		device,
-		commitPipeline,
-		presentationAssets,
-		physicsScriptTableSource,
-		audioDevice,
-		soundTableSource,
-		particleMeshSource,
-		SHARED_FRAME_SETTINGS,
-		undefined,
-		{ createTerrainWorker: () => new TestTerrainWorkerPort() },
-	);
 }
 
 /** Executes the production terrain kernel behind the same closed transport used by the browser. */
@@ -6276,6 +5901,39 @@ function heldVisual(): DecodedStaticPresentation {
 	};
 }
 
+function testPresentationPart(label: "spawned" | "promoted") {
+	return {
+		defaultScale: new Vec3(1, 1, 1),
+		geometry: {
+			bounds: AABB3.zero(),
+			id: `geometry:${label}` as const,
+			indices: new Uint32Array([0, 1, 2]),
+			materialSideKinds: new Uint8Array([0]),
+			materialSideTypes: new Uint8Array([0]),
+			materialSlotIndices: new Uint16Array([0]),
+			materialStippling: new Uint8Array([0]),
+			materialWrapModes: new Uint8Array([0]),
+			normals: new Float32Array(9),
+			positions: new Float32Array(9),
+			sourceDiagnostics: { rejectedDegenerateTriangles: [] },
+			textureCoordinates: new Float32Array(6),
+		},
+		materials: [
+			{
+				color: [1, 1, 1, 1] as const,
+				diffuseScale: 1,
+				id: `material:${label}` as const,
+				kind: "solid-color" as const,
+				luminosity: 0,
+				rawSurfaceFlags: 0,
+				translucency: 0,
+			},
+		],
+		partIndex: 0,
+		retailVisibility: "normally-visible" as const,
+	};
+}
+
 function spawnedVisual(): DecodedStaticPresentation {
 	return {
 		behavior: {
@@ -6292,38 +5950,7 @@ function spawnedVisual(): DecodedStaticPresentation {
 			holdingLocations: new Map(),
 			id: "presentation:spawned",
 			lights: [],
-			parts: [
-				{
-					defaultScale: new Vec3(1, 1, 1),
-					geometry: {
-						bounds: AABB3.zero(),
-						id: "geometry:spawned",
-						indices: new Uint32Array([0, 1, 2]),
-						materialSideKinds: new Uint8Array([0]),
-						materialSideTypes: new Uint8Array([0]),
-						materialSlotIndices: new Uint16Array([0]),
-						materialStippling: new Uint8Array([0]),
-						materialWrapModes: new Uint8Array([0]),
-						normals: new Float32Array(9),
-						positions: new Float32Array(9),
-						sourceDiagnostics: { rejectedDegenerateTriangles: [] },
-						textureCoordinates: new Float32Array(6),
-					},
-					materials: [
-						{
-							color: [1, 1, 1, 1],
-							diffuseScale: 1,
-							id: "material:spawned",
-							kind: "solid-color",
-							luminosity: 0,
-							rawSurfaceFlags: 0,
-							translucency: 0,
-						},
-					],
-					partIndex: 0,
-					retailVisibility: "normally-visible",
-				},
-			],
+			parts: [testPresentationPart("spawned")],
 			placementPoses: new Map([
 				[0, { partTransforms: [Mat4.identity()], placementId: 0 }],
 			]),
@@ -6336,11 +5963,15 @@ function spawnedVisual(): DecodedStaticPresentation {
 	};
 }
 
-function sceneInterest(anchorLandblockId: string) {
+function sceneInterest(
+	anchorLandblockId: string,
+	mode: "outdoor" | "buildings" | "objects" | "generated" = "outdoor",
+) {
 	return {
-		ambientOutdoorEnvCellOwners: new Set([
-			anchorLandblockId as LandblockOwnerId,
-		]),
+		ambientOutdoorEnvCellOwners:
+			mode === "outdoor"
+				? new Set([anchorLandblockId as LandblockOwnerId])
+				: new Set<LandblockOwnerId>(),
 		target: {
 			kind: "outdoor",
 			requested: {
@@ -6349,70 +5980,10 @@ function sceneInterest(anchorLandblockId: string) {
 			},
 		},
 		radii: {
-			buildingRadius: null,
+			buildingRadius: mode === "buildings" ? 0 : null,
 			envCellRadius: null,
-			explicitObjectRadius: null,
-			generatedObjectRadius: null,
-			terrainRadius: 0,
-		},
-	} as const;
-}
-
-function buildingSceneInterest(anchorLandblockId: string) {
-	return {
-		ambientOutdoorEnvCellOwners: new Set<LandblockOwnerId>(),
-		target: {
-			kind: "outdoor",
-			requested: {
-				kind: "outdoor",
-				landblockId: anchorLandblockId as LandblockOwnerId,
-			},
-		},
-		radii: {
-			buildingRadius: 0,
-			envCellRadius: null,
-			explicitObjectRadius: null,
-			generatedObjectRadius: null,
-			terrainRadius: 0,
-		},
-	} as const;
-}
-
-function objectSceneInterest(anchorLandblockId: string) {
-	return {
-		ambientOutdoorEnvCellOwners: new Set<LandblockOwnerId>(),
-		target: {
-			kind: "outdoor",
-			requested: {
-				kind: "outdoor",
-				landblockId: anchorLandblockId as LandblockOwnerId,
-			},
-		},
-		radii: {
-			buildingRadius: null,
-			envCellRadius: null,
-			explicitObjectRadius: 0,
-			generatedObjectRadius: null,
-			terrainRadius: 0,
-		},
-	} as const;
-}
-
-function generatedSceneInterest(anchorLandblockId: string) {
-	return {
-		ambientOutdoorEnvCellOwners: new Set<LandblockOwnerId>(),
-		target: {
-			kind: "outdoor",
-			requested: {
-				kind: "outdoor",
-				landblockId: anchorLandblockId as LandblockOwnerId,
-			},
-		},
-		radii: {
-			buildingRadius: null,
-			envCellRadius: null,
-			explicitObjectRadius: null,
-			generatedObjectRadius: 0,
+			explicitObjectRadius: mode === "objects" ? 0 : null,
+			generatedObjectRadius: mode === "generated" ? 0 : null,
 			terrainRadius: 0,
 		},
 	} as const;
@@ -6541,38 +6112,7 @@ function promotedResidentSource(
 		presentation: {
 			appearanceKey: "setup:0x02000001|base",
 			id: "presentation:promoted",
-			parts: [
-				{
-					defaultScale: new Vec3(1, 1, 1),
-					geometry: {
-						bounds: AABB3.zero(),
-						id: "geometry:promoted",
-						indices: new Uint32Array([0, 1, 2]),
-						materialSideKinds: new Uint8Array([0]),
-						materialSideTypes: new Uint8Array([0]),
-						materialSlotIndices: new Uint16Array([0]),
-						materialStippling: new Uint8Array([0]),
-						materialWrapModes: new Uint8Array([0]),
-						normals: new Float32Array(9),
-						positions: new Float32Array(9),
-						sourceDiagnostics: { rejectedDegenerateTriangles: [] },
-						textureCoordinates: new Float32Array(6),
-					},
-					materials: [
-						{
-							color: [1, 1, 1, 1],
-							diffuseScale: 1,
-							id: "material:promoted",
-							kind: "solid-color",
-							luminosity: 0,
-							rawSurfaceFlags: 0,
-							translucency: 0,
-						},
-					],
-					partIndex: 0,
-					retailVisibility: "normally-visible",
-				},
-			],
+			parts: [testPresentationPart("promoted")],
 			lights: [],
 			holdingLocations: new Map(),
 			placementPoses: new Map([

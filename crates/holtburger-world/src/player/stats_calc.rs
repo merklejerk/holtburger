@@ -224,22 +224,6 @@ impl PlayerState {
         }
     }
 
-    pub fn get_attribute_multiplier(&self, attr: stats::AttributeType) -> f32 {
-        crate::magic::get_enchantment_multiplier(
-            &self.enchantments,
-            EnchantmentTypeFlags::ATTRIBUTE.bits(),
-            attr as u32,
-        )
-    }
-
-    pub fn get_attribute_additive(&self, attr: stats::AttributeType) -> f32 {
-        crate::magic::get_enchantment_additive(
-            &self.enchantments,
-            EnchantmentTypeFlags::ATTRIBUTE.bits(),
-            attr as u32,
-        )
-    }
-
     pub fn get_attribute_base(&self, attr: stats::AttributeType) -> u32 {
         self.attributes.get(&attr).map(|a| a.base).unwrap_or(0)
     }
@@ -320,22 +304,6 @@ impl PlayerState {
         self.attribute_formula(formula, use_current)
     }
 
-    pub fn get_vital_multiplier(&self, vital: stats::VitalType) -> f32 {
-        crate::magic::get_enchantment_multiplier(
-            &self.enchantments,
-            EnchantmentTypeFlags::SECOND_ATT.bits(),
-            vital as u32,
-        )
-    }
-
-    pub fn get_vital_additive(&self, vital: stats::VitalType) -> f32 {
-        crate::magic::get_enchantment_additive(
-            &self.enchantments,
-            EnchantmentTypeFlags::SECOND_ATT.bits(),
-            vital as u32,
-        )
-    }
-
     pub fn calculate_vital_base(
         &self,
         vital_type: stats::VitalType,
@@ -391,22 +359,6 @@ impl PlayerState {
                 finalization,
             },
         )
-    }
-
-    pub fn get_skill_multiplier(&self, skill: stats::SkillType) -> f32 {
-        crate::magic::get_enchantment_multiplier(
-            &self.enchantments,
-            EnchantmentTypeFlags::SKILL.bits(),
-            skill as u32,
-        )
-    }
-
-    pub fn get_skill_additive(&self, skill: stats::SkillType) -> f32 {
-        crate::magic::get_enchantment_additive(
-            &self.enchantments,
-            EnchantmentTypeFlags::SKILL.bits(),
-            skill as u32,
-        ) + self.enchantments.skill_wide_additive(skill)
     }
 
     pub fn derive_skill_value(

@@ -6,25 +6,25 @@ import {
 	createObjectVertexShader,
 	createWebGL2ObjectProgram,
 	OBJECT_TEXTURE_UNITS,
-} from "../../lib/game/renderer/webgl2-object-program";
+} from "../../lib/game/renderer/webgl2/webgl2-object-program";
 import {
 	linkWebGL2Program,
 	requireWebGL2Uniform,
 } from "../../lib/game/webgl/shader-program";
-import { WebGL2GpuFrameProfiler } from "../../lib/game/renderer/webgl2-gpu-frame-profiler";
+import { WebGL2GpuFrameProfiler } from "../../lib/game/renderer/webgl2/webgl2-gpu-frame-profiler";
 import {
 	createObjectMaterialTable,
 	OBJECT_MATERIAL_TEXELS,
-} from "../../lib/game/renderer/object-material-table";
-import type { PreparedObjectMaterial } from "../../lib/game/renderer/object-rendering-policy";
-import { compileDynamicIndexBatches } from "../../lib/game/renderer/dynamic-index-batches";
+} from "../../lib/game/renderer/webgl2/object-material-table";
+import type { PreparedObjectMaterial } from "../../lib/game/renderer/webgl2/object-rendering-policy";
+import { compileDynamicIndexBatches } from "../../lib/game/renderer/webgl2/dynamic-index-batches";
 import {
 	DYNAMIC_POSE_TEXELS,
 	WebGL2DynamicPosePages,
-} from "../../lib/game/renderer/webgl2-dynamic-pose-pages";
+} from "../../lib/game/renderer/webgl2/webgl2-dynamic-pose-pages";
 import { Mat4, Vec3 } from "../../lib/game/math/types";
 import { mat4ToFloat32Array } from "../../lib/game/math/matrices";
-import type { PreparedObjectSurface } from "../../lib/game/renderer/object-rendering-policy";
+import type { PreparedObjectSurface } from "../../lib/game/renderer/webgl2/object-rendering-policy";
 import type { DynamicAppearance } from "../../lib/game/systems/dynamic-appearance";
 import {
 	createAssetTextureKey,

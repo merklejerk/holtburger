@@ -2,8 +2,8 @@ import type { LandblockOwnerId } from "../game-types";
 import type {
 	EntityGroundingSelection,
 	OutdoorDirectionalShadowSelection,
-} from "./entity-grounding";
-import { ParticleRenderBatcher } from "./particle-render-routing";
+} from "./overlays/entity-grounding";
+import { ParticleRenderBatcher } from "./passes/particle-render-routing";
 
 /** Reusable outputs retained until every pass of one prepared camera has executed. */
 export interface ViewSubmissionStorage {

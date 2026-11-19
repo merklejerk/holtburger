@@ -9,7 +9,6 @@ use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::PropertyUpdate;
 use holtburger_protocol::errors::WeenieError;
 use holtburger_protocol::messages::MovementEventData;
-use holtburger_protocol::messages::magic::Enchantment;
 
 /// Why a fresh self motion advances sequencing without installing server playback.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -18,33 +17,6 @@ pub enum SelfMotionAcknowledgement {
     Death,
     /// The current combat/casting controller already owns target facing.
     TargetFacing,
-}
-
-#[derive(Debug, Clone)]
-pub struct PlayerInfoData {
-    /// Authoritative world/entity snapshot for the local player.
-    pub entity: Box<Entity>,
-    pub attributes: Vec<stats::Attribute>,
-    pub vitals: Vec<stats::Vital>,
-    pub skills: Vec<stats::Skill>,
-    pub enchantments: Vec<Enchantment>,
-    pub spells: Vec<u32>,
-    pub level_info: stats::CharacterLevelInfo,
-    pub resistances: stats::Resistances,
-    pub armor: i32,
-    pub vitae: f32,
-    pub inventory: std::collections::HashSet<Guid>,
-    pub equipment: std::collections::HashMap<Guid, holtburger_protocol::messages::EquipMask>,
-}
-
-#[derive(Debug, Clone)]
-pub struct DerivedStatsData {
-    pub attributes: Vec<stats::Attribute>,
-    pub vitals: Vec<stats::Vital>,
-    pub skills: Vec<stats::Skill>,
-    pub resistances: stats::Resistances,
-    pub armor: i32,
-    pub vitae: f32,
 }
 
 #[derive(Debug, Clone)]
@@ -193,17 +165,12 @@ pub enum WorldEvent {
         generation: u64,
     },
     VitalUpdated(stats::Vital),
-    AttributeUpdated(stats::Attribute),
-    SkillUpdated(stats::Skill),
-    LevelInfoUpdated(stats::CharacterLevelInfo),
     PropertiesUpdated {
         guid: Guid,
         updates: Vec<PropertyUpdate>,
     },
-    PlayerInfo(Box<PlayerInfoData>),
-    PlayerEnchantmentsUpdated {
-        enchantments: Vec<Enchantment>,
-    },
+    PlayerInfo(Box<Entity>),
+    PlayerEnchantmentsUpdated,
     PlayerGroundedUpdated {
         grounded: bool,
     },
@@ -228,21 +195,13 @@ pub enum WorldEvent {
         force_position_sequence: u16,
         server_control_sequence: u16,
     },
-    SpellUpdated {
-        spell_id: u32,
-        name: Option<String>,
-        spell_ids: Vec<u32>,
-    },
-    SpellRemoved {
-        spell_id: u32,
-        spell_ids: Vec<u32>,
-    },
+    PlayerSpellsChanged(Vec<u32>),
     CombatModeUpdated(holtburger_protocol::messages::combat::CombatMode),
     ServerTimeUpdate(f64),
     TeleportStarted {
         sequence: u16,
     },
-    DerivedStatsUpdated(Box<DerivedStatsData>),
+    DerivedStatsUpdated,
     EntityStateUpdated {
         guid: Guid,
         physics_state: holtburger_common::properties::PhysicsState,
@@ -274,7 +233,8 @@ pub enum WorldEvent {
     },
     /// A server ApproachVendor response supplies a complete interaction, including trade refreshes.
     VendorApproached(vendor::VendorState),
-    VendorItemIdentified(Box<vendor::CoreVendorItem>),
+    /// Retained vendor catalog facts changed after an offer appraisal.
+    VendorCatalogUpdated,
     /// The retained character friend list changed.
     FriendsStateUpdated,
     /// Contract membership/stage/timer observation changed.

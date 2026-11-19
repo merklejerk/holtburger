@@ -7,7 +7,7 @@ use crossterm::event::{KeyCode, KeyEvent, MouseEvent};
 use holtburger_common::Guid;
 use holtburger_core::client::types::TargetSlot;
 use holtburger_core::{ClientCommand, ClientViewEvent};
-use holtburger_protocol::messages::magic::Enchantment;
+use holtburger_world::enchantments::EnchantmentKey;
 use holtburger_world::stats::{AttributeType, SkillType, VitalType};
 use ratatui::Frame;
 use ratatui::layout::Rect;
@@ -390,9 +390,9 @@ pub enum ContextView {
     Debug(InspectTarget),
     Book(Guid),
     Spell(u32),
-    Enchantment(Enchantment),
+    Enchantment(EnchantmentKey),
     DebugSpell(u32),
-    DebugEnchantment(Enchantment),
+    DebugEnchantment(EnchantmentKey),
     Logopolis,
 }
 
@@ -727,7 +727,6 @@ pub enum AppAction {
     Give {
         item: Guid,
         recipient: Guid,
-        amount: u32,
     },
     OpenShop {
         vendor: Guid,
@@ -740,7 +739,6 @@ pub enum AppAction {
     SellToVendor {
         vendor: Guid,
         item: Guid,
-        amount: u32,
     },
     AcceptTrade,
     DeclineTrade,

@@ -1,5 +1,5 @@
-import { CLIENT_SUMMON_TUNING } from "../../client/client-tuning";
-import { readSummonLeashColors } from "../../client/client-summon-leash-appearance";
+import { CLIENT_SUMMON_TUNING } from "../../client/settings/tuning";
+import { readSummonLeashColors } from "../../client/combat/summon-leash-appearance";
 import { probeSummonLeashAppearance } from "./summon-leash-appearance-probe";
 import type { Renderer } from "../../lib/game/renderer/renderer";
 import type { RenderWorld } from "../../lib/game/renderer/render-world";

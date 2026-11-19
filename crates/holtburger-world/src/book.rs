@@ -3,12 +3,7 @@ use holtburger_protocol::messages::{BookDataResponseEventData, BookPageDataRespo
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BookPage {
     pub index: u32,
-    pub author_id: u32,
     pub author_name: String,
-    pub author_account: String,
-    pub flags: u32,
-    pub text_included: bool,
-    pub ignore_author: bool,
     pub page_text: Option<String>,
 }
 
@@ -19,12 +14,7 @@ impl BookPage {
     ) -> Option<Self> {
         Some(Self {
             index: u32::try_from(index).ok()?,
-            author_id: page.author_id,
             author_name: page.author_name.clone(),
-            author_account: page.author_account.clone(),
-            flags: page.flags,
-            text_included: page.text_included,
-            ignore_author: page.ignore_author,
             page_text: page.page_text.clone(),
         })
     }
@@ -32,18 +22,19 @@ impl BookPage {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct BookData {
-    pub max_num_pages: Option<u32>,
-    pub num_pages: Option<u32>,
-    pub max_num_chars_per_page: Option<u32>,
     pub pages: Vec<BookPage>,
     pub inscription: Option<String>,
-    pub author_id: Option<u32>,
     pub author_name: Option<String>,
-    pub ignore_author: Option<bool>,
 }
 
 impl BookData {
     pub fn from_response(response: &BookDataResponseEventData) -> Self {
+        let ignore_author = response
+            .pages
+            .first()
+            .is_some_and(|page| page.ignore_author);
+        let author_name = (!ignore_author && !response.author_name.trim().is_empty())
+            .then(|| response.author_name.clone());
         let pages = response
             .pages
             .iter()
@@ -52,14 +43,9 @@ impl BookData {
             .collect::<Vec<_>>();
 
         Self {
-            max_num_pages: Some(response.max_num_pages),
-            num_pages: Some(response.num_pages),
-            max_num_chars_per_page: Some(response.max_num_chars_per_page),
-            ignore_author: pages.first().map(|page| page.ignore_author),
             pages,
             inscription: Some(response.inscription.clone()),
-            author_id: Some(response.author_id),
-            author_name: Some(response.author_name.clone()),
+            author_name,
         }
     }
 
@@ -132,5 +118,55 @@ mod tests {
         });
 
         assert!(book.pages.is_empty());
+    }
+
+    #[test]
+    fn from_response_resolves_author_name_once_and_omits_ignored_or_blank_authors() {
+        let make_page = |ignore_author: bool| BookPageData {
+            author_id: 1,
+            author_name: "Scribe".to_string(),
+            author_account: "acct".to_string(),
+            flags: 0,
+            text_included: false,
+            ignore_author,
+            page_text: None,
+        };
+
+        let ignored = BookData::from_response(&BookDataResponseEventData {
+            object_guid: Guid(1),
+            max_num_pages: 1,
+            num_pages: 1,
+            max_num_chars_per_page: 100,
+            pages: vec![make_page(true)],
+            inscription: "Signed".to_string(),
+            author_id: 1,
+            author_name: "Archivist".to_string(),
+        });
+        assert_eq!(ignored.author_name, None);
+        assert_eq!(ignored.pages[0].author_name, "Scribe");
+
+        let blank = BookData::from_response(&BookDataResponseEventData {
+            object_guid: Guid(1),
+            max_num_pages: 1,
+            num_pages: 1,
+            max_num_chars_per_page: 100,
+            pages: vec![make_page(false)],
+            inscription: String::new(),
+            author_id: 1,
+            author_name: "   ".to_string(),
+        });
+        assert_eq!(blank.author_name, None);
+
+        let named = BookData::from_response(&BookDataResponseEventData {
+            object_guid: Guid(1),
+            max_num_pages: 1,
+            num_pages: 1,
+            max_num_chars_per_page: 100,
+            pages: vec![make_page(false)],
+            inscription: "Signed".to_string(),
+            author_id: 1,
+            author_name: "Archivist".to_string(),
+        });
+        assert_eq!(named.author_name.as_deref(), Some("Archivist"));
     }
 }

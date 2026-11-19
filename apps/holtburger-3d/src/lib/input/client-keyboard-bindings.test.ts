@@ -11,7 +11,7 @@ import {
 	createClientKeyboardDefaults,
 	clientInputConfiguration,
 	clientKeyboardSettingsEqual,
-} from "../../client/client-input-settings";
+} from "../../client/settings/input-settings";
 import type { KeyBinding } from "./input-contract";
 
 const defaults = createClientKeyboardDefaults("windows");

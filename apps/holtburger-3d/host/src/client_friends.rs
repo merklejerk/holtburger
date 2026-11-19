@@ -1,28 +1,11 @@
-//! Narrow Friends projection and command adapter; membership remains world-owned.
+//! Narrow Friends command adapter and preferences; membership remains world-owned.
 
 use holtburger_common::{CharacterOption, Guid};
 use holtburger_core::{ClientCommand, PlayerCharacterOptions};
-use holtburger_world::state::friends::{FriendState, FriendsState};
 use serde::{Deserialize, Serialize};
 
-/// Friend list read model, projected identically for replacement and incremental delivery.
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ClientFriendsSnapshot {
-    /// Retained identities, names, and presence; frontend owns display ordering.
-    pub members: Vec<FriendState>,
-}
-
-impl From<&FriendsState> for ClientFriendsSnapshot {
-    fn from(state: &FriendsState) -> Self {
-        Self {
-            members: state.members.values().cloned().collect(),
-        }
-    }
-}
-
 /// Locally mirrored character option, distinct from a server acknowledgement.
-#[derive(Debug, Clone, Copy, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClientFriendsPreferences {
     /// Whether the local player requests to appear offline to friends.

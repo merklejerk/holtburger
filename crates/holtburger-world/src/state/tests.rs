@@ -137,6 +137,170 @@ fn seed_player_run_skill(world: &mut WorldState, run_skill: u32) {
     );
 }
 
+fn pos(landblock_id: u32, x: f32, y: f32, z: f32) -> WorldPosition {
+    WorldPosition {
+        landblock_id: Guid(landblock_id),
+        coords: Vector3::new(x, y, z),
+        rotation: Quaternion::identity(),
+    }
+}
+
+fn world_with_player(guid: Guid, pose: WorldPosition) -> WorldState {
+    let mut state = WorldState::synthetic();
+    state.player.guid = guid;
+    state.seed_local_player_entity(guid, "Player", pose);
+    state
+}
+
+fn remote_entity(guid: Guid, pose: WorldPosition) -> Entity {
+    Entity::new(guid, "Remote".to_string(), pose)
+}
+
+fn off_world_entity(guid: Guid, name: &str) -> Entity {
+    let mut entity = Entity::new(guid, name.to_string(), WorldPosition::default());
+    entity.position.landblock_id = Guid::NULL;
+    entity
+}
+
+fn set_server_time(state: &mut WorldState, server_time: f64) {
+    state.server_time = Some(ServerTimeSync {
+        server_time,
+        local_time: Instant::now(),
+    });
+}
+
+fn game_event(target: Guid, sequence: u32, event: GameEvent) -> GameMessage {
+    GameMessage::GameEvent(Box::new(GameEventMessage {
+        target,
+        sequence,
+        event,
+    }))
+}
+
+fn position_pack(
+    pose: WorldPosition,
+    position_sequence: u16,
+    flags: UpdatePositionFlag,
+) -> PositionPack {
+    PositionPack {
+        pos: pose,
+        position_sequence,
+        flags,
+        ..PositionPack::default()
+    }
+}
+
+fn update_pos_msg(
+    guid: Guid,
+    pose: WorldPosition,
+    instance_sequence: u16,
+    position_sequence: u16,
+    teleport_sequence: u16,
+    force_position_sequence: u16,
+    flags: UpdatePositionFlag,
+) -> GameMessage {
+    GameMessage::UpdatePosition(Box::new(UpdatePositionData {
+        guid,
+        pos: PositionPack {
+            pos: pose,
+            instance_sequence,
+            position_sequence,
+            teleport_sequence,
+            force_position_sequence,
+            flags,
+            ..PositionPack::default()
+        },
+    }))
+}
+
+fn set_state_msg(
+    guid: Guid,
+    physics_state: PhysicsState,
+    instance_sequence: u16,
+    state_sequence: u16,
+) -> GameMessage {
+    GameMessage::SetState(Box::new(SetStateData {
+        guid,
+        physics_state,
+        instance_sequence,
+        state_sequence,
+    }))
+}
+
+fn default_player_description(guid: Guid) -> PlayerDescriptionEventData {
+    PlayerDescriptionEventData {
+        guid,
+        sequence: 1,
+        name: "Player".to_string(),
+        wee_type: 1,
+        pos: Some(WorldPosition::default()),
+        properties: WorldObjectProperties::default(),
+        positions: std::collections::BTreeMap::new(),
+        attributes: std::collections::BTreeMap::new(),
+        skills: std::collections::BTreeMap::new(),
+        enchantments: Vec::new(),
+        spells: std::collections::BTreeMap::new(),
+        has_health: true,
+        options1: CharacterOptions1::empty(),
+        options2: CharacterOptions2::empty(),
+        shortcuts: Vec::new(),
+        hotbar_spells: Vec::new(),
+        desired_comps: Vec::new(),
+        spellbook_filters: 0,
+        gameplay_options: Vec::new(),
+        inventory: Vec::new(),
+        equipped_objects: Vec::new(),
+    }
+}
+
+fn fellow_member_data(
+    guid: Guid,
+    name: &str,
+    level: u32,
+    hp: (u32, u32),
+    stam: (u32, u32),
+    mana: (u32, u32),
+) -> FellowshipMemberData {
+    FellowshipMemberData {
+        guid,
+        cached_cp: 0,
+        cached_luminance: 0,
+        level,
+        max_health: hp.1,
+        max_stamina: stam.1,
+        max_mana: mana.1,
+        current_health: hp.0,
+        current_stamina: stam.0,
+        current_mana: mana.0,
+        share_loot: 1,
+        name: name.to_string(),
+    }
+}
+
+fn fellow_member_state(
+    guid: Guid,
+    name: &str,
+    level: u32,
+    hp: (u32, u32),
+    stam: (u32, u32),
+    mana: (u32, u32),
+) -> FellowshipMemberState {
+    FellowshipMemberState {
+        guid,
+        name: name.to_string(),
+        level,
+        cached_cp: 0,
+        cached_luminance: 0,
+        max_health: hp.1,
+        max_stamina: stam.1,
+        max_mana: mana.1,
+        current_health: hp.0,
+        current_stamina: stam.0,
+        current_mana: mana.0,
+        share_loot: true,
+    }
+}
+
 #[test]
 fn resolve_player_motion_table_profile_prefers_direct_motion_table_property() {
     let motion_table_id = 0x0900_0020;
@@ -460,16 +624,12 @@ fn resolve_self_movement_capabilities_derives_left_turn_from_right_turn_omega() 
 fn resolve_body_projection_input_uses_grounded_motion_snapshot_without_vector_update() {
     let motion_table_id = 0x0900_0040;
     let guid = Guid(0x7000_0100);
-    let pose = WorldPosition {
-        landblock_id: Guid(0x1234_0000),
-        coords: Vector3::new(10.0, 20.0, 0.0),
-        rotation: holtburger_common::math::Quaternion::identity(),
-    };
+    let pose = pos(0x1234_0000, 10.0, 20.0, 0.0);
 
     let mut state = WorldState::synthetic();
     state.set_motion_sequences(test_motion_catalog(motion_table_id));
 
-    let mut entity = Entity::new(guid, "Remote".to_string(), pose);
+    let mut entity = remote_entity(guid, pose);
     entity.properties.set_did_prop(
         holtburger_common::properties::PropertyDataId::MotionTable,
         Guid(motion_table_id),
@@ -525,14 +685,10 @@ fn resolve_body_projection_input_uses_grounded_motion_snapshot_without_vector_up
 #[test]
 fn resolve_body_projection_input_retains_physical_vectors_for_airborne_body() {
     let guid = Guid(0x7000_0101);
-    let pose = WorldPosition {
-        landblock_id: Guid(0x1234_0000),
-        coords: Vector3::new(1.0, 2.0, 3.0),
-        rotation: holtburger_common::math::Quaternion::identity(),
-    };
+    let pose = pos(0x1234_0000, 1.0, 2.0, 3.0);
 
     let mut state = WorldState::synthetic();
-    let mut entity = Entity::new(guid, "Remote".to_string(), pose);
+    let mut entity = remote_entity(guid, pose);
     entity.velocity = Vector3::new(0.0, 0.0, 4.0);
     entity.omega = Vector3::new(0.0, 0.0, 0.5);
     entity.network_motion = EntityNetworkMotion::Initialized(crate::entity::EntityMotionSnapshot {
@@ -605,11 +761,7 @@ fn player_server_vector_sample_updates_entity_without_creating_runtime_body() {
 fn set_local_player_runtime_pose_only_emits_runtime_body_change() {
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x5000_0123);
-    let start_pos = WorldPosition {
-        landblock_id: Guid(0x1234_0000),
-        coords: Vector3::new(1.0, 2.0, 3.0),
-        rotation: holtburger_common::math::Quaternion::identity(),
-    };
+    let start_pos = pos(0x1234_0000, 1.0, 2.0, 3.0);
 
     state.seed_local_player_entity(player_guid, "Player", start_pos);
 
@@ -633,13 +785,9 @@ fn set_local_player_runtime_pose_only_emits_runtime_body_change() {
 fn solved_remote_runtime_body_only_emits_runtime_body_change() {
     let mut state = WorldState::synthetic();
     let guid = Guid(0x5000_0222);
-    let pose = WorldPosition {
-        landblock_id: Guid(0x1234_0000),
-        coords: Vector3::new(2.0, 3.0, 4.0),
-        rotation: holtburger_common::math::Quaternion::identity(),
-    };
+    let pose = pos(0x1234_0000, 2.0, 3.0, 4.0);
 
-    state.add_entity(Entity::new(guid, "Remote".to_string(), pose));
+    state.add_entity(remote_entity(guid, pose));
 
     let events = state.apply_solved_body_kinematics(&SolvedBodyKinematics {
         body_id: SpatialBodyId::Entity(guid),
@@ -676,11 +824,7 @@ fn solved_remote_runtime_body_only_emits_runtime_body_change() {
 fn authoritative_player_snapshots_do_not_clobber_active_local_runtime_motion() {
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x5000_0125);
-    let authoritative_pose = WorldPosition {
-        landblock_id: Guid(0x1234_0000),
-        coords: Vector3::new(1.0, 2.0, 3.0),
-        rotation: holtburger_common::math::Quaternion::identity(),
-    };
+    let authoritative_pose = pos(0x1234_0000, 1.0, 2.0, 3.0);
     let runtime_pose = WorldPosition {
         coords: Vector3::new(10.0, 20.0, 3.0),
         ..authoritative_pose
@@ -720,11 +864,7 @@ fn authoritative_player_snapshots_do_not_clobber_active_local_runtime_motion() {
 fn local_forced_reposition_uses_single_reset_reconcile_path() {
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x5000_0999);
-    let start_pos = WorldPosition {
-        landblock_id: Guid(0x1234_0000),
-        coords: Vector3::new(1.0, 2.0, 3.0),
-        rotation: holtburger_common::math::Quaternion::identity(),
-    };
+    let start_pos = pos(0x1234_0000, 1.0, 2.0, 3.0);
     let forced_pos = WorldPosition {
         coords: Vector3::new(9.0, 8.0, 3.0),
         ..start_pos
@@ -779,11 +919,7 @@ fn test_set_player_position_sanitizes_nan_rotation() {
     let player_guid = Guid(0x50000123);
     state.player.guid = player_guid;
 
-    let initial_pos = WorldPosition {
-        landblock_id: Guid(0x12340000),
-        coords: Vector3::new(0.0, 0.0, 0.0),
-        rotation: holtburger_common::math::Quaternion::identity(),
-    };
+    let initial_pos = pos(0x12340000, 0.0, 0.0, 0.0);
     state.seed_local_player_entity(player_guid, "Player", initial_pos);
 
     let nan_pos = WorldPosition {
@@ -816,21 +952,13 @@ fn test_set_player_position_sanitizes_nan_rotation() {
 fn apply_solved_body_kinematics_updates_local_runtime_body_and_grounded_state() {
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x50000123);
-    let start_pos = WorldPosition {
-        landblock_id: Guid(0x12340000),
-        coords: Vector3::new(0.0, 0.0, 0.0),
-        rotation: holtburger_common::math::Quaternion::identity(),
-    };
+    let start_pos = pos(0x12340000, 0.0, 0.0, 0.0);
 
     state.seed_local_player_entity(player_guid, "Player", start_pos);
 
     let solved = SolvedBodyKinematics {
         body_id: SpatialBodyId::LocalPlayer(player_guid),
-        pose: WorldPosition {
-            landblock_id: Guid(0x12340000),
-            coords: Vector3::new(10.0, 20.0, 30.0),
-            rotation: holtburger_common::math::Quaternion::identity(),
-        },
+        pose: pos(0x12340000, 10.0, 20.0, 30.0),
         accepted_motion: crate::AcceptedBodyMotion {
             velocity: Vector3::new(1.0, 2.0, 3.0),
             omega: Vector3::new(0.0, 0.0, 4.0),
@@ -907,11 +1035,7 @@ fn unknown_runtime_contact_preserves_packet_contact_fallback() {
 fn apply_spatial_body_event_emits_runtime_body_changed_for_remote_contact() {
     let mut state = WorldState::synthetic();
     let guid = Guid(0x5000_0200);
-    let position = WorldPosition {
-        landblock_id: Guid(0x1234_0000),
-        coords: Vector3::new(1.0, 2.0, 3.0),
-        rotation: holtburger_common::math::Quaternion::identity(),
-    };
+    let position = pos(0x1234_0000, 1.0, 2.0, 3.0);
 
     state.add_entity(Entity::new(guid, "Drudge".to_string(), position));
 
@@ -951,11 +1075,7 @@ fn player_teleport_suspends_runtime_bodies_and_emits_reset_signal() {
     };
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x5000_0201);
-    let position = WorldPosition {
-        landblock_id: Guid(0x1234_0000),
-        coords: Vector3::new(10.0, 20.0, 30.0),
-        rotation: holtburger_common::math::Quaternion::identity(),
-    };
+    let position = pos(0x1234_0000, 10.0, 20.0, 30.0);
 
     state.player.guid = player_guid;
     state.seed_local_player_entity(player_guid, "Player", position);
@@ -1032,11 +1152,7 @@ fn player_teleport_suspends_runtime_bodies_and_emits_reset_signal() {
 fn remote_creature_directive_uses_shared_authored_root_and_retires_to_default() {
     let motion_table_id = 0x0900_0041;
     let guid = Guid(0x5000_0241);
-    let mut target = WorldPosition {
-        landblock_id: Guid(0x1234_0001),
-        coords: Vector3::new(20.0, 0.0, 0.0),
-        rotation: Quaternion::identity(),
-    };
+    let mut target = pos(0x1234_0001, 20.0, 0.0, 0.0);
     let mut start = WorldPosition {
         coords: Vector3::zero(),
         ..target
@@ -1243,8 +1359,7 @@ fn test_empty_world_uses_synthetic_reference_data() {
 
 #[test]
 fn derived_skill_refresh_reads_current_player_augmentation_properties() {
-    let mut state = WorldState::synthetic();
-    state.seed_local_player_entity(Guid(0x5000_0001), "Player", WorldPosition::default());
+    let mut state = world_with_player(Guid(0x5000_0001), WorldPosition::default());
     state.player.skill_bases.insert(
         SkillType::HeavyWeapons,
         crate::player::SkillBase { ranks: 10, init: 0 },
@@ -1278,11 +1393,11 @@ fn derived_skill_refresh_reads_current_player_augmentation_properties() {
     state.emit_player_derived_stats(&mut events);
     let skill = &state.player.skills[&SkillType::HeavyWeapons];
     assert_eq!((skill.base, skill.current), (30, 30));
-    assert!(events.iter().any(|event| matches!(
-        event,
-        WorldEvent::DerivedStatsUpdated(stats)
-            if stats.skills.iter().any(|skill| skill.skill_type == SkillType::HeavyWeapons && skill.base == 30)
-    )));
+    assert!(
+        events
+            .iter()
+            .any(|event| matches!(event, WorldEvent::DerivedStatsUpdated))
+    );
 }
 
 #[test]
@@ -1386,9 +1501,9 @@ fn bootstrap_reference_tables_drive_player_and_spell_lookups() {
             || resolved_info.power > 0
     );
 
-    let mut events = Vec::new();
-    state.player.update_skill(
-        crate::player::mutations::SkillUpdateParams {
+    state
+        .player
+        .update_skill(crate::player::mutations::SkillUpdateParams {
             skill_id,
             ranks: 0,
             status: 2,
@@ -1400,17 +1515,13 @@ fn bootstrap_reference_tables_drive_player_and_spell_lookups() {
                 augmentations: state.player_skill_augmentations(),
                 vitae: state.player_vitae(),
             },
-        },
-        &mut events,
-    );
+        });
 
-    let updated_skill = events
-        .into_iter()
-        .find_map(|event| match event {
-            WorldEvent::SkillUpdated(skill) if skill.skill_type as u32 == skill_id => Some(skill),
-            _ => None,
-        })
-        .expect("skill update should emit a SkillUpdated event");
+    let updated_skill = state
+        .player
+        .skills
+        .get(&crate::stats::SkillType::from_repr(skill_id).unwrap())
+        .expect("skill update should store cached skill");
 
     assert_eq!(
         (updated_skill.trained_cost, updated_skill.specialized_cost),
@@ -1423,11 +1534,7 @@ fn bootstrap_reference_tables_drive_player_and_spell_lookups() {
 fn test_tick_does_not_integrate_player_velocity() {
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x50000124);
-    let player_pos = WorldPosition {
-        landblock_id: Guid(0x12340000),
-        coords: Vector3::new(10.0, 20.0, 30.0),
-        rotation: holtburger_common::math::Quaternion::identity(),
-    };
+    let player_pos = pos(0x12340000, 10.0, 20.0, 30.0);
 
     state.player.guid = player_guid;
     let mut player_entity = Entity::new(player_guid, "Player".to_string(), player_pos);
@@ -1452,11 +1559,7 @@ fn test_tick_does_not_integrate_player_velocity() {
 fn test_tick_does_not_require_runtime_resource_access() {
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x50000125);
-    let player_pos = WorldPosition {
-        landblock_id: Guid(0x12340000),
-        coords: Vector3::new(1.0, 2.0, 3.0),
-        rotation: holtburger_common::math::Quaternion::identity(),
-    };
+    let player_pos = pos(0x12340000, 1.0, 2.0, 3.0);
 
     state.player.guid = player_guid;
     let mut player_entity = Entity::new(player_guid, "Player".to_string(), player_pos);
@@ -1481,11 +1584,7 @@ fn player_autonomous_sync_defers_pose_to_core_authority_adapter() {
 
     let sync_data = ServerAutonomousPositionData {
         guid: player_guid,
-        position: WorldPosition {
-            landblock_id: Guid(0x56780000),
-            coords: Vector3::new(1.0, 1.0, 1.0),
-            rotation: holtburger_common::math::Quaternion::identity(),
-        },
+        position: pos(0x56780000, 1.0, 1.0, 1.0),
         instance_sequence: 10,
         server_control_sequence: 20,
         teleport_sequence: 30,
@@ -1522,20 +1621,12 @@ fn test_stale_player_autonomous_sync_is_ignored() {
     state.player.teleport_sequence = 30;
     state.player.force_position_sequence = 40;
 
-    let initial_pos = WorldPosition {
-        landblock_id: Guid(0x12340000),
-        coords: Vector3::new(5.0, 5.0, 0.0),
-        rotation: holtburger_common::math::Quaternion::identity(),
-    };
+    let initial_pos = pos(0x12340000, 5.0, 5.0, 0.0);
     state.seed_local_player_entity(player_guid, "Player", initial_pos);
 
     let sync_data = ServerAutonomousPositionData {
         guid: player_guid,
-        position: WorldPosition {
-            landblock_id: Guid(0x56780000),
-            coords: Vector3::new(1.0, 1.0, 1.0),
-            rotation: holtburger_common::math::Quaternion::identity(),
-        },
+        position: pos(0x56780000, 1.0, 1.0, 1.0),
         instance_sequence: 10,
         server_control_sequence: 20,
         teleport_sequence: 30,
@@ -1560,11 +1651,7 @@ fn remote_force_position_sequence_has_no_independent_reconciliation_meaning() {
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x5000_0001);
     let guid = Guid(0x6000_0001);
-    let initial_pos = WorldPosition {
-        landblock_id: Guid(0x01000000),
-        coords: Vector3::new(1.0, 2.0, 3.0),
-        rotation: holtburger_common::math::Quaternion::identity(),
-    };
+    let initial_pos = pos(0x01000000, 1.0, 2.0, 3.0);
     state.player.guid = player_guid;
     state.seed_local_player_entity(player_guid, "Player", initial_pos);
     let mut entity = Entity::new(guid, "Target".to_string(), initial_pos);
@@ -1573,22 +1660,15 @@ fn remote_force_position_sequence_has_no_independent_reconciliation_meaning() {
     let instance_sequence = entity.instance_sequence();
     state.add_entity(entity);
 
-    let msg = GameMessage::UpdatePosition(Box::new(UpdatePositionData {
+    let msg = update_pos_msg(
         guid,
-        pos: PositionPack {
-            pos: WorldPosition {
-                landblock_id: Guid(0x01000000),
-                coords: Vector3::new(10.0, 20.0, 0.5),
-                rotation: holtburger_common::math::Quaternion::identity(),
-            },
-            instance_sequence,
-            position_sequence: 9,
-            teleport_sequence: 30,
-            force_position_sequence: 41,
-            flags: UpdatePositionFlag::HAS_CONTACT,
-            ..PositionPack::default()
-        },
-    }));
+        pos(0x01000000, 10.0, 20.0, 0.5),
+        instance_sequence,
+        9,
+        30,
+        41,
+        UpdatePositionFlag::HAS_CONTACT,
+    );
 
     let events = state.handle_message(&msg);
 
@@ -1610,11 +1690,7 @@ fn remote_force_position_regression_does_not_reject_a_newer_contacted_position()
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x5000_0002);
     let guid = Guid(0x6000_0002);
-    let initial_pos = WorldPosition {
-        landblock_id: Guid(0x0A0AFFFF),
-        coords: Vector3::new(4.0, 5.0, 6.0),
-        rotation: holtburger_common::math::Quaternion::identity(),
-    };
+    let initial_pos = pos(0x0A0AFFFF, 4.0, 5.0, 6.0);
     state.player.guid = player_guid;
     state.seed_local_player_entity(player_guid, "Player", initial_pos);
 
@@ -1624,22 +1700,15 @@ fn remote_force_position_regression_does_not_reject_a_newer_contacted_position()
     let instance_sequence = entity.instance_sequence();
     state.add_entity(entity);
 
-    let msg = GameMessage::UpdatePosition(Box::new(UpdatePositionData {
+    let msg = update_pos_msg(
         guid,
-        pos: PositionPack {
-            pos: WorldPosition {
-                landblock_id: Guid(0x2020FFFF),
-                coords: Vector3::new(40.0, 50.0, 60.0),
-                rotation: holtburger_common::math::Quaternion::identity(),
-            },
-            instance_sequence,
-            position_sequence: 9,
-            teleport_sequence: 30,
-            force_position_sequence: 39,
-            flags: UpdatePositionFlag::HAS_CONTACT,
-            ..PositionPack::default()
-        },
-    }));
+        pos(0x2020FFFF, 40.0, 50.0, 60.0),
+        instance_sequence,
+        9,
+        30,
+        39,
+        UpdatePositionFlag::HAS_CONTACT,
+    );
 
     let events = state.handle_message(&msg);
 
@@ -1662,11 +1731,7 @@ fn remote_force_position_regression_does_not_reject_a_newer_contacted_position()
 fn test_remote_autonomous_position_emits_forced_reposition_even_without_sequence_change() {
     let mut state = WorldState::synthetic();
     let guid = Guid(0x6000_0003);
-    let initial_pos = WorldPosition {
-        landblock_id: Guid(0x01000000),
-        coords: Vector3::new(0.0, 0.0, 0.0),
-        rotation: holtburger_common::math::Quaternion::identity(),
-    };
+    let initial_pos = pos(0x01000000, 0.0, 0.0, 0.0);
     let mut entity = Entity::new(guid, "Target".to_string(), initial_pos);
     entity.sequences[4] = 30;
     entity.sequences[6] = 40;
@@ -1674,11 +1739,7 @@ fn test_remote_autonomous_position_emits_forced_reposition_even_without_sequence
 
     let msg = GameMessage::AutonomousPosition(Box::new(ServerAutonomousPositionData {
         guid,
-        position: WorldPosition {
-            landblock_id: Guid(0x01000000),
-            coords: Vector3::new(7.0, 8.0, 9.0),
-            rotation: holtburger_common::math::Quaternion::identity(),
-        },
+        position: pos(0x01000000, 7.0, 8.0, 9.0),
         instance_sequence: 12,
         server_control_sequence: 13,
         teleport_sequence: 30,
@@ -1753,39 +1814,27 @@ fn test_fellowship_full_update_populates_world_state_and_emits_projection() {
     let mut state = WorldState::synthetic();
     state.player.guid = Guid(0x5000_0001);
 
-    let msg = GameMessage::GameEvent(Box::new(GameEventMessage {
-        target: state.player.guid,
-        sequence: 1,
-        event: GameEvent::FellowshipFullUpdate(Box::new(FellowshipFullUpdateEventData {
+    let msg = game_event(
+        state.player.guid,
+        1,
+        GameEvent::FellowshipFullUpdate(Box::new(FellowshipFullUpdateEventData {
             fellows: vec![
-                FellowshipMemberData {
-                    guid: Guid(0x5000_0001),
-                    cached_cp: 0,
-                    cached_luminance: 0,
-                    level: 12,
-                    max_health: 180,
-                    max_stamina: 150,
-                    max_mana: 120,
-                    current_health: 170,
-                    current_stamina: 140,
-                    current_mana: 110,
-                    share_loot: 1,
-                    name: "Player".to_string(),
-                },
-                FellowshipMemberData {
-                    guid: Guid(0x5000_0032),
-                    cached_cp: 0,
-                    cached_luminance: 0,
-                    level: 18,
-                    max_health: 220,
-                    max_stamina: 160,
-                    max_mana: 140,
-                    current_health: 215,
-                    current_stamina: 150,
-                    current_mana: 130,
-                    share_loot: 1,
-                    name: "Bravo".to_string(),
-                },
+                fellow_member_data(
+                    Guid(0x5000_0001),
+                    "Player",
+                    12,
+                    (170, 180),
+                    (140, 150),
+                    (110, 120),
+                ),
+                fellow_member_data(
+                    Guid(0x5000_0032),
+                    "Bravo",
+                    18,
+                    (215, 220),
+                    (150, 160),
+                    (130, 140),
+                ),
             ],
             fellowship_name: "Raid Bus".to_string(),
             leader_guid: Guid(0x5000_0001),
@@ -1796,7 +1845,7 @@ fn test_fellowship_full_update_populates_world_state_and_emits_projection() {
             departed_members: Vec::new(),
             fellowship_locks: Vec::new(),
         })),
-    }));
+    );
 
     let events = state.handle_message(&msg);
 
@@ -1824,27 +1873,21 @@ fn test_fellowship_update_fellow_creates_placeholder_state_when_snapshot_missing
     let mut state = WorldState::synthetic();
     state.player.guid = Guid(0x5000_0001);
 
-    let msg = GameMessage::GameEvent(Box::new(GameEventMessage {
-        target: Guid::NULL,
-        sequence: 1,
-        event: GameEvent::FellowshipUpdateFellow(Box::new(FellowshipUpdateFellowEventData {
-            fellow: FellowshipMemberData {
-                guid: Guid(0x5000_0001),
-                cached_cp: 0,
-                cached_luminance: 0,
-                level: 12,
-                max_health: 180,
-                max_stamina: 150,
-                max_mana: 120,
-                current_health: 170,
-                current_stamina: 140,
-                current_mana: 110,
-                share_loot: 1,
-                name: "Player".to_string(),
-            },
+    let msg = game_event(
+        Guid::NULL,
+        1,
+        GameEvent::FellowshipUpdateFellow(Box::new(FellowshipUpdateFellowEventData {
+            fellow: fellow_member_data(
+                Guid(0x5000_0001),
+                "Player",
+                12,
+                (170, 180),
+                (140, 150),
+                (110, 120),
+            ),
             update_type: FellowUpdateType::Vitals,
         })),
-    }));
+    );
 
     let events = state.handle_message(&msg);
 
@@ -1878,29 +1921,23 @@ fn test_fellowship_quit_for_local_player_clears_state() {
         even_share: false,
         open: true,
         is_locked: false,
-        members: vec![FellowshipMemberState {
-            guid: player_guid,
-            name: "Player".to_string(),
-            level: 12,
-            cached_cp: 0,
-            cached_luminance: 0,
-            max_health: 180,
-            max_stamina: 150,
-            max_mana: 120,
-            current_health: 170,
-            current_stamina: 140,
-            current_mana: 110,
-            share_loot: true,
-        }],
+        members: vec![fellow_member_state(
+            player_guid,
+            "Player",
+            12,
+            (170, 180),
+            (140, 150),
+            (110, 120),
+        )],
         departed_members: Vec::new(),
         locks: Vec::new(),
     });
 
-    let msg = GameMessage::GameEvent(Box::new(GameEventMessage {
-        target: Guid::NULL,
-        sequence: 1,
-        event: GameEvent::FellowshipQuit(Box::new(FellowshipQuitEventData { player_guid })),
-    }));
+    let msg = game_event(
+        Guid::NULL,
+        1,
+        GameEvent::FellowshipQuit(Box::new(FellowshipQuitEventData { player_guid })),
+    );
 
     let events = state.handle_message(&msg);
 
@@ -1931,46 +1968,27 @@ fn test_fellowship_quit_for_leader_waits_for_server_successor() {
         open: true,
         is_locked: false,
         members: vec![
-            FellowshipMemberState {
-                guid: leader_guid,
-                name: "Leader".to_string(),
-                level: 12,
-                cached_cp: 0,
-                cached_luminance: 0,
-                max_health: 180,
-                max_stamina: 150,
-                max_mana: 120,
-                current_health: 170,
-                current_stamina: 140,
-                current_mana: 110,
-                share_loot: true,
-            },
-            FellowshipMemberState {
-                guid: member_guid,
-                name: "Bravo".to_string(),
-                level: 18,
-                cached_cp: 0,
-                cached_luminance: 0,
-                max_health: 220,
-                max_stamina: 160,
-                max_mana: 140,
-                current_health: 215,
-                current_stamina: 150,
-                current_mana: 130,
-                share_loot: true,
-            },
+            fellow_member_state(
+                leader_guid,
+                "Leader",
+                12,
+                (170, 180),
+                (140, 150),
+                (110, 120),
+            ),
+            fellow_member_state(member_guid, "Bravo", 18, (215, 220), (150, 160), (130, 140)),
         ],
         departed_members: Vec::new(),
         locks: Vec::new(),
     });
 
-    let msg = GameMessage::GameEvent(Box::new(GameEventMessage {
-        target: Guid::NULL,
-        sequence: 1,
-        event: GameEvent::FellowshipQuit(Box::new(FellowshipQuitEventData {
+    let msg = game_event(
+        Guid::NULL,
+        1,
+        GameEvent::FellowshipQuit(Box::new(FellowshipQuitEventData {
             player_guid: leader_guid,
         })),
-    }));
+    );
 
     let events = state.handle_message(&msg);
 
@@ -1984,24 +2002,18 @@ fn test_fellowship_quit_for_leader_waits_for_server_successor() {
             if fellowship.leader_guid.is_none() && fellowship.members.len() == 1
     )));
 
-    let replacement = GameMessage::GameEvent(Box::new(GameEventMessage {
-        target: state.player.guid,
-        sequence: 2,
-        event: GameEvent::FellowshipFullUpdate(Box::new(FellowshipFullUpdateEventData {
-            fellows: vec![FellowshipMemberData {
-                guid: member_guid,
-                name: "Bravo".to_string(),
-                level: 18,
-                cached_cp: 0,
-                cached_luminance: 0,
-                max_health: 220,
-                max_stamina: 160,
-                max_mana: 140,
-                current_health: 215,
-                current_stamina: 150,
-                current_mana: 130,
-                share_loot: 1,
-            }],
+    let replacement = game_event(
+        state.player.guid,
+        2,
+        GameEvent::FellowshipFullUpdate(Box::new(FellowshipFullUpdateEventData {
+            fellows: vec![fellow_member_data(
+                member_guid,
+                "Bravo",
+                18,
+                (215, 220),
+                (150, 160),
+                (130, 140),
+            )],
             fellowship_name: "Raid Bus".to_string(),
             leader_guid: member_guid,
             share_xp: true,
@@ -2011,7 +2023,7 @@ fn test_fellowship_quit_for_leader_waits_for_server_successor() {
             departed_members: Vec::new(),
             fellowship_locks: Vec::new(),
         })),
-    }));
+    );
     state.handle_message(&replacement);
     assert_eq!(
         state.fellowship.as_ref().unwrap().leader_guid,
@@ -2030,45 +2042,33 @@ fn test_fellowship_update_fellow_for_new_remote_member_emits_join_activity() {
         even_share: false,
         open: true,
         is_locked: false,
-        members: vec![FellowshipMemberState {
-            guid: Guid(0x5000_0001),
-            name: "Player".to_string(),
-            level: 12,
-            cached_cp: 0,
-            cached_luminance: 0,
-            max_health: 180,
-            max_stamina: 150,
-            max_mana: 120,
-            current_health: 170,
-            current_stamina: 140,
-            current_mana: 110,
-            share_loot: true,
-        }],
+        members: vec![fellow_member_state(
+            Guid(0x5000_0001),
+            "Player",
+            12,
+            (170, 180),
+            (140, 150),
+            (110, 120),
+        )],
         departed_members: Vec::new(),
         locks: Vec::new(),
     });
 
-    let msg = GameMessage::GameEvent(Box::new(GameEventMessage {
-        target: Guid::NULL,
-        sequence: 1,
-        event: GameEvent::FellowshipUpdateFellow(Box::new(FellowshipUpdateFellowEventData {
-            fellow: FellowshipMemberData {
-                guid: Guid(0x5000_0032),
-                cached_cp: 0,
-                cached_luminance: 0,
-                level: 18,
-                max_health: 220,
-                max_stamina: 160,
-                max_mana: 140,
-                current_health: 215,
-                current_stamina: 150,
-                current_mana: 130,
-                share_loot: 1,
-                name: "Bravo".to_string(),
-            },
+    let msg = game_event(
+        Guid::NULL,
+        1,
+        GameEvent::FellowshipUpdateFellow(Box::new(FellowshipUpdateFellowEventData {
+            fellow: fellow_member_data(
+                Guid(0x5000_0032),
+                "Bravo",
+                18,
+                (215, 220),
+                (150, 160),
+                (130, 140),
+            ),
             update_type: FellowUpdateType::Full,
         })),
-    }));
+    );
 
     let events = state.handle_message(&msg);
 
@@ -2085,18 +2085,10 @@ fn test_private_update_position_non_location_is_stored_without_moving_player() {
     let player_guid = Guid(0x50000123);
     state.player.guid = player_guid;
 
-    let live_position = WorldPosition {
-        landblock_id: Guid(0x12340000),
-        coords: Vector3::new(5.0, 5.0, 0.0),
-        rotation: holtburger_common::math::Quaternion::identity(),
-    };
+    let live_position = pos(0x12340000, 5.0, 5.0, 0.0);
     state.seed_local_player_entity(player_guid, "Player", live_position);
 
-    let saved_position = WorldPosition {
-        landblock_id: Guid(0x56780000),
-        coords: Vector3::new(42.0, 24.0, 9.0),
-        rotation: holtburger_common::math::Quaternion::identity(),
-    };
+    let saved_position = pos(0x56780000, 42.0, 24.0, 9.0);
 
     let events = state.handle_message(&GameMessage::PrivateUpdatePosition(Box::new(
         PrivateUpdatePositionData {
@@ -2126,18 +2118,10 @@ fn test_public_update_position_non_location_for_player_is_stored_without_moving_
     let player_guid = Guid(0x50000123);
     state.player.guid = player_guid;
 
-    let live_position = WorldPosition {
-        landblock_id: Guid(0x12340000),
-        coords: Vector3::new(1.0, 2.0, 3.0),
-        rotation: holtburger_common::math::Quaternion::identity(),
-    };
+    let live_position = pos(0x12340000, 1.0, 2.0, 3.0);
     state.seed_local_player_entity(player_guid, "Player", live_position);
 
-    let sanctuary_position = WorldPosition {
-        landblock_id: Guid(0x9ABC0000),
-        coords: Vector3::new(11.0, 12.0, 13.0),
-        rotation: holtburger_common::math::Quaternion::identity(),
-    };
+    let sanctuary_position = pos(0x9ABC0000, 11.0, 12.0, 13.0);
 
     let events = state.handle_message(&GameMessage::PublicUpdatePosition(Box::new(
         PublicUpdatePositionData {
@@ -2169,16 +2153,12 @@ fn remote_location_quality_preserves_runtime_correction_and_placement_ownership(
         ] {
             let mut state = WorldState::synthetic();
             let guid = Guid(0x50000999);
-            let initial = WorldPosition {
-                landblock_id: Guid(0x1234_0001),
-                rotation: Quaternion::identity(),
-                ..WorldPosition::default()
-            };
+            let initial = pos(0x1234_0001, 0.0, 0.0, 0.0);
             let target = WorldPosition {
                 coords: Vector3::new(1.0, 0.0, 0.0),
                 ..initial
             };
-            state.add_entity(Entity::new(guid, "Remote".to_owned(), initial));
+            state.add_entity(remote_entity(guid, initial));
             let body_id = SpatialBodyId::Entity(guid);
             if pending_correction {
                 state.apply_authoritative_pose_effect(
@@ -2231,20 +2211,12 @@ fn test_public_update_position_non_location_for_other_entity_does_not_move_it() 
         WorldPosition::default(),
     ));
 
-    let live_position = WorldPosition {
-        landblock_id: Guid(0x12340000),
-        coords: Vector3::new(3.0, 4.0, 5.0),
-        rotation: holtburger_common::math::Quaternion::identity(),
-    };
+    let live_position = pos(0x12340000, 3.0, 4.0, 5.0);
     state
         .entities
         .insert(Entity::new(other_guid, "Other".to_string(), live_position));
 
-    let non_live_position = WorldPosition {
-        landblock_id: Guid(0x56780000),
-        coords: Vector3::new(30.0, 40.0, 50.0),
-        rotation: holtburger_common::math::Quaternion::identity(),
-    };
+    let non_live_position = pos(0x56780000, 30.0, 40.0, 50.0);
 
     let events = state.handle_message(&GameMessage::PublicUpdatePosition(Box::new(
         PublicUpdatePositionData {
@@ -2360,14 +2332,7 @@ fn test_inventory_put_obj_in_container_emits_entity_moved_when_item_leaves_world
     let container_guid = Guid(0x2);
     let item_guid = Guid(0x3);
 
-    let mut item = Entity::new(
-        item_guid,
-        "Item".to_string(),
-        WorldPosition {
-            landblock_id: Guid(0x1234),
-            ..WorldPosition::default()
-        },
-    );
+    let mut item = Entity::new(item_guid, "Item".to_string(), pos(0x1234, 0.0, 0.0, 0.0));
     item.set_wielder_id(Some(Guid(0x9)));
     state.entities.insert(item);
 
@@ -2406,10 +2371,7 @@ fn test_wield_object() {
     state.entities.insert(Entity::new(
         obj_guid,
         "Weapon".to_string(),
-        WorldPosition {
-            landblock_id: Guid(0x1234),
-            ..WorldPosition::default()
-        },
+        pos(0x1234, 0.0, 0.0, 0.0),
     ));
 
     let data = WieldObjectEventData {
@@ -2490,16 +2452,8 @@ fn test_player_description_initialization() {
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x50000001);
     let player_name = "TestingPlayer".to_string();
-    let bootstrap_pos = WorldPosition {
-        landblock_id: Guid(0x12340000),
-        coords: Vector3::new(12.0, 34.0, 56.0),
-        rotation: holtburger_common::math::Quaternion::identity(),
-    };
-    let saved_death = WorldPosition {
-        landblock_id: Guid(0x56780001),
-        coords: Vector3::new(42.0, 24.0, 9.0),
-        rotation: holtburger_common::math::Quaternion::identity(),
-    };
+    let bootstrap_pos = pos(0x12340000, 12.0, 34.0, 56.0);
+    let saved_death = pos(0x56780001, 42.0, 24.0, 9.0);
     let options1 =
         CharacterOptions1::USE_CRAFT_SUCCESS_DIALOG | CharacterOptions1::HEAR_ALLEGIANCE_CHAT;
     let options2 = CharacterOptions2::SHOW_HELM | CharacterOptions2::HEAR_GENERAL_CHAT;
@@ -2512,27 +2466,17 @@ fn test_player_description_initialization() {
     properties.set_int64_prop(PropertyInt64::AvailableExperience, 12345);
 
     let data = PlayerDescriptionEventData {
-        guid: player_guid,
-        sequence: 1,
         name: player_name.clone(),
-        wee_type: 1,
         pos: Some(bootstrap_pos),
         properties,
         positions: [(PositionType::LastOutsideDeath as u32, saved_death)].into(),
-        attributes: std::collections::BTreeMap::new(),
-        skills: std::collections::BTreeMap::new(),
-        enchantments: Vec::new(),
-        spells: std::collections::BTreeMap::new(),
-        has_health: true,
         options1,
         options2,
-        shortcuts: Vec::new(),
         hotbar_spells: hotbar_spells.clone(),
         desired_comps: desired_comps.clone(),
         spellbook_filters,
         gameplay_options: gameplay_options.clone(),
-        inventory: Vec::new(),
-        equipped_objects: Vec::new(),
+        ..default_player_description(player_guid)
     };
 
     let event = GameEvent::PlayerDescription(Box::new(data));
@@ -2570,17 +2514,14 @@ fn test_player_description_initialization() {
         player_entity.get_int64_prop(PropertyInt64::AvailableExperience),
         Some(12345)
     );
+    assert_eq!(state.get_level_info().level, 17);
     assert!(events.iter().any(|event| matches!(
         event,
-        WorldEvent::PlayerInfo(data)
-            if data.entity.guid == player_guid
-                && data.entity.name() == player_name
-                && data.entity.position == bootstrap_pos
-                && data.level_info.level == 17
+        WorldEvent::PlayerInfo(entity)
+            if entity.guid == player_guid
+                && entity.name() == player_name
+                && entity.position == bootstrap_pos
     )));
-    assert!(events.iter().any(
-        |event| matches!(event, WorldEvent::LevelInfoUpdated(level_info) if level_info.level == 17)
-    ));
     assert!(
         state
             .player
@@ -2653,11 +2594,7 @@ fn test_player_description_initialization() {
 fn test_parent_event_does_not_null_player_landblock() {
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x50000001);
-    let initial_pos = WorldPosition {
-        landblock_id: Guid(0xDA55001C),
-        coords: Vector3::new(1.0, 2.0, 3.0),
-        rotation: holtburger_common::math::Quaternion::identity(),
-    };
+    let initial_pos = pos(0xDA55001C, 1.0, 2.0, 3.0);
 
     state.player.guid = player_guid;
     state.seed_local_player_entity(player_guid, "Player", initial_pos);
@@ -2695,11 +2632,7 @@ fn test_parent_event_does_not_null_player_landblock() {
 fn test_player_wielder_iid_update_keeps_position() {
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x50000001);
-    let initial_pos = WorldPosition {
-        landblock_id: Guid(0xDA55001C),
-        coords: Vector3::new(1.0, 2.0, 3.0),
-        rotation: holtburger_common::math::Quaternion::identity(),
-    };
+    let initial_pos = pos(0xDA55001C, 1.0, 2.0, 3.0);
 
     state.player.guid = player_guid;
     state.seed_local_player_entity(player_guid, "Player", initial_pos);
@@ -2879,47 +2812,21 @@ fn test_self_object_create_bootstraps_player_position() {
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x50000042);
 
-    let initial_pos = WorldPosition {
-        landblock_id: Guid(0x12340000),
-        coords: Vector3::new(1.0, 2.0, 3.0),
-        rotation: holtburger_common::math::Quaternion::identity(),
-    };
+    let initial_pos = pos(0x12340000, 1.0, 2.0, 3.0);
     let mut private_properties = WorldObjectProperties::default();
     private_properties.set_int_prop(PropertyInt::CoinValue, 12345);
-    let player_description = GameMessage::GameEvent(Box::new(GameEventMessage {
-        target: player_guid,
-        sequence: 1,
-        event: GameEvent::PlayerDescription(Box::new(PlayerDescriptionEventData {
-            guid: player_guid,
-            sequence: 1,
-            name: "Player".to_string(),
-            wee_type: 1,
+    let player_description = game_event(
+        player_guid,
+        1,
+        GameEvent::PlayerDescription(Box::new(PlayerDescriptionEventData {
             pos: Some(initial_pos),
             properties: private_properties,
-            positions: std::collections::BTreeMap::new(),
-            attributes: std::collections::BTreeMap::new(),
-            skills: std::collections::BTreeMap::new(),
-            enchantments: Vec::new(),
-            spells: std::collections::BTreeMap::new(),
-            has_health: true,
-            options1: CharacterOptions1::empty(),
-            options2: CharacterOptions2::empty(),
-            shortcuts: Vec::new(),
-            hotbar_spells: Vec::new(),
-            desired_comps: Vec::new(),
-            spellbook_filters: 0,
-            gameplay_options: Vec::new(),
-            inventory: Vec::new(),
-            equipped_objects: Vec::new(),
+            ..default_player_description(player_guid)
         })),
-    }));
+    );
     let _ = state.handle_message(&player_description);
 
-    let bootstrap_pos = WorldPosition {
-        landblock_id: Guid(0x12340010),
-        coords: Vector3::new(11.0, 22.0, 33.0),
-        rotation: holtburger_common::math::Quaternion::identity(),
-    };
+    let bootstrap_pos = pos(0x12340010, 11.0, 22.0, 33.0);
 
     let mut data = ObjectDescriptionData::with_guid(player_guid);
     data.public_weenie_desc.name = Some("Player".to_string());
@@ -3144,8 +3051,7 @@ fn test_container_iid_update_tracks_player_inventory_and_clears_deadline() {
         WorldPosition::default(),
     ));
 
-    let mut item = Entity::new(guid, "Item".to_string(), WorldPosition::default());
-    item.position.landblock_id = Guid::NULL;
+    let item = off_world_entity(guid, "Item");
     state.entities.insert(item);
     state.request_unretained_entity_prune(guid, state.current_server_time() - 1.0);
 
@@ -3174,10 +3080,7 @@ fn test_pickup_event_marks_unretained_entity_for_sweep() {
     state.entities.insert(Entity::new(
         guid,
         "GroundLoot".to_string(),
-        WorldPosition {
-            landblock_id: Guid(0x1234),
-            ..WorldPosition::default()
-        },
+        pos(0x1234, 0.0, 0.0, 0.0),
     ));
 
     let msg = GameMessage::PickupEvent(Box::new(PickupEventData {
@@ -3229,8 +3132,7 @@ fn test_explicit_delete_hides_entity_from_filtered_access() {
 fn test_retention_snapshot_reflects_lifecycle_metadata() {
     let mut state = WorldState::synthetic();
     let guid = Guid(0xDEF);
-    let mut entity = Entity::new(guid, "Preview".to_string(), WorldPosition::default());
-    entity.position.landblock_id = Guid::NULL;
+    let entity = off_world_entity(guid, "Preview");
     state.entities.insert(entity);
 
     state.mark_trade_preview(guid);
@@ -3297,12 +3199,8 @@ fn test_upsert_entity_from_create_replaces_in_place() {
 fn test_add_entity_seeds_remote_body_sidecar() {
     let mut state = WorldState::synthetic();
     let guid = Guid(0x6200_0001);
-    let position = WorldPosition {
-        landblock_id: Guid(0x0101_FFFF),
-        coords: Vector3::new(3.0, 4.0, 5.0),
-        rotation: holtburger_common::math::Quaternion::identity(),
-    };
-    let mut entity = Entity::new(guid, "Remote".to_string(), position);
+    let position = pos(0x0101_FFFF, 3.0, 4.0, 5.0);
+    let mut entity = remote_entity(guid, position);
     entity.velocity = Vector3::new(1.0, 2.0, 0.0);
     entity.omega = Vector3::new(0.0, 0.0, 0.5);
 
@@ -3323,19 +3221,11 @@ fn test_add_entity_seeds_remote_body_sidecar() {
 fn player_confirmation_and_server_vectors_preserve_local_runtime_kinematics() {
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x5000_0100);
-    let initial_pos = WorldPosition {
-        landblock_id: Guid(0x1111_FFFF),
-        coords: Vector3::new(1.0, 1.0, 0.0),
-        rotation: holtburger_common::math::Quaternion::identity(),
-    };
+    let initial_pos = pos(0x1111_FFFF, 1.0, 1.0, 0.0);
     state.player.guid = player_guid;
     state.seed_local_player_entity(player_guid, "Player", initial_pos);
 
-    let moved = WorldPosition {
-        landblock_id: Guid(0x2222_FFFF),
-        coords: Vector3::new(9.0, 8.0, 7.0),
-        rotation: holtburger_common::math::Quaternion::identity(),
-    };
+    let moved = pos(0x2222_FFFF, 9.0, 8.0, 7.0);
 
     let body_id = SpatialBodyId::LocalPlayer(player_guid);
     let local_velocity = Vector3::new(1.0, 2.0, 3.0);
@@ -3374,23 +3264,14 @@ fn contacted_near_remote_position_preserves_runtime_pose_then_interpolates_on_ti
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x6200_0010);
     let remote_guid = Guid(0x6200_0011);
-    let pose = |x| WorldPosition {
-        landblock_id: Guid(0x0100_0001),
-        coords: Vector3::new(x, 0.0, 0.0),
-        rotation: holtburger_common::math::Quaternion::identity(),
-    };
+    let pose = |x| pos(0x0100_0001, x, 0.0, 0.0);
     state.player.guid = player_guid;
     state.seed_local_player_entity(player_guid, "Player", pose(0.0));
-    state.add_entity(Entity::new(remote_guid, "Remote".to_owned(), pose(8.0)));
+    state.add_entity(remote_entity(remote_guid, pose(8.0)));
 
     let accepted = state.apply_entity_position_pack(
         remote_guid,
-        &PositionPack {
-            pos: pose(10.0),
-            position_sequence: 1,
-            flags: UpdatePositionFlag::HAS_CONTACT,
-            ..PositionPack::default()
-        },
+        &position_pack(pose(10.0), 1, UpdatePositionFlag::HAS_CONTACT),
         &mut Vec::new(),
     );
     assert!(accepted);
@@ -3420,11 +3301,8 @@ fn contacted_near_remote_position_preserves_runtime_pose_then_interpolates_on_ti
 fn remote_position_requires_a_strictly_newer_position_sequence() {
     let mut state = WorldState::synthetic();
     let guid = Guid(0x6200_0012);
-    let initial = WorldPosition {
-        landblock_id: Guid(0x0100_0001),
-        ..WorldPosition::default()
-    };
-    state.add_entity(Entity::new(guid, "Remote".to_owned(), initial));
+    let initial = pos(0x0100_0001, 0.0, 0.0, 0.0);
+    state.add_entity(remote_entity(guid, initial));
 
     assert!(!state.apply_entity_position_pack(
         guid,
@@ -3451,22 +3329,13 @@ fn remote_position_at_retail_distance_boundary_schedules_tick_snap() {
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x6200_0013);
     let remote_guid = Guid(0x6200_0014);
-    let pose = |x| WorldPosition {
-        landblock_id: Guid(0x0100_0001),
-        coords: Vector3::new(x, 0.0, 0.0),
-        rotation: holtburger_common::math::Quaternion::identity(),
-    };
+    let pose = |x| pos(0x0100_0001, x, 0.0, 0.0);
     state.player.guid = player_guid;
     state.seed_local_player_entity(player_guid, "Player", pose(0.0));
-    state.add_entity(Entity::new(remote_guid, "Remote".to_owned(), pose(96.0)));
+    state.add_entity(remote_entity(remote_guid, pose(96.0)));
     assert!(state.apply_entity_position_pack(
         remote_guid,
-        &PositionPack {
-            pos: pose(100.0),
-            position_sequence: 1,
-            flags: UpdatePositionFlag::HAS_CONTACT,
-            ..PositionPack::default()
-        },
+        &position_pack(pose(100.0), 1, UpdatePositionFlag::HAS_CONTACT),
         &mut Vec::new(),
     ));
 
@@ -3496,20 +3365,11 @@ fn valid_remote_position_recovers_a_missing_runtime_cell() {
         "Remote".to_owned(),
         WorldPosition::default(),
     ));
-    let recovered = WorldPosition {
-        landblock_id: Guid(0x0100_0001),
-        coords: Vector3::new(5.0, 0.0, 0.0),
-        rotation: holtburger_common::math::Quaternion::identity(),
-    };
+    let recovered = pos(0x0100_0001, 5.0, 0.0, 0.0);
     let mut events = Vec::new();
     assert!(state.apply_entity_position_pack(
         guid,
-        &PositionPack {
-            pos: recovered,
-            position_sequence: 1,
-            flags: UpdatePositionFlag::HAS_CONTACT,
-            ..PositionPack::default()
-        },
+        &position_pack(recovered, 1, UpdatePositionFlag::HAS_CONTACT),
         &mut events,
     ));
     assert_eq!(
@@ -3526,11 +3386,7 @@ fn valid_remote_position_recovers_a_missing_runtime_cell() {
 fn newer_remote_teleport_resets_and_suspends_body_sampling() {
     let mut state = WorldState::synthetic();
     let guid = Guid(0x6200_0002);
-    let initial_pos = WorldPosition {
-        landblock_id: Guid(0x0100_0000),
-        coords: Vector3::new(1.0, 2.0, 3.0),
-        rotation: holtburger_common::math::Quaternion::identity(),
-    };
+    let initial_pos = pos(0x0100_0000, 1.0, 2.0, 3.0);
     let mut entity = Entity::new(guid, "Target".to_string(), initial_pos);
     entity.sequences[4] = 30;
     entity.sequences[6] = 40;
@@ -3539,11 +3395,7 @@ fn newer_remote_teleport_resets_and_suspends_body_sampling() {
     let accepted = state.apply_entity_position_pack(
         guid,
         &PositionPack {
-            pos: WorldPosition {
-                landblock_id: Guid(0x0200_0000),
-                coords: Vector3::new(10.0, 20.0, 30.0),
-                rotation: holtburger_common::math::Quaternion::identity(),
-            },
+            pos: pos(0x0200_0000, 10.0, 20.0, 30.0),
             instance_sequence: 2,
             position_sequence: 3,
             teleport_sequence: 31,
@@ -3576,12 +3428,8 @@ fn rejected_remote_position_does_not_replace_observation_or_correction_authority
     {
         let mut state = WorldState::synthetic();
         let guid = Guid(0x6200_0006);
-        let initial = WorldPosition {
-            landblock_id: Guid(0x0100_0001),
-            rotation: holtburger_common::Quaternion::identity(),
-            ..WorldPosition::default()
-        };
-        state.add_entity(Entity::new(guid, "Remote".into(), initial));
+        let initial = pos(0x0100_0001, 0.0, 0.0, 0.0);
+        state.add_entity(remote_entity(guid, initial));
         let before = state
             .scene
             .body(SpatialBodyId::Entity(guid))
@@ -3617,11 +3465,7 @@ fn rejected_remote_position_does_not_replace_observation_or_correction_authority
 fn non_contact_remote_position_retains_observation_without_changing_simulation() {
     let mut state = WorldState::synthetic();
     let guid = Guid(0x6200_0005);
-    let initial_pos = WorldPosition {
-        landblock_id: Guid(0x0100_0000),
-        coords: Vector3::new(1.0, 2.0, 3.0),
-        rotation: holtburger_common::math::Quaternion::identity(),
-    };
+    let initial_pos = pos(0x0100_0000, 1.0, 2.0, 3.0);
     let mut entity = Entity::new(guid, "Target".to_string(), initial_pos);
     entity.velocity = Vector3::new(0.0, 0.0, 20.046_688);
     state.add_entity(entity);
@@ -3630,11 +3474,7 @@ fn non_contact_remote_position_retains_observation_without_changing_simulation()
     let applied = state.apply_entity_position_pack(
         guid,
         &PositionPack {
-            pos: WorldPosition {
-                landblock_id: Guid(0x0100_0000),
-                coords: Vector3::new(9.745_981, -58.954_994, 0.004_999_995),
-                rotation: holtburger_common::math::Quaternion::identity(),
-            },
+            pos: pos(0x0100_0000, 9.745_981, -58.954_994, 0.004_999_995),
             velocity: Some(Vector3::new(-1.327_315_8, 5.460_433_5, -18.468_733)),
             instance_sequence: 0,
             position_sequence: 285,
@@ -3665,11 +3505,7 @@ fn non_contact_remote_position_retains_observation_without_changing_simulation()
     let applied = state.apply_entity_position_pack(
         guid,
         &PositionPack {
-            pos: WorldPosition {
-                landblock_id: Guid(0x0100_0000),
-                coords: Vector3::new(9.745_981, -58.954_994, 0.004_999_995),
-                rotation: holtburger_common::math::Quaternion::identity(),
-            },
+            pos: pos(0x0100_0000, 9.745_981, -58.954_994, 0.004_999_995),
             instance_sequence: 0,
             position_sequence: 286,
             teleport_sequence: 0,
@@ -3745,10 +3581,7 @@ fn test_remove_entity_retires_body_sidecar() {
     state.add_entity(Entity::new(
         guid,
         "Disposable".to_string(),
-        WorldPosition {
-            landblock_id: Guid(0x0303_FFFF),
-            ..Default::default()
-        },
+        pos(0x0303_FFFF, 0.0, 0.0, 0.0),
     ));
 
     let removed = state.remove_entity(guid);
@@ -3764,10 +3597,7 @@ fn test_clear_world_presence_retires_body_sidecar() {
     state.add_entity(Entity::new(
         guid,
         "Contained".to_string(),
-        WorldPosition {
-            landblock_id: Guid(0x0404_FFFF),
-            ..Default::default()
-        },
+        pos(0x0404_FFFF, 0.0, 0.0, 0.0),
     ));
 
     let cleared = state.clear_entity_world_presence(guid);
@@ -3816,8 +3646,7 @@ fn test_tick_sweeps_expired_deadline_without_movement() {
         WorldPosition::default(),
     ));
 
-    let mut target = Entity::new(target_guid, "Target".to_string(), WorldPosition::default());
-    target.position.landblock_id = Guid::NULL;
+    let target = off_world_entity(target_guid, "Target");
     state.entities.insert(target);
     state.request_unretained_entity_prune(target_guid, state.current_server_time() - 1.0);
 
@@ -3837,12 +3666,12 @@ fn admitted_set_state_updates_local_player_instance_sequence_and_entity_physics_
     state.seed_local_player_entity(state.player.guid, "Player", WorldPosition::default());
     state.entities.get_mut(state.player.guid).unwrap().sequences
         [crate::entity::OBJECT_INSTANCE_SEQUENCE_INDEX] = 1649;
-    let events = state.handle_message(&GameMessage::SetState(Box::new(SetStateData {
-        guid: state.player.guid,
-        physics_state: PhysicsState::REPORT_COLLISIONS | PhysicsState::IGNORE_COLLISIONS,
-        instance_sequence: 1649,
-        state_sequence: 1,
-    })));
+    let events = state.handle_message(&set_state_msg(
+        state.player.guid,
+        PhysicsState::REPORT_COLLISIONS | PhysicsState::IGNORE_COLLISIONS,
+        1649,
+        1,
+    ));
 
     assert_eq!(state.player.instance_sequence, 1649);
     let player_entity = state
@@ -3944,15 +3773,7 @@ fn set_state_dynamic_definition() -> crate::DynamicPhysicalBodyConfiguration {
 fn script_scale_is_absolute_and_updates_the_installed_unit_body() {
     let mut state = WorldState::synthetic();
     let guid = Guid(0x7000_0100);
-    let mut entity = Entity::new(
-        guid,
-        "Scaled".to_owned(),
-        WorldPosition {
-            landblock_id: Guid(0xda55_0020),
-            coords: Vector3::zero(),
-            rotation: Quaternion::identity(),
-        },
-    );
+    let mut entity = Entity::new(guid, "Scaled".to_owned(), pos(0xda55_0020, 0.0, 0.0, 0.0));
     entity.set_property(PropertyUpdate::Float(
         holtburger_common::properties::PropertyFloat::DefaultScale,
         2.0,
@@ -4036,11 +3857,7 @@ fn solidification_uses_published_part_pose_and_preserves_it_through_retry() {
     let mut state = WorldState::synthetic();
     let door = Guid(0x7000_0101);
     let peer = Guid(0x7000_0102);
-    let pose = WorldPosition {
-        landblock_id: Guid(0xda55_0020),
-        coords: Vector3::new(96.0, 96.0, 1.0),
-        rotation: Quaternion::identity(),
-    };
+    let pose = pos(0xda55_0020, 96.0, 96.0, 1.0);
     state.add_entity(Entity::new(door, "Door".to_owned(), pose));
     state.add_entity(Entity::new(
         peer,
@@ -4202,11 +4019,7 @@ fn authored_ethereal_hook_blocks_solidification_until_the_peer_clears() {
     let mut state = WorldState::synthetic();
     let door_guid = Guid(0x7000_0101);
     let peer_guid = Guid(0x7000_0102);
-    let door_pose = WorldPosition {
-        landblock_id: Guid(0xDA55_0020),
-        coords: Vector3::zero(),
-        rotation: Quaternion::identity(),
-    };
+    let door_pose = pos(0xDA55_0020, 0.0, 0.0, 0.0);
     let peer_pose = WorldPosition {
         coords: Vector3::new(0.75, 0.0, 0.0),
         ..door_pose
@@ -4275,11 +4088,7 @@ fn authored_ethereal_hook_blocks_solidification_until_the_peer_clears() {
 fn admitted_set_state_reconciles_authored_prediction_and_runtime_body_policy() {
     let mut state = WorldState::synthetic();
     let guid = Guid(0x7000_0103);
-    let pose = WorldPosition {
-        landblock_id: Guid(0xDA55_0020),
-        coords: Vector3::zero(),
-        rotation: Quaternion::identity(),
-    };
+    let pose = pos(0xDA55_0020, 0.0, 0.0, 0.0);
     state.add_entity(Entity::new(guid, "Door".to_owned(), pose));
     let body_id = SpatialBodyId::Entity(guid);
     state
@@ -4342,12 +4151,8 @@ fn admitted_set_state_reconciles_authored_prediction_and_runtime_body_policy() {
 fn set_state_updates_semantic_truth_without_inferring_client_physical_policy() {
     let mut state = WorldState::synthetic();
     let guid = Guid(0x7000_0001);
-    let pose = WorldPosition {
-        landblock_id: Guid(0xDA55_0020),
-        coords: Vector3::new(96.0, 96.0, 20.0),
-        rotation: Quaternion::identity(),
-    };
-    state.add_entity(Entity::new(guid, "Remote".to_owned(), pose));
+    let pose = pos(0xDA55_0020, 96.0, 96.0, 20.0);
+    state.add_entity(remote_entity(guid, pose));
     let body_id = SpatialBodyId::Entity(guid);
     state
         .scene
@@ -4417,8 +4222,7 @@ fn test_tick_does_not_sweep_unexpired_deadline() {
         WorldPosition::default(),
     ));
 
-    let mut target = Entity::new(target_guid, "Target".to_string(), WorldPosition::default());
-    target.position.landblock_id = Guid::NULL;
+    let target = off_world_entity(target_guid, "Target");
     state.entities.insert(target);
     state.request_unretained_entity_prune(target_guid, state.current_server_time() + 60.0);
 
@@ -4452,21 +4256,10 @@ fn test_tick_runs_sweep_without_player_guid() {
 fn test_stationary_tick_starts_visibility_prune_request() {
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x50000130);
-    let player_pos = WorldPosition {
-        landblock_id: Guid(0x0A0AFFFF),
-        coords: Vector3::new(0.0, 0.0, 0.0),
-        rotation: holtburger_common::math::Quaternion::identity(),
-    };
-    let far_pos = WorldPosition {
-        landblock_id: Guid(0x2020FFFF),
-        coords: Vector3::new(0.0, 0.0, 0.0),
-        rotation: holtburger_common::math::Quaternion::identity(),
-    };
+    let player_pos = pos(0x0A0AFFFF, 0.0, 0.0, 0.0);
+    let far_pos = pos(0x2020FFFF, 0.0, 0.0, 0.0);
 
-    state.server_time = Some(ServerTimeSync {
-        server_time: 100.0,
-        local_time: Instant::now(),
-    });
+    set_server_time(&mut state, 100.0);
     state.player.guid = player_guid;
     state.seed_local_player_entity(player_guid, "Player", player_pos);
 
@@ -4488,21 +4281,10 @@ fn test_stationary_tick_starts_visibility_prune_request() {
 fn test_visibility_timeout_sweeps_world_entity_after_25_seconds() {
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x50000131);
-    let player_pos = WorldPosition {
-        landblock_id: Guid(0x0A0AFFFF),
-        coords: Vector3::new(0.0, 0.0, 0.0),
-        rotation: holtburger_common::math::Quaternion::identity(),
-    };
-    let far_pos = WorldPosition {
-        landblock_id: Guid(0x2020FFFF),
-        coords: Vector3::new(0.0, 0.0, 0.0),
-        rotation: holtburger_common::math::Quaternion::identity(),
-    };
+    let player_pos = pos(0x0A0AFFFF, 0.0, 0.0, 0.0);
+    let far_pos = pos(0x2020FFFF, 0.0, 0.0, 0.0);
 
-    state.server_time = Some(ServerTimeSync {
-        server_time: 100.0,
-        local_time: Instant::now(),
-    });
+    set_server_time(&mut state, 100.0);
     state.player.guid = player_guid;
     state.seed_local_player_entity(player_guid, "Player", player_pos);
 
@@ -4515,10 +4297,7 @@ fn test_visibility_timeout_sweeps_world_entity_after_25_seconds() {
         .and_then(|lifecycle| lifecycle.prune_request.map(|request| request.deadline))
         .expect("expected a destruction deadline to be assigned");
 
-    state.server_time = Some(ServerTimeSync {
-        server_time: deadline + 1.0,
-        local_time: Instant::now(),
-    });
+    set_server_time(&mut state, deadline + 1.0);
 
     let events = state.tick(None);
 
@@ -4532,21 +4311,10 @@ fn test_visibility_timeout_sweeps_world_entity_after_25_seconds() {
 fn test_reentry_before_timeout_clears_visibility_prune_request() {
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x50000132);
-    let player_pos = WorldPosition {
-        landblock_id: Guid(0x0A0AFFFF),
-        coords: Vector3::new(0.0, 0.0, 0.0),
-        rotation: holtburger_common::math::Quaternion::identity(),
-    };
-    let far_pos = WorldPosition {
-        landblock_id: Guid(0x2020FFFF),
-        coords: Vector3::new(0.0, 0.0, 0.0),
-        rotation: holtburger_common::math::Quaternion::identity(),
-    };
+    let player_pos = pos(0x0A0AFFFF, 0.0, 0.0, 0.0);
+    let far_pos = pos(0x2020FFFF, 0.0, 0.0, 0.0);
 
-    state.server_time = Some(ServerTimeSync {
-        server_time: 100.0,
-        local_time: Instant::now(),
-    });
+    set_server_time(&mut state, 100.0);
     state.player.guid = player_guid;
     state.seed_local_player_entity(player_guid, "Player", player_pos);
 
@@ -4561,10 +4329,7 @@ fn test_reentry_before_timeout_clears_visibility_prune_request() {
             .is_some()
     );
 
-    state.server_time = Some(ServerTimeSync {
-        server_time: 110.0,
-        local_time: Instant::now(),
-    });
+    set_server_time(&mut state, 110.0);
 
     let mut events = Vec::new();
     let _ = state.apply_public_position_update(
@@ -4586,11 +4351,7 @@ fn test_reentry_before_timeout_clears_visibility_prune_request() {
 fn test_nearby_entities_omit_explicit_delete_and_null_landblock() {
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x50000133);
-    let player_pos = WorldPosition {
-        landblock_id: Guid(0x0A0AFFFF),
-        coords: Vector3::new(0.0, 0.0, 0.0),
-        rotation: holtburger_common::math::Quaternion::identity(),
-    };
+    let player_pos = pos(0x0A0AFFFF, 0.0, 0.0, 0.0);
 
     state.player.guid = player_guid;
     state.seed_local_player_entity(player_guid, "Player", player_pos);
@@ -4666,10 +4427,7 @@ fn test_reset_trade_sweeps_preview_only_entities() {
     let player_guid = Guid(0x50000141);
     let preview_guid = Guid(0x60000142);
 
-    state.server_time = Some(ServerTimeSync {
-        server_time: 100.0,
-        local_time: Instant::now(),
-    });
+    set_server_time(&mut state, 100.0);
 
     state.player.guid = player_guid;
     state.register_trade(player_guid, Guid(0x5000BEEF), &mut Vec::new());
@@ -4706,10 +4464,7 @@ fn test_reset_trade_sweeps_preview_only_entities() {
             .is_some_and(|trade| trade.partner_side.items.is_empty())
     );
 
-    state.server_time = Some(ServerTimeSync {
-        server_time: deadline + 1.0,
-        local_time: Instant::now(),
-    });
+    set_server_time(&mut state, deadline + 1.0);
 
     let tick_events = state.tick(None);
     assert!(state.entities.get(preview_guid).is_none());
@@ -4725,11 +4480,11 @@ fn clear_trade_acceptance_resets_offers_and_releases_previews() {
     let item = Guid(0x60000143);
     state.register_trade(state.player.guid, Guid(0x5000BEEF), &mut Vec::new());
     state.add_trade_item(2, item, &mut Vec::new());
-    let events = state.handle_message(&GameMessage::GameEvent(Box::new(GameEventMessage {
-        target: state.player.guid,
-        sequence: 1,
-        event: GameEvent::ClearTradeAcceptance,
-    })));
+    let events = state.handle_message(&game_event(
+        state.player.guid,
+        1,
+        GameEvent::ClearTradeAcceptance,
+    ));
     let trade = state.trade.as_ref().unwrap();
     assert!(trade.self_side.items.is_empty());
     assert!(trade.partner_side.items.is_empty());
@@ -4751,10 +4506,7 @@ fn test_close_trade_sweeps_preview_only_entities() {
     let player_guid = Guid(0x50000152);
     let preview_guid = Guid(0x60000152);
 
-    state.server_time = Some(ServerTimeSync {
-        server_time: 100.0,
-        local_time: Instant::now(),
-    });
+    set_server_time(&mut state, 100.0);
 
     state.player.guid = player_guid;
     state.register_trade(player_guid, Guid(0x5000BEEF), &mut Vec::new());
@@ -4791,10 +4543,7 @@ fn test_close_trade_sweeps_preview_only_entities() {
         |event| matches!(event, WorldEvent::EntityDespawned { guid, .. } if *guid == preview_guid)
     ));
 
-    state.server_time = Some(ServerTimeSync {
-        server_time: deadline + 1.0,
-        local_time: Instant::now(),
-    });
+    set_server_time(&mut state, deadline + 1.0);
 
     let tick_events = state.tick(None);
     assert!(state.entities.get(preview_guid).is_none());
@@ -4810,10 +4559,7 @@ fn test_trade_complete_preserves_real_owned_entity_while_pruning_preview_only_en
     let preview_guid = Guid(0x60000144);
     let owned_guid = Guid(0x60000145);
 
-    state.server_time = Some(ServerTimeSync {
-        server_time: 100.0,
-        local_time: Instant::now(),
-    });
+    set_server_time(&mut state, 100.0);
 
     state.player.guid = player_guid;
     state.register_trade(player_guid, Guid(0x5000BEEF), &mut Vec::new());
@@ -4827,8 +4573,7 @@ fn test_trade_complete_preserves_real_owned_entity_while_pruning_preview_only_en
     state.entities.insert(preview_entity);
     state.mark_trade_preview(preview_guid);
 
-    let mut owned_entity = Entity::new(owned_guid, "Owned".to_string(), WorldPosition::default());
-    owned_entity.position.landblock_id = Guid::NULL;
+    let owned_entity = off_world_entity(owned_guid, "Owned");
     state.entities.insert(owned_entity);
     state.mark_trade_preview(owned_guid);
     state
@@ -4861,10 +4606,7 @@ fn test_trade_complete_preserves_real_owned_entity_while_pruning_preview_only_en
         |event| matches!(event, WorldEvent::EntityDespawned { guid, .. } if *guid == preview_guid)
     ));
 
-    state.server_time = Some(ServerTimeSync {
-        server_time: deadline + 1.0,
-        local_time: Instant::now(),
-    });
+    set_server_time(&mut state, deadline + 1.0);
 
     let tick_events = state.tick(None);
     assert!(state.entities.get(preview_guid).is_none());
@@ -4878,20 +4620,13 @@ fn test_tick_does_not_prune_off_world_entities_with_inventory_equipment_or_open_
  {
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x50000154);
-    let player_pos = WorldPosition {
-        landblock_id: Guid(0x0A0AFFFF),
-        coords: Vector3::new(0.0, 0.0, 0.0),
-        rotation: holtburger_common::math::Quaternion::identity(),
-    };
+    let player_pos = pos(0x0A0AFFFF, 0.0, 0.0, 0.0);
     let inventory_guid = Guid(0x60000154);
     let equipped_guid = Guid(0x60000155);
     let container_guid = Guid(0x70000154);
     let preview_guid = Guid(0x60000156);
 
-    state.server_time = Some(ServerTimeSync {
-        server_time: 100.0,
-        local_time: Instant::now(),
-    });
+    set_server_time(&mut state, 100.0);
     state.player.guid = player_guid;
     state.seed_local_player_entity(player_guid, "Player", player_pos);
 
@@ -4966,10 +4701,10 @@ fn test_book_data_response_updates_entity_book_state() {
         WorldPosition::default(),
     ));
 
-    let message = GameMessage::GameEvent(Box::new(GameEventMessage {
-        target: Guid(0x50000001),
-        sequence: 0x21,
-        event: GameEvent::BookDataResponse(Box::new(BookDataResponseEventData {
+    let message = game_event(
+        Guid(0x50000001),
+        0x21,
+        GameEvent::BookDataResponse(Box::new(BookDataResponseEventData {
             object_guid: guid,
             max_num_pages: 3,
             num_pages: 3,
@@ -4987,7 +4722,7 @@ fn test_book_data_response_updates_entity_book_state() {
             author_id: 0xAABBCCDD,
             author_name: "Archivist".to_string(),
         })),
-    }));
+    );
 
     let events = state.handle_message(&message);
 
@@ -5002,9 +4737,9 @@ fn test_book_data_response_updates_entity_book_state() {
 
     let entity = state.entities.get(guid).expect("entity should still exist");
     let book = entity.book.as_ref().expect("book data should be populated");
-    assert_eq!(book.max_num_pages, Some(3));
     assert_eq!(book.pages.len(), 1);
     assert_eq!(book.pages[0].author_name, "Scribe One");
+    assert_eq!(book.author_name, None);
     assert_eq!(book.inscription.as_deref(), Some("Signed and sealed"));
 }
 
@@ -5016,22 +4751,17 @@ fn test_book_page_data_response_merges_into_existing_book_state() {
     entity.book = Some(crate::book::BookData {
         pages: vec![crate::book::BookPage {
             index: 0,
-            author_id: 1,
             author_name: "Page Zero".to_string(),
-            author_account: "old".to_string(),
-            flags: 0xFFFF0002,
-            text_included: false,
-            ignore_author: false,
             page_text: None,
         }],
         ..crate::book::BookData::default()
     });
     state.entities.insert(entity);
 
-    let message = GameMessage::GameEvent(Box::new(GameEventMessage {
-        target: Guid(0x50000001),
-        sequence: 0x22,
-        event: GameEvent::BookPageDataResponse(Box::new(BookPageDataResponseEventData {
+    let message = game_event(
+        Guid(0x50000001),
+        0x22,
+        GameEvent::BookPageDataResponse(Box::new(BookPageDataResponseEventData {
             object_guid: guid,
             page_index: 1,
             page: BookPageData {
@@ -5044,7 +4774,7 @@ fn test_book_page_data_response_merges_into_existing_book_state() {
                 page_text: Some("The second page has text.".to_string()),
             },
         })),
-    }));
+    );
 
     let events = state.handle_message(&message);
 
@@ -5072,10 +4802,7 @@ fn test_remove_entity_marks_wielded_dependents_for_prune() {
     let wielder_guid = Guid(0x60000157);
     let item_guid = Guid(0x60000158);
 
-    state.server_time = Some(ServerTimeSync {
-        server_time: 100.0,
-        local_time: Instant::now(),
-    });
+    set_server_time(&mut state, 100.0);
 
     state.add_entity(Entity::new(
         wielder_guid,
@@ -5086,10 +4813,7 @@ fn test_remove_entity_marks_wielded_dependents_for_prune() {
     let mut item = Entity::new(
         item_guid,
         "Wielded Item".to_string(),
-        WorldPosition {
-            landblock_id: Guid(0x0404_FFFF),
-            ..WorldPosition::default()
-        },
+        pos(0x0404_FFFF, 0.0, 0.0, 0.0),
     );
     item.set_wielder_id(Some(wielder_guid));
     item.set_int_prop(
@@ -5126,10 +4850,7 @@ fn test_orphaned_wielded_item_is_not_retained() {
     let mut state = WorldState::synthetic();
     let item_guid = Guid(0x6000015B);
 
-    state.server_time = Some(ServerTimeSync {
-        server_time: 100.0,
-        local_time: Instant::now(),
-    });
+    set_server_time(&mut state, 100.0);
 
     let mut item = Entity::new(
         item_guid,
@@ -5159,10 +4880,7 @@ fn test_remove_entity_marks_contained_dependents_for_prune() {
     let container_guid = Guid(0x60000159);
     let item_guid = Guid(0x6000015A);
 
-    state.server_time = Some(ServerTimeSync {
-        server_time: 100.0,
-        local_time: Instant::now(),
-    });
+    set_server_time(&mut state, 100.0);
 
     state.add_entity(Entity::new(
         container_guid,
@@ -5205,11 +4923,7 @@ fn parent_event_waits_for_parent_before_applying_the_typed_attachment() {
     state.entities.insert(Entity::new(
         item_guid,
         "Sword".to_string(),
-        WorldPosition {
-            landblock_id: Guid(0xDA55_001C),
-            coords: Vector3::new(1.0, 2.0, 3.0),
-            rotation: holtburger_common::math::Quaternion::identity(),
-        },
+        pos(0xDA55_001C, 1.0, 2.0, 3.0),
     ));
 
     state.handle_message(&GameMessage::ParentEvent(Box::new(ParentEventData {
@@ -5255,11 +4969,7 @@ fn parent_event_naming_an_unknown_location_leaves_the_entity_unattached() {
     state.entities.insert(Entity::new(
         item_guid,
         "Sword".to_string(),
-        WorldPosition {
-            landblock_id: Guid(0xDA55_001C),
-            coords: Vector3::new(1.0, 2.0, 3.0),
-            rotation: holtburger_common::math::Quaternion::identity(),
-        },
+        pos(0xDA55_001C, 1.0, 2.0, 3.0),
     ));
 
     // Resolve the parent prerequisite so this test reaches attach-point validation.
@@ -5289,15 +4999,7 @@ fn parent_event_naming_an_unknown_location_leaves_the_entity_unattached() {
 
 /// Position an entity somewhere unambiguous so delegation is visible.
 fn placed_entity(guid: Guid, name: &str, landblock: u32, x: f32) -> Entity {
-    Entity::new(
-        guid,
-        name.to_string(),
-        WorldPosition {
-            landblock_id: Guid(landblock),
-            coords: Vector3::new(x, 0.0, 0.0),
-            rotation: holtburger_common::math::Quaternion::identity(),
-        },
-    )
+    Entity::new(guid, name.to_string(), pos(landblock, x, 0.0, 0.0))
 }
 
 fn parent_event(parent: Guid, child: Guid, location: u32, placement: u32) -> GameMessage {
@@ -5369,11 +5071,7 @@ fn a_parent_announcing_an_unarrived_child_attaches_it_on_arrival() {
     let item = Guid(0x8000_0001);
 
     let mut wielder_data = ObjectDescriptionData::with_guid(wielder);
-    wielder_data.pos = Some(WorldPosition {
-        landblock_id: Guid(0xDA55_001C),
-        coords: Vector3::new(10.0, 0.0, 0.0),
-        rotation: holtburger_common::math::Quaternion::identity(),
-    });
+    wielder_data.pos = Some(pos(0xDA55_001C, 10.0, 0.0, 0.0));
     wielder_data.children = Some(vec![PhysicsChildData {
         guid: item,
         location_id: ParentLocation::LeftWeapon as u32,
@@ -5408,11 +5106,7 @@ fn a_child_that_arrives_first_is_delegated_once_its_parent_exists() {
     let item = Guid(0x8000_0001);
 
     let mut item_data = ObjectDescriptionData::with_guid(item);
-    item_data.pos = Some(WorldPosition {
-        landblock_id: Guid(0xDA55_001D),
-        coords: Vector3::new(99.0, 0.0, 0.0),
-        rotation: holtburger_common::math::Quaternion::identity(),
-    });
+    item_data.pos = Some(pos(0xDA55_001D, 99.0, 0.0, 0.0));
     item_data.parent = Some(PhysicsDescParent {
         id: wielder,
         location_id: ParentLocation::LeftWeapon as u32,
@@ -5427,11 +5121,7 @@ fn a_child_that_arrives_first_is_delegated_once_its_parent_exists() {
     );
 
     let mut wielder_data = ObjectDescriptionData::with_guid(wielder);
-    wielder_data.pos = Some(WorldPosition {
-        landblock_id: Guid(0xDA55_001C),
-        coords: Vector3::new(10.0, 0.0, 0.0),
-        rotation: holtburger_common::math::Quaternion::identity(),
-    });
+    wielder_data.pos = Some(pos(0xDA55_001C, 10.0, 0.0, 0.0));
     wielder_data.children = Some(vec![PhysicsChildData {
         guid: item,
         location_id: ParentLocation::LeftWeapon as u32,
@@ -5624,11 +5314,7 @@ fn position_only_sticky_requires_dimensions_and_tracks_received_targets() {
     let actor = Guid(0x5000_0001);
     let target = Guid(0x7000_0001);
     let setup = 0x0200_0001;
-    let pose = WorldPosition {
-        landblock_id: Guid(0x1234_0100),
-        coords: Vector3::zero(),
-        rotation: Quaternion::identity(),
-    };
+    let pose = pos(0x1234_0100, 0.0, 0.0, 0.0);
     world.seed_local_player_entity(actor, "Player", pose);
     world.add_entity(Entity::new(
         target,
@@ -5715,15 +5401,7 @@ fn pk_messages_refresh_installed_identity_without_changing_body_state() {
         if local {
             state.player.guid = guid;
         }
-        let mut entity = Entity::new(
-            guid,
-            "Player".into(),
-            WorldPosition {
-                landblock_id: Guid(0xda55_0020),
-                coords: Vector3::new(90.0, 96.0, 1.0),
-                rotation: Quaternion::identity(),
-            },
-        );
+        let mut entity = Entity::new(guid, "Player".into(), pos(0xda55_0020, 90.0, 96.0, 1.0));
         entity.flags = Flags::PLAYER;
         state.add_entity(entity);
         let id = state.runtime_body_id_for_guid(guid).unwrap();
@@ -6011,11 +5689,7 @@ fn use_range_and_directed_approach_share_scaled_body_distance_and_pending_geomet
     let actor = Guid(0x5000_0201);
     let target = Guid(0x8000_0202);
     world.player.guid = actor;
-    let pose = WorldPosition {
-        landblock_id: Guid(0xda55_0020),
-        coords: Vector3::zero(),
-        rotation: Quaternion::identity(),
-    };
+    let pose = pos(0xda55_0020, 0.0, 0.0, 0.0);
     world.add_entity(Entity::new(actor, "Actor".into(), pose));
     world.add_entity(Entity::new(
         target,
@@ -6137,11 +5811,11 @@ fn use_range_and_directed_approach_share_scaled_body_distance_and_pending_geomet
 }
 
 fn identify_response_message(data: IdentifyObjectResponseEventData) -> GameMessage {
-    GameMessage::GameEvent(Box::new(GameEventMessage {
-        target: Guid(0x50000001),
-        sequence: 1,
-        event: GameEvent::IdentifyObjectResponse(Box::new(data)),
-    }))
+    game_event(
+        Guid(0x50000001),
+        1,
+        GameEvent::IdentifyObjectResponse(Box::new(data)),
+    )
 }
 
 #[test]
@@ -6325,9 +5999,9 @@ fn successful_vendor_identify_uses_the_shared_ready_shape() {
     let events = world.handle_message(&identify_response_message(response.clone()));
 
     assert!(
-        events.iter().any(
-            |event| matches!(event, WorldEvent::VendorItemIdentified(item) if item.guid == guid)
-        )
+        events
+            .iter()
+            .any(|event| matches!(event, WorldEvent::VendorCatalogUpdated))
     );
     assert!(events.iter().any(|event| matches!(
         event,
@@ -6341,7 +6015,7 @@ fn successful_vendor_identify_uses_the_shared_ready_shape() {
     assert!(
         !repeated
             .iter()
-            .any(|event| matches!(event, WorldEvent::VendorItemIdentified(_)))
+            .any(|event| matches!(event, WorldEvent::VendorCatalogUpdated))
     );
     assert!(repeated.iter().any(|event| matches!(
         event,
@@ -6360,7 +6034,7 @@ fn successful_vendor_identify_uses_the_shared_ready_shape() {
     assert!(
         changed_events
             .iter()
-            .any(|event| matches!(event, WorldEvent::VendorItemIdentified(_)))
+            .any(|event| matches!(event, WorldEvent::VendorCatalogUpdated))
     );
 
     let mut unsupported = IdentifyObjectResponseEventData {
@@ -6388,7 +6062,7 @@ fn successful_vendor_identify_uses_the_shared_ready_shape() {
 }
 
 #[test]
-fn trade_withdrawal_preserves_partner_acceptance_and_offer_revision() {
+fn trade_withdrawal_preserves_partner_acceptance_and_advances_revision() {
     let mut world = WorldState::synthetic();
     let player = Guid(0x5000_0001);
     let partner = Guid(0x5000_0002);
@@ -6398,14 +6072,18 @@ fn trade_withdrawal_preserves_partner_acceptance_and_offer_revision() {
     world.add_trade_item(2, Guid(0x8000_0002), &mut Vec::new());
     let offered = world.trade.clone().unwrap();
     world.accept_trade(player, &mut Vec::new());
+    let after_self_accept = world.trade.as_ref().unwrap().revision;
+    assert!(after_self_accept > offered.revision);
     world.accept_trade(partner, &mut Vec::new());
+    let after_partner_accept = world.trade.as_ref().unwrap().revision;
+    assert!(after_partner_accept > after_self_accept);
     world.decline_trade(player, &mut Vec::new());
     let trade = world.trade.as_ref().unwrap();
     assert!(!trade.self_side.accepted);
     assert!(trade.partner_side.accepted);
     assert_eq!(trade.self_side.items, offered.self_side.items);
     assert_eq!(trade.partner_side.items, offered.partner_side.items);
-    assert_eq!(trade.revision, offered.revision);
+    assert!(trade.revision > after_partner_accept);
 }
 
 #[test]
@@ -6417,8 +6095,8 @@ fn trade_additions_are_idempotent_and_reset_invalidates_even_an_empty_offer() {
     world.player.guid = player;
     world.register_trade(player, partner, &mut Vec::new());
     world.add_trade_item(1, item, &mut Vec::new());
-    let revision = world.trade.as_ref().unwrap().revision;
     world.accept_trade(player, &mut Vec::new());
+    let revision = world.trade.as_ref().unwrap().revision;
     world.add_trade_item(1, item, &mut Vec::new());
     let trade = world.trade.as_ref().unwrap();
     assert_eq!(trade.self_side.items, vec![item]);
@@ -6561,55 +6239,33 @@ fn character_titles_replace_grant_and_select_through_private_retention() {
 fn character_titles_reset_with_description_and_ignore_other_characters() {
     let mut state = WorldState::synthetic();
     let player_guid = Guid(1);
-    let mut description = PlayerDescriptionEventData {
-        guid: player_guid,
-        sequence: 1,
-        name: "Player".to_string(),
-        wee_type: 1,
-        pos: Some(WorldPosition::default()),
-        properties: WorldObjectProperties::default(),
-        positions: std::collections::BTreeMap::new(),
-        attributes: std::collections::BTreeMap::new(),
-        skills: std::collections::BTreeMap::new(),
-        enchantments: Vec::new(),
-        spells: std::collections::BTreeMap::new(),
-        has_health: true,
-        options1: CharacterOptions1::empty(),
-        options2: CharacterOptions2::empty(),
-        shortcuts: Vec::new(),
-        hotbar_spells: Vec::new(),
-        desired_comps: Vec::new(),
-        spellbook_filters: 0,
-        gameplay_options: Vec::new(),
-        inventory: Vec::new(),
-        equipped_objects: Vec::new(),
-    };
-    state.handle_message(&GameMessage::GameEvent(Box::new(GameEventMessage {
-        target: player_guid,
-        sequence: 1,
-        event: GameEvent::PlayerDescription(Box::new(description.clone())),
-    })));
+    let mut description = default_player_description(player_guid);
+    state.handle_message(&game_event(
+        player_guid,
+        1,
+        GameEvent::PlayerDescription(Box::new(description.clone())),
+    ));
     for next_character in [player_guid, Guid(2)] {
         state.player.character_titles = Some([42].into_iter().collect());
         description.guid = next_character;
-        state.handle_message(&GameMessage::GameEvent(Box::new(GameEventMessage {
-            target: next_character,
-            sequence: 2,
-            event: GameEvent::PlayerDescription(Box::new(description.clone())),
-        })));
+        state.handle_message(&game_event(
+            next_character,
+            2,
+            GameEvent::PlayerDescription(Box::new(description.clone())),
+        ));
         assert!(state.player.character_titles.is_none());
     }
-    let events = state.handle_message(&GameMessage::GameEvent(Box::new(GameEventMessage {
-        target: Guid(99),
-        sequence: 3,
-        event: GameEvent::CharacterTitle(Box::new(
+    let events = state.handle_message(&game_event(
+        Guid(99),
+        3,
+        GameEvent::CharacterTitle(Box::new(
             holtburger_protocol::messages::CharacterTitleEventData {
                 version: 1,
                 selected_id: 999,
                 title_ids: vec![999],
             },
         )),
-    })));
+    ));
     assert!(state.player.character_titles.is_none());
     assert!(events.is_empty());
 }
@@ -6620,7 +6276,7 @@ fn hidden_motion_pauses_cached_running_output_and_resumes_without_catch_up() {
     let guid = Guid(0x7000_0100);
     let mut state = WorldState::synthetic();
     state.set_motion_sequences(test_motion_catalog(table));
-    let mut entity = Entity::new(guid, "Remote".to_owned(), WorldPosition::default());
+    let mut entity = remote_entity(guid, WorldPosition::default());
     entity.properties.set_did_prop(
         holtburger_common::properties::PropertyDataId::MotionTable,
         Guid(table),
@@ -6680,14 +6336,7 @@ fn hidden_state_removes_remote_physics_without_losing_retained_motion() {
     let guid = Guid(0x7000_0100);
     let id = SpatialBodyId::Entity(guid);
     let mut state = WorldState::synthetic();
-    let mut entity = Entity::new(
-        guid,
-        "Remote".to_owned(),
-        WorldPosition {
-            landblock_id: Guid(0x1234_0001),
-            ..WorldPosition::default()
-        },
-    );
+    let mut entity = remote_entity(guid, pos(0x1234_0001, 0.0, 0.0, 0.0));
     entity.velocity = Vector3::new(2.0, 0.0, 0.0);
     entity.omega = Vector3::new(0.0, 0.0, 1.0);
     state.add_entity(entity);
@@ -6714,11 +6363,7 @@ fn hidden_state_removes_remote_physics_without_losing_retained_motion() {
     assert_eq!(after.pose, before.pose);
     assert_eq!(after.retained, before.retained);
 
-    let destination = WorldPosition {
-        landblock_id: Guid(0x4321_0100),
-        coords: Vector3::new(10.0, 10.0, 0.0),
-        rotation: Quaternion::identity(),
-    };
+    let destination = pos(0x4321_0100, 10.0, 10.0, 0.0);
     assert!(state.apply_entity_position_pack(
         guid,
         &PositionPack {

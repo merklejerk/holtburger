@@ -13,8 +13,8 @@ The crate owns:
 - binary-search WCID lookup using positioned record reads; and
 - canonical identity enumeration by decoding only each record's WCID/class/name prefix.
 
-It deliberately has no dependency on MySQL, Tauri, HBA/content discovery, DAT decoding, protocol,
-world state, or frontend DTOs. `holtburger-tools` owns SQL extraction. The Explorer Tauri host owns
+It deliberately has no dependency on MySQL, desktop shell, HBA/content discovery, DAT decoding, protocol,
+world state, or frontend DTOs. `holtburger-tools` owns SQL extraction. The Explorer host (`apps/holtburger-3d/host`) owns
 optional catalog discovery and capability reporting in `explorer_weenie_catalog.rs`, and combines
 catalog templates with DAT/setup-derived facts to resolve the effective `PhysicsState` before any
 shared contract sees them. The catalog remains outside HBA/`ContentRepository` discovery and is

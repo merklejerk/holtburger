@@ -291,6 +291,41 @@ pub enum TrainingLevel {
     Specialized = 3,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Display, FromRepr)]
+#[serde(rename_all = "kebab-case")]
+#[repr(u32)]
+pub enum MagicSchool {
+    #[strum(serialize = "None")]
+    None = 0,
+    #[strum(serialize = "War Magic")]
+    WarMagic = 1,
+    #[strum(serialize = "Life Magic")]
+    LifeMagic = 2,
+    #[strum(serialize = "Item Enchantment")]
+    ItemEnchantment = 3,
+    #[strum(serialize = "Creature Enchantment")]
+    CreatureEnchantment = 4,
+    #[strum(serialize = "Void Magic")]
+    VoidMagic = 5,
+}
+
+/// Authored spell school identity, preserving unrecognized numeric IDs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum SpellSchool {
+    Known { school: MagicSchool },
+    Unknown { id: u32 },
+}
+
+impl SpellSchool {
+    pub fn from_raw(id: u32) -> Self {
+        match MagicSchool::from_repr(id) {
+            Some(school) => Self::Known { school },
+            None => Self::Unknown { id },
+        }
+    }
+}
+
 impl SkillType {
     /// Returns true if the skill is part of the End of Retail (EOR) skill set.
     /// Many earlier skills were retired or supplanted (e.g., Axe/Sword/Mace -> Heavy/Light/Finesse).

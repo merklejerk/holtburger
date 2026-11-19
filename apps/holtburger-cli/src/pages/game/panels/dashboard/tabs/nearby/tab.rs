@@ -277,7 +277,6 @@ impl TabController for NearbyTab {
                                 AppAction::Give {
                                     item: item_guid,
                                     recipient: e.guid,
-                                    amount: e.stack_size().max(1),
                                 },
                                 AppAction::CancelInteraction,
                             ],

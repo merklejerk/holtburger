@@ -1,5 +1,5 @@
-import { decodeClientCombatOutcome } from "../../client/client-host-contract";
-import { CLIENT_COMBAT_EFFECTS_TUNING } from "../../client/client-tuning";
+import { decodeClientCombatOutcome } from "../../client/session/host-contract";
+import { CLIENT_COMBAT_EFFECTS_TUNING } from "../../client/settings/tuning";
 import type { Renderer } from "../../lib/game/renderer/renderer";
 import type { GamePresentationRuntime } from "../../lib/game/runtime/game-presentation-runtime";
 import type { DynamicEntityView } from "../../lib/game/runtime/dynamic-entity-feed";

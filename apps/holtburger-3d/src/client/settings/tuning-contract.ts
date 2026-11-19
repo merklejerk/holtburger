@@ -1,0 +1,331 @@
+import type { ClientAttackProfile } from "../session/host-contract";
+import type { ClientTargetIndicatorGeometryTuning } from "../combat/target-indicator";
+import type { ClientVitalWarningTuning } from "../combat/vital-warning";
+import type { CycleSelectionPolicy } from "../combat/target-acquisition";
+import type { PortalTransitionPolicy } from "../../lib/client/portal-transition-controller";
+import type { HexRgbaColor } from "../../lib/frontend-color";
+import type {
+	PossessionCameraOrbitPolicy,
+	PossessionCameraRecenterPolicy,
+} from "../../lib/game/camera/possession-camera-controller";
+import type { HostKinematicBoomDistancePolicy } from "../../lib/game/camera/host-kinematic-boom-session";
+import type { FrameSettings } from "../../lib/game/renderer/renderer";
+import type {
+	FrontendAudioTuning,
+	FrontendPortalTransitionTuning,
+	FrontendUiDiagnosticsTuning,
+} from "../../lib/frontend-tuning-contract";
+
+/** Client-owned third-person camera projection, placement, and gesture policy. */
+interface ClientCameraTuning {
+	/** Far clipping distance in world units. */
+	readonly far: number;
+	/** Camera height above its unrotated target origin. */
+	readonly height: number;
+	/** Near clipping distance in world units. */
+	readonly near: number;
+	/** Initial downward view angle. */
+	readonly pitchRadians: number;
+	/** Legacy fixed rear offset used before a boom presentation is available. */
+	readonly rearDistance: number;
+	/** Host-validated third-person boom distance bounds. */
+	readonly distance: HostKinematicBoomDistancePolicy;
+	/** Pointer-driven orbit limits and rates. */
+	readonly orbit: PossessionCameraOrbitPolicy;
+	/** Time-based return-behind policy during continuous movement. */
+	readonly recenter: PossessionCameraRecenterPolicy;
+}
+
+/** Client transition timing paired with the shared renderer-owned appearance. */
+export interface ClientPortalTransitionTuning extends FrontendPortalTransitionTuning {
+	/** Client lifecycle durations for entering and leaving portal space. */
+	readonly timing: PortalTransitionPolicy;
+}
+
+/** Appraisal burst window, concurrency cap, timeout, refresh cadence, and health recency tuning. */
+export interface ClientAppraisalTuningConfig {
+	/** Sliding window duration for `burstLimit` IdentifyObject sends, in milliseconds. */
+	readonly assessmentRetryIntervalMs: number;
+	/** Maximum IdentifyObject requests allowed per window and in flight simultaneously. */
+	readonly burstLimit: number;
+	/** Maximum wait before expiring an unanswered inflight appraisal, in milliseconds. */
+	readonly responseTimeoutMs: number;
+	/** Extra TS-side watchdog headroom above core's `responseTimeoutMs`, in milliseconds. */
+	readonly factsTimeoutSlackMs: number;
+	/** Periodic refresh cadence for active inspectors and interested nameplates, in milliseconds. */
+	readonly refreshIntervalMs: number;
+	/** Host-time window during which a mob health update stays visible on nameplates, in milliseconds. */
+	readonly recentWindowMs: number;
+}
+
+/** Narrow pacing and concurrency bounds validated by the native host at client startup. */
+export type ClientHostAppraisalTuningConfig = Pick<
+	ClientAppraisalTuningConfig,
+	"assessmentRetryIntervalMs" | "burstLimit" | "responseTimeoutMs"
+>;
+
+/** Client-owned combat health-request scheduling and interest bounds. */
+export interface ClientCombatHealthTuning {
+	/** Maximum player-to-mob distance in meters to maintain combat-health interest. */
+	readonly maxDistanceMeters: number;
+	/** How long a mob retains combat interest after combat observation or target change. */
+	readonly combatInterestMs: number;
+	/** Host-time window after which an in-flight facts request is considered stale. */
+	readonly recentWindowMs: number;
+	/** Periodic background facts-appraisal refresh cadence while combat interest remains active. */
+	readonly refreshIntervalMs: number;
+	/** Whether entering combat interest issues an immediate bootstrap facts appraisal when health is absent or stale. */
+	readonly bootstrapOnCombatEnter: boolean;
+}
+
+/** Smart nameplate proximity, preview cadence, and overhead health-bar display policy. */
+export interface ClientEntityOverlayTuning {
+	/** Total horizontal arc angle in degrees around player body facing for Smart proximity labels. */
+	readonly proximityArcDegrees: number;
+	/** Inclusive 3D root-to-root Euclidean distance in meters for Smart proximity labels. */
+	readonly proximityRadiusMeters: number;
+	/** Cadence in milliseconds for passive Smart Tab immediate preview sampling. */
+	readonly immediatePreviewIntervalMs: number;
+	/** Maximum player-to-creature distance in meters for overhead health bar display. */
+	readonly healthMaxDistanceMeters: number;
+	/** Host-time recency window in milliseconds during which observed creature health stays visible. */
+	readonly healthRecentWindowMs: number;
+}
+
+/** Complete starting renderer display policy. */
+export interface ClientTuning {
+	/** Screen-edge warnings are client presentation policy only. */
+	readonly vitalWarning: ClientVitalWarningTuning;
+	/** Journal pulls display facts only while its window is visible. */
+	readonly journal: {
+		/** Fixed presentation window for summarizing bursts of accepted membership changes. */
+		readonly membershipToastBatchMs: number;
+		/** Visible Journal/map tooltip countdown refresh interval. */
+		readonly displayIntervalMs: number;
+		/** Fixed CSS-pixel side of contract map icons and their hover footprint. */
+		readonly mapMarkerSizeCssPixels: number;
+	};
+	/** Screen-space density of available housing area markers. */
+	readonly housingSearch: {
+		/** CSS-pixel width of a bucket merging available housing areas. */
+		readonly clusterSpacingCssPixels: number;
+	};
+	/** Bound the local pending-cycle cursor; core independently bounds peace admission. */
+	readonly resting: { readonly acknowledgementTimeoutMs: number };
+	/** App-owned emote submission timing and user-profile history. */
+	readonly emotes: {
+		/** Maximum distinct queued poses retained in Recent. */
+		readonly recentLimit: number;
+		/** Bound readiness and admission waits; do not guess active emote durations. */
+		readonly admissionTimeoutMs: number;
+	};
+	/** In-memory sent-chat input retained for this app session. */
+	readonly chat: {
+		readonly sentHistoryLimit: number;
+		/** CSS pixel slack for fractional scroll geometry at the bottom. */
+		readonly bottomToleranceCssPixels: number;
+	};
+	/** Spell artwork sampling and shortcut drag presentation policy. */
+	readonly spells: {
+		/** Mounted spell-list artwork sampling; membership itself is event-driven. */
+		readonly iconDisplayIntervalMs: number;
+		/** Horizontal activation band inside the visible spell-cell strip. */
+		readonly dragScrollEdgeCssPixels: number;
+		/** Maximum horizontal speed, scaled by edge proximity. */
+		readonly dragScrollCssPixelsPerSecond: number;
+	};
+	/** Bounded display sampling for creation and progression artwork. */
+	readonly statIcons: { readonly displayIntervalMs: number };
+	/** HUD experience gain and level-up presentation. */
+	readonly xpFeedback: {
+		/** Full-width fill travel time; shorter movements scale with distance. */
+		readonly gainMs: number;
+		/** Level-up highlight and number-pop duration. */
+		readonly levelUpMs: number;
+		/** Color-only feedback duration when reduced motion is enabled. */
+		readonly reducedMotionHighlightMs: number;
+		/** Particle flight lifetime after emission at fill completion. */
+		readonly sparkleMs: number;
+		/** Particles emitted per endpoint burst. */
+		readonly sparkleCount: number;
+		/** Maximum number of simultaneous particle flights. */
+		readonly sparkleCapacity: number;
+		/** Downward acceleration in CSS pixels per second squared. */
+		readonly sparkleGravity: number;
+		/** Rightward launch speed range in CSS pixels per second. */
+		readonly sparkleHorizontalSpeed: {
+			/** Slowest launch speed. */
+			readonly min: number;
+			/** Fastest launch speed. */
+			readonly max: number;
+		};
+		/** Peak scale of the level number. */
+		readonly levelScale: number;
+	};
+	/** Character sheet sampling and purchase feedback. */
+	readonly characterSheet: {
+		readonly displayIntervalMs: number;
+		/** Progression reward motion and independent floating-label lifetime. */
+		readonly feedback: {
+			readonly pressMs: number;
+			readonly popMs: number;
+			/** Expansion of the gold icon halo, independent of floating labels. */
+			readonly ringMs: number;
+			readonly ringScale: number;
+			readonly floatMs: number;
+			readonly trainingMs: number;
+			readonly synergyMs: number;
+			readonly iconScale: number;
+			readonly trainingIconScale: number;
+			readonly floatDistancePx: number;
+			readonly labelOffsetPx: number;
+		};
+	};
+	/** Shared audio policy selected by the client composition. */
+	readonly audio: FrontendAudioTuning;
+	/** Client diagnostic publication and display policy. */
+	readonly diagnostics: FrontendUiDiagnosticsTuning;
+	/** Client portal lifecycle timing and visual policy. */
+	readonly portalTransition: ClientPortalTransitionTuning;
+	/** Server-backed object-inspection presentation policy. */
+	readonly objectInspection: {
+		/** Delay between completed refreshes while an inspection window remains open. */
+		readonly refreshIntervalMs: number;
+		/** Maximum item-description characters shown before explicit expansion. */
+		readonly collapsedDescriptionCharacters: number;
+	};
+	/** Isolated creature-inspection model presentation and local controls. */
+	readonly objectPreview: {
+		/** User-resizable preview-pane height in CSS pixels. */
+		readonly height: {
+			/** Height assigned when an inspection window is created. */
+			readonly initial: number;
+			/** Smallest height reachable by pointer or keyboard resizing. */
+			readonly minimum: number;
+			/** Largest height reachable by pointer or keyboard resizing. */
+			readonly maximum: number;
+			/** Height change for one keyboard resize command. */
+			readonly keyboardStep: number;
+		};
+		readonly maximumFramesPerSecond: number;
+		readonly maximumBufferWidth: number;
+		readonly maximumBufferHeight: number;
+		/** Minimum supersampling used when device pixel density would otherwise be lower. */
+		readonly minimumResolutionScale: number;
+		readonly initialYawRadians: number;
+		readonly yawRadiansPerPixel: number;
+		readonly keyboardYawStepRadians: number;
+	};
+	/** Client third-person camera behavior. */
+	readonly camera: ClientCameraTuning;
+	/** Precise-jump evaluation cadence, reach, and marker presentation. */
+	readonly preciseJump: {
+		/** Initial selected normalized power. */
+		readonly initialPower: number;
+		/** Increment per power adjustment action. */
+		readonly powerStep: number;
+		/** Normalized power change per second for held power controls. */
+		readonly heldPowerPerSecond: number;
+		/** Maximum cadence for coalesced authority aim evaluation. */
+		readonly aimEvaluationIntervalMs: number;
+		/** Finite reach of the camera aim ray. */
+		readonly maximumAimDistance: number;
+		/** World-space outer radius of the surface marker. */
+		readonly markerRadius: number;
+	};
+	/** Combat guidance uses a separate screen-edge lane so selection remains distinguishable. */
+	readonly combatTargetIndicator: ClientTargetIndicatorGeometryTuning & {
+		/** Normalized reticle positions above the target bounds bottom for physical attacks. */
+		readonly heightFractions: Readonly<
+			Record<ClientAttackProfile["height"], number>
+		>;
+	};
+
+	/** Client-local entity acquisition feedback policy. */
+	readonly entitySelection: {
+		/** One-shot immediate acquisition threshold for all held targeting bindings. */
+		readonly holdDelayMs: number;
+		/** Keyboard acquisition range, exponential distance bands, and approximate view policy. */
+		readonly cycle: CycleSelectionPolicy;
+		/** Maximum cadence for hover acquisition and selected-target validity sampling. */
+		readonly sampleIntervalMs: number;
+		/** App-local offscreen selected-target arrow appearance. */
+		readonly offscreenIndicator: {
+			/** Minimum arrow-center distance from each viewport edge. */
+			readonly safeInsetCssPixels: number;
+			/** Square arrow extent in CSS pixels. */
+			readonly sizeCssPixels: number;
+			/** Translucent arrow fill color. */
+			readonly fillColor: HexRgbaColor;
+			/** Arrow outline color. */
+			readonly outlineColor: HexRgbaColor;
+			/** Arrow outline thickness in CSS pixels. */
+			readonly outlineWidthCssPixels: number;
+			/** Outer glow color. */
+			readonly glowColor: HexRgbaColor;
+			/** Outer glow blur radius in CSS pixels. */
+			readonly glowBlurCssPixels: number;
+		};
+	};
+	/** Bounded external-storage display pulls; access still commits at session cadence. */
+	readonly worldContainer: {
+		readonly displayIntervalMs: number;
+		/** Bounds for the initial grid footprint before the container is shown. */
+		readonly openingGrid: {
+			/** Small containers reserve one row at this width. */
+			readonly minColumns: number;
+			/** Wider containers stop growing horizontally at this count. */
+			readonly maxColumns: number;
+			/** Additional items and pack headings scroll beyond this row budget. */
+			readonly maxRows: number;
+		};
+	};
+	/** App-local vendor window and trade reach. */
+	readonly vendor: {
+		/** Maximum wait for a local draft quote, including stock refreshes. */
+		readonly previewTimeoutMs: number;
+		/** Maximum player-to-vendor world distance while the shop remains usable. */
+		readonly maximumDistanceMeters: number;
+	};
+	/** App-local crystal dismissal policy, independent of vendor reach. */
+	readonly housing: {
+		/** Accepted player-to-crystal range retained while preparing payment. */
+		readonly maximumDistanceMeters: number;
+	};
+	/** Inventory gestures, display sampling, and execution budgets. */
+	readonly inventory: {
+		/** Core execution budgets snapshotted for each container invocation. */
+		readonly autoMerge: {
+			/** Maximum authoritative confirmation wait for one request. */
+			readonly stepTimeoutMs: number;
+			/** Absolute budget for the entire invocation. */
+			readonly operationTimeoutMs: number;
+		};
+		/** Pointer travel required before an inventory selection becomes a drag. */
+		readonly dragThresholdCssPixels: number;
+		/** Vertical inventory edge band for pointer-held drag scrolling. */
+		readonly dragScrollEdgeCssPixels: number;
+		/** Maximum scroll speed, reached at the viewport edge. */
+		readonly dragScrollCssPixelsPerSecond: number;
+		/** Time after a drag during which synthetic double-click activation is suppressed. */
+		readonly doubleClickSuppressionMs: number;
+		readonly displayIntervalMs: number;
+	};
+	/** Bounded fellowship vital sampling, independent of network publication. */
+	readonly partyHud: { readonly displayIntervalMs: number };
+	/** Selected-entity HUD display policy. */
+	readonly selectedEntityHud: {
+		/** Selected healing-kit name accent. */
+		readonly healingKitColor: HexRgbaColor;
+		/** Selected mana-stone name accent. */
+		readonly manaStoneColor: HexRgbaColor;
+		/** Bounded cadence for refreshing selected-entity display text. */
+		readonly displayIntervalMs: number;
+	};
+	/** Combat-interest background health-appraisal scheduling policy. */
+	readonly combatHealth: ClientCombatHealthTuning;
+	/** Smart nameplate proximity/preview and overhead health-bar display policy. */
+	readonly entityOverlays: ClientEntityOverlayTuning;
+	/** Complete starting renderer display policy. */
+	readonly frameSettings: FrameSettings;
+}

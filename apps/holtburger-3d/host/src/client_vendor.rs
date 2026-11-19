@@ -3,7 +3,7 @@
 use holtburger_common::Guid;
 use holtburger_common::properties::WorldObjectExt;
 use holtburger_world::entity_facts::{EntityIconAppearance, EquipmentCantripState};
-use holtburger_world::vendor::VendorState;
+use holtburger_world::vendor::{VendorCategory, VendorState};
 use serde::Serialize;
 
 /// Price display preserves missing quote facts rather than inventing a zero price.
@@ -23,8 +23,10 @@ pub struct ClientVendorOffer {
     pub wcid: u32,
     /// Display name supplied by the offer description.
     pub name: String,
-    /// Retail item type used for category sections and icon composition.
+    /// Retail item type used for icon composition.
     pub item_type: Option<u32>,
+    /// Shared vendor catalog section classification.
+    pub category: VendorCategory,
     /// Whole described stack added by an ordinary queue gesture.
     pub stack_count: u32,
     /// Authoritative stack capacity determines whether queueing opens a quantity dialog.
@@ -68,6 +70,7 @@ impl From<VendorState> for ClientVendorSnapshot {
                 wcid: item.wcid,
                 name: item.name().to_owned(),
                 item_type: item.item_type_int(),
+                category: item.category(),
                 stack_count: item.stack_size(),
                 stackable: item.is_stackable(),
                 supply: item.vendor_supply,
@@ -242,7 +245,7 @@ mod tests {
             (
                 "failed",
                 ClientViewEvent::VendorTradeFinished(VendorTradeResult {
-                    sequence: Some(7),
+                    sequence: 7,
                     vendor: Guid(100),
                     sold: vec![],
                     sale_issue: None,

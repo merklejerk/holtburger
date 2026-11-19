@@ -5,7 +5,7 @@ use holtburger_world::state::{FellowshipCapabilities, FellowshipState};
 use serde::{Deserialize, Serialize};
 
 /// Character preferences mirrored by core after dispatch, not server acknowledgements.
-#[derive(Debug, Clone, Copy, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClientPartyPreferences {
     /// Sharing intent sampled when creating the next fellowship.

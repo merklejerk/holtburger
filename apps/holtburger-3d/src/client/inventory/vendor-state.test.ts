@@ -1,0 +1,986 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { UiIconRepository } from "../widgets/ui-icon-repository";
+import {
+	ClientEntityMirror,
+	type ClientEntityFacts,
+} from "../world/entity-mirror";
+import {
+	emptyPlayerSummary,
+	entityFacts,
+} from "../world/entity-mirror.test-support";
+import type { ClientLifecycleSessionEvent } from "../session/lifecycle-session";
+import {
+	ClientVendorState,
+	type VendorOffer,
+	type VendorQuote,
+	type VendorRequest,
+	type VendorSession,
+	type VendorSnapshot,
+} from "./vendor-state";
+import { CLIENT_TUNING } from "../settings/tuning";
+
+const cleanups: (() => void)[] = [];
+afterEach(() => {
+	for (const cleanup of cleanups.splice(0)) cleanup();
+	vi.useRealTimers();
+});
+const vendorId = 100;
+const stackOffer: VendorOffer = {
+	guid: 200,
+	wcid: 200,
+	name: "Component",
+	item_type: 0x1000,
+	category: "spell-components",
+	stack_count: 10,
+	stackable: true,
+	supply: null,
+	icon: { base: 1, overlay: null, underlay: null, uiEffects: 0 },
+	price: { kind: "quoted", amount: 20, quantity: 10 },
+	equipment_cantrip: null,
+};
+const singleOffer: VendorOffer = {
+	...stackOffer,
+	guid: 201,
+	wcid: 201,
+	name: "Sword",
+	item_type: 1,
+	category: "weapons",
+	stack_count: 1,
+	stackable: false,
+};
+const catalog: VendorSnapshot = {
+	vendor: vendorId,
+	currency: { wcid: 273, name: "Pyreals" },
+	offers: [singleOffer, stackOffer],
+};
+const blank: VendorQuote = {
+	buys: [],
+	sells: [],
+	currencies: [{ wcid: 273, name: "Pyreals", current: 3000, projected: 3000 }],
+	affordable: true,
+};
+
+function fixture(
+	initialDistance: number | null = 0,
+	extra: readonly ClientEntityFacts[] = [],
+) {
+	let vendorDistance = initialDistance;
+	const entities = new ClientEntityMirror();
+	entities.commit(
+		entities.prepareSnapshot(
+			{
+				projectileSupply: { kind: "not-applicable" },
+				player: emptyPlayerSummary,
+				worldContainer: { kind: "closed" },
+				entities: [
+					entityFacts(1, {
+						storage: {
+							kind: "container",
+							roster: "announced",
+							itemCapacity: 24,
+							packCapacity: 7,
+						},
+					}),
+					entityFacts(vendorId),
+					...[10, 11, 12].map((id, index) =>
+						entityFacts(id, {
+							ownedByPlayer: true,
+							vendorSale: { vendor: vendorId, accepted: true },
+							location: {
+								kind: "contained",
+								parentGuid: 1,
+								slot: { kind: "item", index },
+							},
+						}),
+					),
+					...extra,
+				],
+			},
+			1,
+		),
+	);
+	const listeners = new Set<(event: ClientLifecycleSessionEvent) => void>();
+	const emit = (event: ClientLifecycleSessionEvent) => {
+		for (const listener of listeners) listener(event);
+	};
+	const previewVendor = vi.fn<VendorSession["previewVendor"]>(async () => {});
+	const submitVendor = vi.fn<VendorSession["submitVendor"]>(async () => {});
+	const failure = vi.fn();
+	const icons = new UiIconRepository({
+		prepare: async (requests) =>
+			requests.map(({ key }) => ({
+				kind: "ready",
+				key,
+				image: new Uint8Array([1]),
+			})),
+		createImage: async () => "blob:fixture",
+		revokeImage: vi.fn(),
+		report: vi.fn(),
+	});
+	const model = new ClientVendorState(
+		{
+			entities,
+			vendorSnapshot: () => catalog,
+			previewVendor,
+			submitVendor,
+			subscribe: (listener) => {
+				listeners.add(listener);
+				return () => listeners.delete(listener);
+			},
+		},
+		icons,
+		failure,
+		() => vendorDistance,
+	);
+	const pending = (): VendorRequest => {
+		const call = previewVendor.mock.lastCall;
+		if (call === undefined) throw new Error("No pending quote");
+		return call[0];
+	};
+	const answer = (quote: VendorQuote) =>
+		emit({
+			type: "vendor-preview",
+			result: {
+				sequence: pending().sequence,
+				vendor: pending().draft.vendor,
+				outcome: { kind: "ready", quote },
+			},
+		});
+	answer(blank);
+	cleanups.push(() => {
+		model.destroy();
+		icons.dispose();
+	});
+	return {
+		model,
+		entities,
+		icons,
+		emit,
+		pending,
+		answer,
+		previewVendor,
+		submitVendor,
+		failure,
+		setVendorDistance: (distance: number | null) => {
+			vendorDistance = distance;
+		},
+	};
+}
+
+function buy(model: ClientVendorState, item: number, amount?: number): void {
+	model.queueBuy(item);
+	const request = model.read()?.quantityRequest;
+	if (request !== null && request !== undefined)
+		model.confirmBuyQuantity(item, amount ?? request.initialAmount);
+}
+
+describe("vendor draft presentation", () => {
+	it("updates actor presentation without requoting or replacing a quantity request", () => {
+		const f = fixture();
+		f.model.queueBuy(stackOffer.guid);
+		const request = f.model.read()?.quantityRequest;
+		expect(request).toMatchObject({ item: stackOffer.guid });
+		const count = f.previewVendor.mock.calls.length;
+		const actor = entityFacts(vendorId);
+		if (actor.description.kind !== "known")
+			throw new Error("Expected described vendor");
+		const delta = {
+			upserts: [
+				{
+					...actor,
+					description: { ...actor.description, name: "Renamed vendor" },
+					isHostile: true,
+				},
+			],
+			removed: [],
+			player: null,
+			projectileSupply: null,
+			worldContainer: null,
+		};
+		const prepared = f.entities.prepareDelta(delta);
+		if (prepared === null) throw new Error("Expected prepared delta");
+		f.entities.commit(prepared);
+		f.emit({ type: "entities", delta });
+		expect(f.model.read()).toMatchObject({
+			name: "Renamed vendor",
+			pending: false,
+		});
+		expect(f.model.read()?.quantityRequest).toBe(request);
+		expect(f.previewVendor).toHaveBeenCalledTimes(count);
+	});
+
+	it.each([
+		{
+			name: "health",
+			guid: 1,
+			patch: {
+				health: { instanceSequence: 1, fraction: 0.5, observedAtSeconds: 1 },
+			},
+			removed: [],
+			previews: 0,
+		},
+		{
+			name: "owned item",
+			guid: 10,
+			patch: { vendorSale: { vendor: vendorId, accepted: false } },
+			removed: [],
+			previews: 1,
+		},
+		{
+			name: "inventory addition",
+			guid: 20,
+			patch: {
+				ownedByPlayer: true,
+				location: {
+					kind: "contained",
+					parentGuid: 1,
+					slot: { kind: "item", index: 4 },
+				},
+			},
+			removed: [],
+			previews: 1,
+		},
+		{
+			name: "inventory removal",
+			guid: null,
+			patch: {},
+			removed: [10],
+			previews: 1,
+		},
+		{
+			name: "container hydration",
+			guid: 1,
+			patch: {
+				storage: {
+					kind: "container",
+					roster: "awaiting",
+					itemCapacity: 24,
+					packCapacity: 7,
+				},
+			},
+			removed: [],
+			previews: 1,
+		},
+	] satisfies {
+		name: string;
+		guid: number | null;
+		patch: Partial<ClientEntityFacts>;
+		removed: number[];
+		previews: number;
+	}[])(
+		"requests $previews previews after a $name change",
+		({ guid, patch, removed, previews }) => {
+			const f = fixture();
+			const before = f.previewVendor.mock.calls.length;
+			const read = f.entities.read();
+			if (read.kind !== "current") throw new Error("Expected current entities");
+			const upserts =
+				guid === null
+					? []
+					: [
+							{
+								...(read.level.entities.get(guid) ?? entityFacts(guid)),
+								...patch,
+							},
+						];
+			const delta = {
+				upserts,
+				removed,
+				player: null,
+				projectileSupply: null,
+				worldContainer: null,
+			};
+			const prepared = f.entities.prepareDelta(delta);
+			if (prepared === null) throw new Error("Expected prepared delta");
+			f.entities.commit(prepared);
+			f.emit({ type: "entities", delta });
+			expect(f.model.read()?.pending).toBe(previews > 0);
+			expect(f.previewVendor).toHaveBeenCalledTimes(before + previews);
+		},
+	);
+
+	it("revalidates balance changes during a candidate without losing it or extending its deadline", () => {
+		vi.useFakeTimers();
+		const f = fixture();
+		buy(f.model, stackOffer.guid, 37);
+		const old = f.pending();
+		vi.advanceTimersByTime(CLIENT_TUNING.vendor.previewTimeoutMs / 2);
+		const delta = {
+			upserts: [],
+			removed: [],
+			player: { ...emptyPlayerSummary, pyrealBalance: 2500 },
+			projectileSupply: null,
+			worldContainer: null,
+		};
+		const prepared = f.entities.prepareDelta(delta);
+		if (prepared === null) throw new Error("Expected prepared delta");
+		f.entities.commit(prepared);
+		f.emit({ type: "entities", delta });
+		expect(f.pending().sequence).not.toBe(old.sequence);
+		expect(f.pending().draft).toEqual(old.draft);
+		f.emit({
+			type: "vendor-preview",
+			result: {
+				sequence: old.sequence,
+				vendor: vendorId,
+				outcome: { kind: "ready", quote: blank },
+			},
+		});
+		expect(f.model.read()?.pending).toBe(true);
+		vi.advanceTimersByTime(CLIENT_TUNING.vendor.previewTimeoutMs / 2);
+		expect(f.model.read()?.pending).toBe(false);
+		expect(f.failure).toHaveBeenCalledWith(
+			expect.stringContaining("timed out"),
+		);
+	});
+
+	it.each(["buy", "sell"] as const)(
+		"captures %s queue removal without retargeting a later draft",
+		(side) => {
+			const f = fixture();
+			const item = side === "buy" ? singleOffer.guid : 10;
+			const quote: VendorQuote = {
+				...blank,
+				[side === "buy" ? "buys" : "sells"]: [
+					{ item, amount: 1, total: 100, merge_key: null },
+				],
+			};
+			const queue = () => {
+				if (side === "buy") buy(f.model, item);
+				else f.model.queueSell(item);
+				f.answer(quote);
+				const cell = f.model.read()?.queue[0];
+				if (cell === undefined) throw new Error("Expected queued item");
+				const remove = f.model.captureRemoval(cell.key);
+				if (remove === null) throw new Error("Expected removable item");
+				return remove;
+			};
+			const remove = queue();
+			remove();
+			expect(f.pending().draft).toEqual({
+				vendor: vendorId,
+				buys: [],
+				sells: [],
+			});
+			f.answer(blank);
+			queue();
+			const requests = f.previewVendor.mock.calls.length;
+			remove();
+			expect(f.previewVendor).toHaveBeenCalledTimes(requests);
+			expect(f.model.read()?.queue).toHaveLength(1);
+		},
+	);
+
+	it("refuses drag removal while quoting or paying and after a quote changes", () => {
+		const f = fixture();
+		buy(f.model, singleOffer.guid);
+		const quote = {
+			...blank,
+			buys: [
+				{ item: singleOffer.guid, amount: 1, total: 100, merge_key: null },
+			],
+		};
+		f.answer(quote);
+		const cell = f.model.read()?.queue[0];
+		if (cell === undefined) throw new Error("Expected purchase cell");
+		const remove = f.model.captureRemoval(cell.key);
+		if (remove === null) throw new Error("Expected removable item");
+		expect(f.model.captureRemoval("missing")).toBeNull();
+		f.emit({ type: "vendor-snapshot", vendor: catalog });
+		expect(f.model.captureRemoval(cell.key)).toBeNull();
+		remove();
+		f.answer({ ...quote });
+		const requests = f.previewVendor.mock.calls.length;
+		remove();
+		expect(f.previewVendor).toHaveBeenCalledTimes(requests);
+		expect(f.model.read()?.queue).toHaveLength(1);
+		const removeBeforePayment = f.model.captureRemoval(cell.key);
+		if (removeBeforePayment === null)
+			throw new Error("Expected removable item before payment");
+		f.model.trade();
+		expect(f.submitVendor).toHaveBeenCalledTimes(1);
+		removeBeforePayment();
+		expect(f.previewVendor).toHaveBeenCalledTimes(requests);
+		expect(f.model.read()?.queue).toHaveLength(1);
+		expect(f.model.captureRemoval(cell.key)).toBeNull();
+	});
+
+	it("stages Main Pack's direct items without offering the character", () => {
+		const f = fixture();
+		expect(f.model.acceptsSaleDrop(vendorId, 1)).toBe(true);
+		f.model.queueSell(1);
+		expect(f.pending().draft.sells).toEqual([10, 11, 12]);
+	});
+
+	it("quotes eligible pack contents together and retains existing purchases", () => {
+		const pack = entityFacts(20, {
+			ownedByPlayer: true,
+			location: {
+				kind: "contained",
+				parentGuid: 1,
+				slot: { kind: "pack", index: 0, entryKind: "container" },
+			},
+			storage: {
+				kind: "container",
+				roster: "announced",
+				itemCapacity: 24,
+				packCapacity: 0,
+			},
+			vendorSale: { vendor: vendorId, accepted: false },
+		});
+		const children = [21, 22, 23].map((guid) =>
+			entityFacts(guid, {
+				ownedByPlayer: true,
+				location: {
+					kind: "contained",
+					parentGuid: pack.guid,
+					slot: { kind: "item", index: guid },
+				},
+				vendorSale: { vendor: vendorId, accepted: guid !== 23 },
+			}),
+		);
+		const f = fixture(0, [pack, ...children]);
+		buy(f.model, singleOffer.guid);
+		f.answer({
+			...blank,
+			buys: [{ item: singleOffer.guid, amount: 1, total: 10, merge_key: null }],
+		});
+		const count = f.previewVendor.mock.calls.length;
+		expect(f.model.inventoryItemUnavailable(pack.guid)).toBe(false);
+		expect(f.model.acceptsSaleDrop(vendorId, pack.guid)).toBe(true);
+		f.model.queueSell(pack.guid);
+		expect(f.previewVendor).toHaveBeenCalledTimes(count + 1);
+		expect(f.pending().draft).toEqual({
+			vendor: vendorId,
+			buys: [{ item: singleOffer.guid, amount: 1 }],
+			sells: [21, 22],
+		});
+		f.answer({
+			...blank,
+			sells: [21, 22].map((item) => ({
+				item,
+				amount: 1,
+				total: 10,
+				merge_key: null,
+			})),
+		});
+		expect(f.model.acceptsSaleDrop(vendorId, pack.guid)).toBe(false);
+		f.model.queueSell(pack.guid);
+		expect(f.previewVendor).toHaveBeenCalledTimes(count + 1);
+	});
+
+	it("expires a refreshed preview without losing the committed draft or accepting late replies", () => {
+		vi.useFakeTimers();
+		const f = fixture();
+		f.model.queueSell(10);
+		const sale = { item: 10, amount: 1, total: 10, merge_key: null };
+		f.answer({ ...blank, sells: [sale] });
+		f.model.queueSell(11);
+		vi.advanceTimersByTime(CLIENT_TUNING.vendor.previewTimeoutMs / 2);
+		f.emit({ type: "vendor-snapshot", vendor: catalog });
+		const abandoned = f.pending();
+		vi.advanceTimersByTime(CLIENT_TUNING.vendor.previewTimeoutMs / 2);
+		expect(f.model.read()?.pending).toBe(false);
+		expect(f.model.read()?.queue.flatMap((cell) => cell.sources)).toEqual([10]);
+		expect(f.failure).toHaveBeenCalledWith(
+			expect.stringContaining("timed out"),
+		);
+		f.emit({
+			type: "vendor-preview",
+			result: {
+				sequence: abandoned.sequence,
+				vendor: vendorId,
+				outcome: { kind: "ready", quote: blank },
+			},
+		});
+		expect(f.model.read()?.queue.flatMap((cell) => cell.sources)).toEqual([10]);
+		f.model.queueSell(12);
+		expect(f.pending().draft.sells).toEqual([10, 12]);
+		f.answer({ ...blank, sells: [sale, { ...sale, item: 12 }] });
+		expect(f.model.read()?.canTrade).toBe(true);
+	});
+
+	it("retires pending previews on resync and ignores their late replies", () => {
+		const f = fixture();
+		f.model.queueSell(10);
+		const abandoned = f.pending();
+		f.emit({ type: "resyncing" });
+		f.emit({
+			type: "vendor-preview",
+			result: {
+				sequence: abandoned.sequence,
+				vendor: vendorId,
+				outcome: {
+					kind: "ready",
+					quote: {
+						...blank,
+						sells: [{ item: 10, amount: 1, total: 10, merge_key: null }],
+					},
+				},
+			},
+		});
+		expect(f.model.read()?.queue).toEqual([]);
+		expect(f.model.acceptsDrop(vendorId)).toBe(false);
+		f.model.close();
+		expect(f.model.read()).toBeNull();
+	});
+
+	it.each([
+		{
+			type: "exit-requested",
+			exit: { cause: "explicit-disconnect", diagnostic: "Disconnected" },
+		},
+		{
+			type: "lifecycle",
+			lifecycle: {
+				kind: "portal-space",
+				worldGeneration: 2,
+				cause: "teleport",
+			},
+		},
+		{
+			type: "trade-snapshot",
+			trade: {
+				trade: {
+					revision: 1,
+					partner_guid: 2,
+					initiator_guid: 1,
+					self_side: { guid: 1, accepted: false, items: [] },
+					partner_side: { guid: 2, accepted: false, items: [] },
+				},
+				pending_items: [],
+			},
+		},
+	] satisfies ClientLifecycleSessionEvent[])(
+		"keeps $type closure through passive catalog updates",
+		(event) => {
+			const f = fixture();
+			f.emit(event);
+			expect(f.model.read()).toBeNull();
+			f.emit({ type: "vendor-snapshot", vendor: catalog });
+			expect(f.model.read()).toBeNull();
+		},
+	);
+
+	it("keeps dismissal across catalog and recovery updates, then reopens on approach", () => {
+		const f = fixture();
+		expect(f.model.read()?.vendor).toBe(vendorId);
+		f.model.close();
+		const requestsBeforeRefresh = f.previewVendor.mock.calls.length;
+		const updated = {
+			...catalog,
+			offers: [{ ...singleOffer, name: "Appraised Sword" }],
+		};
+		for (let refresh = 0; refresh < 3; refresh++) {
+			f.emit({ type: "vendor-snapshot", vendor: updated });
+			expect(f.previewVendor).toHaveBeenCalledTimes(requestsBeforeRefresh);
+			expect(f.model.read()).toBeNull();
+		}
+		f.emit({ type: "vendor-approached", vendor: updated });
+		expect(f.previewVendor).toHaveBeenCalledTimes(requestsBeforeRefresh + 1);
+		f.answer(blank);
+		expect(
+			f.model.read()?.sections.flatMap((section) => section.cells),
+		).toMatchObject([{ name: "Appraised Sword" }]);
+	});
+
+	it("preserves an open draft through approach and snapshot refreshes", () => {
+		const f = fixture();
+		buy(f.model, stackOffer.guid);
+		const quote = {
+			...blank,
+			buys: [{ item: stackOffer.guid, amount: 10, total: 20, merge_key: 500 }],
+		};
+		f.answer(quote);
+		for (const type of ["vendor-snapshot", "vendor-approached"] as const) {
+			f.emit({ type, vendor: catalog });
+			expect(f.pending().draft.buys).toEqual([
+				{ item: stackOffer.guid, amount: 10 },
+			]);
+			f.answer(quote);
+			expect(f.model.read()?.queue).toHaveLength(1);
+		}
+	});
+
+	it("retires the catalog on null and opens a new interaction after switching vendors", () => {
+		const f = fixture();
+		f.emit({ type: "vendor-snapshot", vendor: null });
+		expect(f.model.read()).toBeNull();
+		f.emit({ type: "vendor-snapshot", vendor: catalog });
+		expect(f.model.read()).toBeNull();
+		f.emit({
+			type: "vendor-approached",
+			vendor: { ...catalog, vendor: vendorId + 1 },
+		});
+		f.answer(blank);
+		expect(f.model.read()?.vendor).toBe(vendorId + 1);
+		expect(f.pending().draft.buys).toEqual([]);
+	});
+
+	it("closes at the reach limit and checks again when Trade is pressed", () => {
+		const f = fixture();
+		f.model.queueSell(10);
+		f.answer({
+			...blank,
+			sells: [{ item: 10, amount: 1, total: 1, merge_key: null }],
+		});
+		f.setVendorDistance(CLIENT_TUNING.vendor.maximumDistanceMeters);
+		expect(f.model.read()?.canTrade).toBe(true);
+		f.setVendorDistance(CLIENT_TUNING.vendor.maximumDistanceMeters + 0.01);
+		f.model.trade();
+		expect(f.submitVendor).not.toHaveBeenCalled();
+		expect(f.model.read()).toBeNull();
+	});
+
+	it("waits for a measured pose and closes when a previously seen vendor vanishes", () => {
+		const f = fixture(null);
+		expect(f.model.acceptsDrop(vendorId)).toBe(false);
+		expect(f.model.read()).not.toBeNull();
+		f.setVendorDistance(0);
+		expect(f.model.acceptsDrop(vendorId)).toBe(true);
+		// Reading before reconcileRange() must not latch pose availability.
+		f.setVendorDistance(null);
+		expect(f.model.read()).not.toBeNull();
+		f.setVendorDistance(0);
+		f.model.reconcileRange();
+		f.setVendorDistance(null);
+		expect(f.model.read()).toBeNull();
+		f.model.reconcileRange();
+		f.setVendorDistance(0);
+		expect(f.model.read()).toBeNull();
+	});
+
+	it("closes the open panel when reconcileRange observes distance beyond the limit", () => {
+		const f = fixture(CLIENT_TUNING.vendor.maximumDistanceMeters + 1);
+		expect(f.model.read()).toBeNull();
+		f.model.reconcileRange();
+		f.setVendorDistance(0);
+		expect(f.model.read()).toBeNull();
+	});
+
+	it("keeps read() pure without calling previewVendor or mutating icon ownership", () => {
+		const f = fixture(null);
+		f.answer(blank);
+		f.previewVendor.mockClear();
+		const retainSpy = vi.spyOn(f.icons, "retain");
+		const releaseSpy = vi.spyOn(f.icons, "release");
+		expect(f.model.read()).toBe(f.model.read());
+		expect(f.model.read()?.vendor).toBe(vendorId);
+		f.setVendorDistance(CLIENT_TUNING.vendor.maximumDistanceMeters + 1);
+		expect(f.model.read()).toBeNull();
+		f.setVendorDistance(0);
+		f.model.reconcileRange();
+		expect(f.model.read()).toBe(f.model.read());
+		expect(f.model.read()?.vendor).toBe(vendorId);
+		expect(f.previewVendor).not.toHaveBeenCalled();
+		expect(retainSpy).not.toHaveBeenCalled();
+		expect(releaseSpy).not.toHaveBeenCalled();
+	});
+
+	it("keeps sale admission idempotent and blocks trading an unaffordable quote", () => {
+		const f = fixture();
+		f.model.queueSell(10);
+		f.answer({
+			...blank,
+			sells: [{ item: 10, amount: 1, total: 1, merge_key: null }],
+		});
+		const previews = f.previewVendor.mock.calls.length;
+		f.model.queueSell(10);
+		expect(f.previewVendor).toHaveBeenCalledTimes(previews);
+		buy(f.model, stackOffer.guid);
+		f.answer({
+			...blank,
+			buys: [
+				{ item: stackOffer.guid, amount: 10, total: 5000, merge_key: 500 },
+			],
+			sells: [{ item: 10, amount: 1, total: 1, merge_key: null }],
+			affordable: false,
+			currencies: [
+				{ wcid: 273, name: "Pyreals", current: 3000, projected: -1999 },
+			],
+		});
+		expect(f.model.read()?.canTrade).toBe(false);
+		f.model.trade();
+		expect(f.submitVendor).not.toHaveBeenCalled();
+	});
+
+	it("prompts before adding stackables, and restricts finite offers to whole objects", () => {
+		const f = fixture();
+		f.emit({
+			type: "vendor-snapshot",
+			vendor: { ...catalog, offers: [{ ...stackOffer, supply: 10 }] },
+		});
+		f.answer(blank);
+		const previous = f.previewVendor.mock.calls.length;
+		f.model.queueBuy(stackOffer.guid);
+		expect(f.model.read()?.quantityRequest).toMatchObject({
+			minAmount: 10,
+			maxAmount: 10,
+			initialAmount: 10,
+		});
+		expect(f.previewVendor).toHaveBeenCalledTimes(previous);
+		f.model.confirmBuyQuantity(stackOffer.guid, 9);
+		expect(f.model.read()?.quantityRequest).not.toBeNull();
+		f.model.confirmBuyQuantity(stackOffer.guid, 10);
+		expect(f.pending().draft.buys).toEqual([
+			{ item: stackOffer.guid, amount: 10 },
+		]);
+		f.answer({
+			...blank,
+			buys: [{ item: stackOffer.guid, amount: 10, total: 20, merge_key: 500 }],
+		});
+		f.model.queueBuy(stackOffer.guid);
+		expect(f.model.read()?.quantityRequest).toBeNull();
+		f.emit({ type: "vendor-snapshot", vendor: catalog });
+		f.answer({
+			...blank,
+			buys: [{ item: stackOffer.guid, amount: 10, total: 20, merge_key: 500 }],
+		});
+		f.model.queueBuy(stackOffer.guid);
+		expect(f.model.read()?.quantityRequest).toMatchObject({
+			minAmount: 1,
+			maxAmount: 0x7fff_ffff - 10,
+			initialAmount: 10,
+		});
+		f.model.cancelBuyQuantity();
+		expect(f.model.read()?.quantityRequest).toBeNull();
+	});
+
+	it("uses retail category order and admits whole offer stacks only after a matching quote", () => {
+		const f = fixture();
+		expect(f.model.read()?.sections.map((section) => section.name)).toEqual([
+			"Spell Components",
+			"Weapons",
+		]);
+		buy(f.model, stackOffer.guid);
+		expect(f.pending().draft.buys).toEqual([
+			{ item: stackOffer.guid, amount: stackOffer.stack_count },
+		]);
+		expect(f.model.read()?.queue).toEqual([]);
+		expect(f.model.read()?.canTrade).toBe(false);
+		f.answer({
+			...blank,
+			buys: [{ item: stackOffer.guid, amount: 10, total: 20, merge_key: 500 }],
+		});
+		expect(f.model.read()?.queue).toMatchObject([
+			{ amount: 10, total: 20, side: "buy", sources: [stackOffer.guid] },
+		]);
+		buy(f.model, stackOffer.guid);
+		expect(f.pending().draft.buys).toEqual([
+			{ item: stackOffer.guid, amount: 20 },
+		]);
+	});
+
+	it("merges only compatible stackables and preserves each sale source behind the cell", () => {
+		const f = fixture();
+		f.model.queueSell(10);
+		const first = { item: 10, amount: 80, total: 40, merge_key: 900 };
+		f.answer({ ...blank, sells: [first] });
+		f.model.queueSell(11);
+		const second = { item: 11, amount: 80, total: 40, merge_key: 900 };
+		f.answer({ ...blank, sells: [first, second] });
+		f.model.queueSell(12);
+		const third = { item: 12, amount: 1, total: 3, merge_key: null };
+		f.answer({ ...blank, sells: [first, second, third] });
+		const queue = f.model.read()?.queue;
+		expect(queue).toMatchObject([
+			{ amount: 160, total: 80, sources: [11, 10] },
+			{ amount: 1, sources: [12] },
+		]);
+		const merged = queue?.[0];
+		if (merged === undefined) throw new Error("Expected merged cell");
+		f.model.remove(merged);
+		expect(f.pending().draft.sells).toEqual([12]);
+	});
+
+	it("keeps nonstackable purchases separate and removes one copy at a time", () => {
+		const f = fixture();
+		buy(f.model, singleOffer.guid);
+		f.answer({
+			...blank,
+			buys: [
+				{ item: singleOffer.guid, amount: 1, total: 100, merge_key: null },
+			],
+		});
+		buy(f.model, singleOffer.guid);
+		f.answer({
+			...blank,
+			buys: [
+				{ item: singleOffer.guid, amount: 2, total: 200, merge_key: null },
+			],
+		});
+		const queue = f.model.read()?.queue;
+		expect(queue).toMatchObject([
+			{ amount: 1, total: 100 },
+			{ amount: 1, total: 100 },
+		]);
+		const cell = queue?.[0];
+		if (cell === undefined) throw new Error("Expected purchase cell");
+		f.model.remove(cell);
+		expect(f.pending().draft.buys).toEqual([
+			{ item: singleOffer.guid, amount: 1 },
+		]);
+	});
+
+	it("rejects a sale candidate without changing the admitted draft", () => {
+		const f = fixture();
+		buy(f.model, stackOffer.guid);
+		const quote = {
+			...blank,
+			buys: [{ item: stackOffer.guid, amount: 10, total: 20, merge_key: 500 }],
+		};
+		f.answer(quote);
+		f.model.queueSell(10);
+		f.emit({
+			type: "vendor-preview",
+			result: {
+				sequence: f.pending().sequence,
+				vendor: vendorId,
+				outcome: { kind: "rejected", reason: "This item is retained" },
+			},
+		});
+		expect(f.failure).toHaveBeenCalledWith("This item is retained");
+		expect(f.model.read()?.queue).toHaveLength(1);
+		expect(f.model.read()?.canTrade).toBe(true);
+		f.model.trade();
+		expect(f.submitVendor.mock.lastCall?.[0].draft.sells).toEqual([]);
+	});
+
+	it("preserves a pending addition across stock refresh and ignores superseded replies", () => {
+		const f = fixture();
+		buy(f.model, stackOffer.guid);
+		const old = f.pending();
+		f.emit({ type: "vendor-snapshot", vendor: catalog });
+		expect(f.pending().draft).toEqual(old.draft);
+		expect(f.pending().sequence).not.toEqual(old.sequence);
+		f.emit({
+			type: "vendor-preview",
+			result: {
+				sequence: old.sequence,
+				vendor: vendorId,
+				outcome: { kind: "ready", quote: blank },
+			},
+		});
+		expect(f.model.read()?.pending).toBe(true);
+		f.answer({
+			...blank,
+			buys: [{ item: stackOffer.guid, amount: 10, total: 20, merge_key: 500 }],
+		});
+		expect(f.model.read()?.queue).toHaveLength(1);
+	});
+
+	it("clears a successful purchase and retains only unsold sources after a partial sale", () => {
+		const f = fixture();
+		buy(f.model, stackOffer.guid);
+		const buys = [
+			{ item: stackOffer.guid, amount: 10, total: 20, merge_key: 500 },
+		];
+		f.answer({ ...blank, buys });
+		f.model.queueSell(10);
+		const first = { item: 10, amount: 5, total: 10, merge_key: 900 };
+		f.answer({ ...blank, buys, sells: [first] });
+		f.model.queueSell(11);
+		f.answer({ ...blank, buys, sells: [first, { ...first, item: 11 }] });
+		f.model.trade();
+		const submitted = f.submitVendor.mock.lastCall?.[0];
+		if (submitted === undefined) throw new Error("No submitted trade");
+		expect(submitted.draft).toEqual({
+			vendor: vendorId,
+			buys: [{ item: stackOffer.guid, amount: 10 }],
+			sells: [10, 11],
+		});
+		expect(f.model.read()?.phase).toBe("selling");
+		f.model.trade();
+		f.emit({ type: "vendor-snapshot", vendor: catalog });
+		expect(f.model.read()?.queue).toHaveLength(2);
+		expect(f.submitVendor).toHaveBeenCalledTimes(1);
+		f.emit({
+			type: "vendor-result",
+			result: {
+				sequence: submitted.sequence,
+				vendor: vendorId,
+				sold: [10],
+				sale_issue: "Sold 1 of 2 queued items",
+				outcome: { kind: "completed" },
+			},
+		});
+		expect(f.pending().draft).toEqual({
+			...submitted.draft,
+			buys: [],
+			sells: [11],
+		});
+		expect(f.failure).toHaveBeenCalledWith(
+			"Purchase completed. Sold 1 of 2 queued items",
+		);
+	});
+
+	it("reports a completed sale followed by failed purchase without restoring sold sources", () => {
+		const f = fixture();
+		buy(f.model, stackOffer.guid);
+		const buys = [
+			{ item: stackOffer.guid, amount: 10, total: 20, merge_key: 500 },
+		];
+		f.answer({ ...blank, buys });
+		f.model.queueSell(10);
+		f.answer({
+			...blank,
+			buys,
+			sells: [{ item: 10, amount: 1, total: 7000, merge_key: null }],
+		});
+		f.model.trade();
+		const submitted = f.submitVendor.mock.lastCall?.[0];
+		if (submitted === undefined) throw new Error("No submitted trade");
+		f.emit({ type: "vendor-phase", phase: "buying" });
+		expect(f.model.read()?.phase).toBe("buying");
+		f.emit({
+			type: "vendor-result",
+			result: {
+				sequence: submitted.sequence,
+				vendor: vendorId,
+				sold: [10],
+				sale_issue: null,
+				outcome: { kind: "failed", phase: "buying", message: "Out of stock" },
+			},
+		});
+		expect(f.pending().draft.sells).toEqual([]);
+		expect(f.pending().draft.buys).toEqual(submitted.draft.buys);
+		expect(f.failure).toHaveBeenCalledWith(
+			"Items sold; purchase failed. Out of stock",
+		);
+	});
+
+	it("reports both a partial sale and a failed purchase without clearing either remainder", () => {
+		const f = fixture();
+		buy(f.model, stackOffer.guid);
+		const buys = [
+			{ item: stackOffer.guid, amount: 10, total: 20, merge_key: 500 },
+		];
+		f.answer({ ...blank, buys });
+		f.model.queueSell(10);
+		const first = { item: 10, amount: 5, total: 10, merge_key: 900 };
+		f.answer({ ...blank, buys, sells: [first] });
+		f.model.queueSell(11);
+		f.answer({ ...blank, buys, sells: [first, { ...first, item: 11 }] });
+		f.model.trade();
+		const submitted = f.submitVendor.mock.lastCall?.[0];
+		if (submitted === undefined) throw new Error("No submitted trade");
+		f.emit({
+			type: "vendor-result",
+			result: {
+				sequence: submitted.sequence,
+				vendor: vendorId,
+				sold: [10],
+				sale_issue: "Sold 1 of 2 queued items",
+				outcome: {
+					kind: "failed",
+					phase: "buying",
+					message: "Not enough currency",
+				},
+			},
+		});
+		expect(f.pending().draft).toEqual({ ...submitted.draft, sells: [11] });
+		expect(f.failure).toHaveBeenCalledWith(
+			"Sold 1 of 2 queued items; purchase failed. Not enough currency",
+		);
+	});
+});

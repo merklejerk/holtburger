@@ -2,8 +2,8 @@ import { abortError, isAbortError } from "../../async-lifetime";
 import {
 	type ClientCameraIdentity,
 	type ClientCameraTick,
-} from "../../../client/client-host-contract";
-import type { ClientLifecycleSession } from "../../../client/client-lifecycle-session";
+} from "../../../client/session/host-contract";
+import type { ClientLifecycleSession } from "../../../client/session/lifecycle-session";
 import {
 	evaluateHostKinematicBoomPath,
 	type HostKinematicBoomPresentation,

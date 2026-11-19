@@ -1,50 +1,17 @@
 <script lang="ts">
-	import type { PerformanceSession } from "../app/performance-session";
-	import { type WeenieCatalogCapability } from "../lib/host/weenie-catalog-capability";
-
-	import type { SceneInterestTarget } from "../lib/game/runtime/scene-target";
-	import type { SceneInterestRadii } from "../lib/game/runtime/types";
-	import type { ExplorerCameraFocusStatus } from "./explorer-camera-coordinator";
-	import ExplorerFramePanel from "./ExplorerFramePanel.svelte";
-	import ExplorerTexturesPanel from "./ExplorerTexturesPanel.svelte";
-	import ExplorerWorldPanel from "./ExplorerWorldPanel.svelte";
-	import ExplorerRendererPanel from "./ExplorerRendererPanel.svelte";
-	import type { StaticObjectRuntimeDiagnostics } from "../lib/game/runtime/game-presentation-runtime";
-	import type { GamePresentationRuntime } from "../lib/game/runtime/game-presentation-runtime";
-	import type { SceneEnvironmentSelection } from "../lib/game/environment/scene-environment";
+	import ExplorerFramePanel from "./panels/ExplorerFramePanel.svelte";
+	import ExplorerTexturesPanel from "./panels/ExplorerTexturesPanel.svelte";
+	import ExplorerWorldPanel from "./panels/ExplorerWorldPanel.svelte";
+	import ExplorerRendererPanel from "./panels/ExplorerRendererPanel.svelte";
+	import ExplorerGradingPanel from "./panels/ExplorerGradingPanel.svelte";
+	import ExplorerEntitiesPanel from "./entities/ExplorerEntitiesPanel.svelte";
 	import type {
-		EnvCellRenderMode,
-		RendererFrameDiagnosticsSnapshot,
-	} from "../lib/game/renderer/renderer";
-	import type { Texture2DReadback } from "../lib/game/renderer/webgl2-device";
-	import type { TexturePageId } from "../lib/game/textures/texture-manager";
-	import type { TextureFilteringPolicy } from "../lib/game/renderer/texture-filtering-policy";
-	import type { RenderLayerVisibility } from "../lib/game/renderer/renderer";
-	import type { LandblockLayerKind } from "../lib/game/runtime/scene-interest";
-	import type { ExplorerFrameDiagnosticReport } from "./explorer-frame-diagnostic-report";
-	import type { AmbientOcclusionSettings } from "../lib/game/renderer/ambient-occlusion-policy";
-	import type { ColorGradeSettings } from "../lib/game/renderer/color-grade-policy";
-	import type { PhysicalFlyStatus } from "./physical-fly-session";
-	import type { ExplorerCameraMode } from "../lib/game/motion/host-physical-fly-path";
-	import type { EntityShadowSettings } from "../lib/game/renderer/entity-shadow-policy";
-	import type {
-		NameplateCategory,
-		NameplateSettings,
-	} from "../lib/game/renderer/nameplate-policy";
-	import ExplorerGradingPanel from "./ExplorerGradingPanel.svelte";
-	import ExplorerEntitiesPanel from "./ExplorerEntitiesPanel.svelte";
-	import type {
-		ExplorerWeenieSearchRequest,
-		ExplorerWeenieSearchResult,
-	} from "./explorer-entity-commands";
-	import type {
-		ExplorerPossession,
-		ExplorerPossessionControls,
-		PossessionMotionProbe,
-	} from "./explorer-entity-possession";
-	import type { DynamicEntityView } from "../lib/game/runtime/dynamic-entity-feed";
-	import type { HostKinematicBoomStatus } from "../lib/game/camera/host-kinematic-boom-session";
-	import type { ExplorerEntitySelection } from "./explorer-entity-panel-state";
+		ExplorerToolsCameraSurface,
+		ExplorerToolsDiagnosticsSurface,
+		ExplorerToolsEntitiesSurface,
+		ExplorerToolsEnvironmentSurface,
+		ExplorerToolsRenderingSurface,
+	} from "./explorer-tools-surfaces";
 
 	type ExplorerTabId =
 		"world" | "renderer" | "grading" | "frame" | "textures" | "entities";
@@ -59,197 +26,15 @@
 	}
 
 	interface Props {
-		/** Cold access to the mode-owned capture lifecycle. */
-		readonly readPerformanceSession: () => PerformanceSession | null;
-		/** Shared cold identity selected from either the entity list or minimap. */
-		readonly entitySelection: ExplorerEntitySelection | null;
-		readonly selectEntity: (selection: ExplorerEntitySelection | null) => void;
-		readonly runtimeReady: boolean;
-		readonly requestSceneInterest: (
-			target: SceneInterestTarget,
-			radii: SceneInterestRadii,
-		) => void;
-		readonly cameraFocusStatus: ExplorerCameraFocusStatus;
-		/** Formatted camera residency, or null before the first presented frame. */
-		readonly cameraResidencyLabel: string | null;
-		readonly cameraMode: ExplorerCameraMode;
-		readonly cameraModePending: boolean;
-		/** Pull physical-camera diagnostics only while the World panel is mounted. */
-		readonly readPhysicalCameraStatus: () => PhysicalFlyStatus | null;
-		readonly physicalCameraError: string | null;
-		readonly updateCameraMode: (mode: ExplorerCameraMode) => void;
-		readonly environmentSelection: SceneEnvironmentSelection;
-		readonly dayGroupNames: readonly string[];
-		readonly updateEnvironment: (selection: SceneEnvironmentSelection) => void;
-		/** Explorer-local switch controlling distance-fog presentation. */
-		readonly distanceFogEnabled: boolean;
-		/** Whether meshes suppressed by retail's degradation sentinel remain visible. */
-		readonly showRetailHiddenGeometry: boolean;
-		readonly updateShowRetailHiddenGeometry: (visible: boolean) => void;
-		readonly nameplates: NameplateSettings;
-		readonly updateNameplateCategory: (
-			category: NameplateCategory,
-			visible: boolean,
-		) => void;
-		readonly ambientOcclusion: AmbientOcclusionSettings;
-		readonly entityShadows: EntityShadowSettings;
-		readonly updateEntityShadowSettings: (
-			settings: EntityShadowSettings,
-		) => void;
-		/** Presentation grade authored in the grading panel. */
-		readonly colorGrade: ColorGradeSettings;
-		readonly updateColorGradeSettings: (settings: ColorGradeSettings) => void;
-		readonly viewerLightEnabled: boolean;
-		readonly weatherEnabled: boolean;
-		readonly clockFollowing: boolean;
-		/** Follow mode: scene interest follows accepted outdoor residency crossings. */
-		readonly interestFollowsCamera: boolean;
-		readonly audioFollowsCamera: boolean;
-		readonly effectVolume: number;
-		readonly ambientVolume: number;
-		/** Update Explorer's distance-fog presentation switch. */
-		readonly updateDistanceFog: (enabled: boolean) => void;
-		readonly updateAmbientOcclusionSettings: (
-			settings: AmbientOcclusionSettings,
-		) => void;
-		readonly updateViewerLight: (enabled: boolean) => void;
-		readonly updateWeather: (enabled: boolean) => void;
-		readonly updateClockFollowing: (enabled: boolean) => void;
-		readonly updateInterestFollowsCamera: (enabled: boolean) => void;
-		readonly updateAudioFollowsCamera: (enabled: boolean) => void;
-		readonly updateEffectVolume: (volume: number) => void;
-		readonly updateAmbientVolume: (volume: number) => void;
-		readonly envCellRenderMode: EnvCellRenderMode;
-		readonly updateEnvCellRenderMode: (mode: EnvCellRenderMode) => void;
-		readonly layerVisibility: RenderLayerVisibility;
-		readonly updateLayerVisibility: (
-			layer: LandblockLayerKind,
-			visible: boolean,
-		) => void;
-		/** Effective filterable texture quality selected for the next frame. */
-		readonly textureFiltering: TextureFilteringPolicy;
-		/** Device-supported texture filtering choices in display order. */
-		readonly textureFilteringOptions: readonly TextureFilteringPolicy[];
-		/** Raw device maximum shown beside the client-capped choices. */
-		readonly maximumTextureAnisotropy: number | null;
-		readonly updateTextureFiltering: (policy: TextureFilteringPolicy) => void;
-		readonly renderScale: number;
-		readonly renderScaleOptions: readonly number[];
-		readonly updateRenderScale: (renderScale: number) => void;
-		/** Pull renderer diagnostics only while the Frame panel is mounted. */
-		readonly readRendererFrameDiagnostics: () => RendererFrameDiagnosticsSnapshot | null;
-		/** Compose current renderer and Explorer context into one exportable report. */
-		readonly captureFrameDiagnosticReport: () => ExplorerFrameDiagnosticReport | null;
-		readonly readAuthoredDynamicRuntimeDiagnostics: () => ReturnType<
-			GamePresentationRuntime["getAuthoredDynamicRuntimeDiagnostics"]
-		> | null;
-		/** Read an outdoor-static and texture atlas snapshot for the Explorer inspector. */
-		readonly readStaticObjectRuntimeDiagnostics: () => StaticObjectRuntimeDiagnostics | null;
-		/** Explicit diagnostic readback of one active packed atlas page. */
-		readonly readTextureAtlasPage: (pageId: TexturePageId) => Texture2DReadback;
-		readonly entityCatalog: WeenieCatalogCapability | null;
-		readonly spawnedEntities: readonly DynamicEntityView[];
-		readonly spawnedEntityPresentationError: string | null;
-		readonly spawnExplorerEntity: (
-			wcid: number,
-			distance: number,
-		) => Promise<void>;
-		readonly searchExplorerWeenies: (
-			request: ExplorerWeenieSearchRequest,
-		) => Promise<readonly ExplorerWeenieSearchResult[]>;
-		readonly despawnExplorerEntity: (
-			entity: DynamicEntityView,
-		) => Promise<void>;
-		/** Possess one spawned entity so commands reach it, or release with `null`. */
-		readonly possessExplorerEntity: (
-			guid: number | null,
-		) => Promise<ExplorerPossession>;
-		readonly setExplorerEntityStance: (style: number) => Promise<void>;
-		readonly setExplorerEntityRunRate: (value: number) => Promise<void>;
-		readonly explorerPossession: ExplorerPossession | null;
-		readonly explorerPossessionControls: ExplorerPossessionControls | null;
-		readonly readPossessionMotionProbe: () => Promise<PossessionMotionProbe | null>;
-		/** Pull one exact current entity only for disclosure-scoped volatile diagnostics. */
-		readonly readExplorerEntity: (
-			selection: ExplorerEntitySelection,
-		) => DynamicEntityView | null;
-		/** Pull current boom diagnostics without subscribing the tool tree to render frames. */
-		readonly readBoomCameraStatus: () => HostKinematicBoomStatus | null;
+		readonly camera: ExplorerToolsCameraSurface;
+		readonly environment: ExplorerToolsEnvironmentSurface;
+		readonly rendering: ExplorerToolsRenderingSurface;
+		readonly diagnostics: ExplorerToolsDiagnosticsSurface;
+		readonly entities: ExplorerToolsEntitiesSurface;
 	}
 
-	let {
-		entitySelection,
-		selectEntity,
-		runtimeReady,
-		requestSceneInterest,
-		cameraFocusStatus,
-		cameraResidencyLabel,
-		cameraMode,
-		cameraModePending,
-		readPhysicalCameraStatus,
-		physicalCameraError,
-		updateCameraMode,
-		environmentSelection,
-		dayGroupNames,
-		updateEnvironment,
-		distanceFogEnabled,
-		showRetailHiddenGeometry,
-		updateShowRetailHiddenGeometry,
-		nameplates,
-		updateNameplateCategory,
-		ambientOcclusion,
-		entityShadows,
-		updateEntityShadowSettings,
-		colorGrade,
-		updateColorGradeSettings,
-		viewerLightEnabled,
-		weatherEnabled,
-		clockFollowing,
-		interestFollowsCamera,
-		audioFollowsCamera,
-		effectVolume,
-		ambientVolume,
-		updateDistanceFog,
-		updateAmbientOcclusionSettings,
-		updateViewerLight,
-		updateWeather,
-		updateClockFollowing,
-		updateInterestFollowsCamera,
-		updateAudioFollowsCamera,
-		updateEffectVolume,
-		updateAmbientVolume,
-		envCellRenderMode,
-		updateEnvCellRenderMode,
-		layerVisibility,
-		updateLayerVisibility,
-		textureFiltering,
-		textureFilteringOptions,
-		maximumTextureAnisotropy,
-		updateTextureFiltering,
-		renderScale,
-		renderScaleOptions,
-		updateRenderScale,
-		readPerformanceSession,
-		readRendererFrameDiagnostics,
-		captureFrameDiagnosticReport,
-		readAuthoredDynamicRuntimeDiagnostics,
-		readStaticObjectRuntimeDiagnostics,
-		readTextureAtlasPage,
-		entityCatalog,
-		spawnedEntities,
-		spawnedEntityPresentationError,
-		spawnExplorerEntity,
-		searchExplorerWeenies,
-		despawnExplorerEntity,
-		possessExplorerEntity,
-		setExplorerEntityStance,
-		setExplorerEntityRunRate,
-		explorerPossession,
-		explorerPossessionControls,
-		readPossessionMotionProbe,
-		readExplorerEntity,
-		readBoomCameraStatus,
-	}: Props = $props();
+	let { camera, environment, rendering, diagnostics, entities }: Props =
+		$props();
 
 	const tabs: readonly ExplorerTab[] = [
 		{
@@ -287,7 +72,7 @@
 	let expanded = $state(true);
 	let activeTabId = $state<ExplorerTabId>("world");
 	$effect(() => {
-		if (entitySelection !== null) {
+		if (entities.entitySelection !== null) {
 			activeTabId = "entities";
 			expanded = true;
 		}
@@ -349,91 +134,94 @@
 					>
 						{#if activeTab.id === "world"}
 							<ExplorerWorldPanel
-								runtimeReady={runtimeReady && !cameraModePending}
-								{requestSceneInterest}
-								{cameraFocusStatus}
-								{cameraResidencyLabel}
-								{cameraMode}
-								{cameraModePending}
-								{readPhysicalCameraStatus}
-								{physicalCameraError}
-								{updateCameraMode}
-								{environmentSelection}
-								{dayGroupNames}
-								{updateEnvironment}
-								{weatherEnabled}
-								{clockFollowing}
-								{interestFollowsCamera}
-								{updateInterestFollowsCamera}
-								{audioFollowsCamera}
-								{effectVolume}
-								{ambientVolume}
-								{updateWeather}
-								{updateClockFollowing}
-								{updateAudioFollowsCamera}
-								{updateEffectVolume}
-								{updateAmbientVolume}
+								runtimeReady={camera.runtimeReady && !camera.cameraModePending}
+								requestSceneInterest={camera.requestSceneInterest}
+								cameraFocusStatus={camera.cameraFocusStatus}
+								cameraResidencyLabel={camera.cameraResidencyLabel}
+								cameraMode={camera.cameraMode}
+								cameraModePending={camera.cameraModePending}
+								readPhysicalCameraStatus={camera.readPhysicalCameraStatus}
+								physicalCameraError={camera.physicalCameraError}
+								updateCameraMode={camera.updateCameraMode}
+								environmentSelection={environment.environmentSelection}
+								dayGroupNames={environment.dayGroupNames}
+								updateEnvironment={environment.updateEnvironment}
+								weatherEnabled={environment.weatherEnabled}
+								clockFollowing={environment.clockFollowing}
+								interestFollowsCamera={camera.interestFollowsCamera}
+								updateInterestFollowsCamera={camera.updateInterestFollowsCamera}
+								audioFollowsCamera={camera.audioFollowsCamera}
+								effectVolume={environment.effectVolume}
+								ambientVolume={environment.ambientVolume}
+								updateWeather={environment.updateWeather}
+								updateClockFollowing={environment.updateClockFollowing}
+								updateAudioFollowsCamera={camera.updateAudioFollowsCamera}
+								updateEffectVolume={environment.updateEffectVolume}
+								updateAmbientVolume={environment.updateAmbientVolume}
 							/>
 						{:else if activeTab.id === "renderer"}
 							<ExplorerRendererPanel
-								{runtimeReady}
-								{distanceFogEnabled}
-								{updateDistanceFog}
-								{viewerLightEnabled}
-								{updateViewerLight}
-								{envCellRenderMode}
-								{updateEnvCellRenderMode}
-								{layerVisibility}
-								{updateLayerVisibility}
-								{showRetailHiddenGeometry}
-								{updateShowRetailHiddenGeometry}
-								{nameplates}
-								{updateNameplateCategory}
-								{ambientOcclusion}
-								{updateAmbientOcclusionSettings}
-								{entityShadows}
-								{updateEntityShadowSettings}
-								{textureFiltering}
-								{textureFilteringOptions}
-								{maximumTextureAnisotropy}
-								{updateTextureFiltering}
-								{renderScale}
-								{renderScaleOptions}
-								{updateRenderScale}
+								runtimeReady={camera.runtimeReady}
+								distanceFogEnabled={rendering.distanceFogEnabled}
+								updateDistanceFog={rendering.updateDistanceFog}
+								viewerLightEnabled={rendering.viewerLightEnabled}
+								updateViewerLight={rendering.updateViewerLight}
+								envCellRenderMode={rendering.envCellRenderMode}
+								updateEnvCellRenderMode={rendering.updateEnvCellRenderMode}
+								layerVisibility={rendering.layerVisibility}
+								updateLayerVisibility={rendering.updateLayerVisibility}
+								showRetailHiddenGeometry={rendering.showRetailHiddenGeometry}
+								updateShowRetailHiddenGeometry={rendering.updateShowRetailHiddenGeometry}
+								nameplates={rendering.nameplates}
+								updateNameplateCategory={rendering.updateNameplateCategory}
+								ambientOcclusion={rendering.ambientOcclusion}
+								updateAmbientOcclusionSettings={rendering.updateAmbientOcclusionSettings}
+								entityShadows={rendering.entityShadows}
+								updateEntityShadowSettings={rendering.updateEntityShadowSettings}
+								textureFiltering={rendering.textureFiltering}
+								textureFilteringOptions={rendering.textureFilteringOptions}
+								maximumTextureAnisotropy={rendering.maximumTextureAnisotropy}
+								updateTextureFiltering={rendering.updateTextureFiltering}
+								renderScale={rendering.renderScale}
+								renderScaleOptions={rendering.renderScaleOptions}
+								updateRenderScale={rendering.updateRenderScale}
 							/>
 						{:else if activeTab.id === "grading"}
-							<ExplorerGradingPanel {colorGrade} {updateColorGradeSettings} />
+							<ExplorerGradingPanel
+								colorGrade={rendering.colorGrade}
+								updateColorGradeSettings={rendering.updateColorGradeSettings}
+							/>
 						{:else if activeTab.id === "frame"}
 							<ExplorerFramePanel
-								{readRendererFrameDiagnostics}
-								{readAuthoredDynamicRuntimeDiagnostics}
-								{readPerformanceSession}
-								captureReport={captureFrameDiagnosticReport}
+								readRendererFrameDiagnostics={diagnostics.readRendererFrameDiagnostics}
+								readAuthoredDynamicRuntimeDiagnostics={diagnostics.readAuthoredDynamicRuntimeDiagnostics}
+								readPerformanceSession={diagnostics.readPerformanceSession}
+								captureReport={diagnostics.captureFrameDiagnosticReport}
 							/>
 						{:else if activeTab.id === "textures"}
 							<ExplorerTexturesPanel
-								readDiagnostics={readStaticObjectRuntimeDiagnostics}
-								{readTextureAtlasPage}
+								readDiagnostics={diagnostics.readStaticObjectRuntimeDiagnostics}
+								readTextureAtlasPage={diagnostics.readTextureAtlasPage}
 							/>
 						{:else if activeTab.id === "entities"}
 							<ExplorerEntitiesPanel
-								selection={entitySelection}
-								select={selectEntity}
-								{runtimeReady}
-								catalog={entityCatalog}
-								entities={spawnedEntities}
-								presentationError={spawnedEntityPresentationError}
-								spawn={spawnExplorerEntity}
-								search={searchExplorerWeenies}
-								despawn={despawnExplorerEntity}
-								possess={possessExplorerEntity}
-								setStance={setExplorerEntityStance}
-								setRunRate={setExplorerEntityRunRate}
-								possession={explorerPossession}
-								possessionControls={explorerPossessionControls}
-								{readPossessionMotionProbe}
-								{readExplorerEntity}
-								{readBoomCameraStatus}
+								selection={entities.entitySelection}
+								select={entities.selectEntity}
+								runtimeReady={camera.runtimeReady}
+								catalog={entities.entityCatalog}
+								entities={entities.spawnedEntities}
+								presentationError={entities.spawnedEntityPresentationError}
+								spawn={entities.spawnExplorerEntity}
+								search={entities.searchExplorerWeenies}
+								despawn={entities.despawnExplorerEntity}
+								possess={entities.possessExplorerEntity}
+								setStance={entities.setExplorerEntityStance}
+								setRunRate={entities.setExplorerEntityRunRate}
+								possession={entities.explorerPossession}
+								possessionControls={entities.explorerPossessionControls}
+								readPossessionMotionProbe={entities.readPossessionMotionProbe}
+								readExplorerEntity={entities.readExplorerEntity}
+								readBoomCameraStatus={entities.readBoomCameraStatus}
 							/>
 						{/if}
 					</div>

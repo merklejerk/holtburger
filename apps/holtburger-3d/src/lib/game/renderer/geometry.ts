@@ -1,4 +1,4 @@
-import { OBJECT_MATERIAL_TEXELS } from "./object-material-table";
+import { OBJECT_MATERIAL_TEXELS } from "./webgl2/object-material-table";
 
 /** Terrain attributes retained from generation through backend upload. */
 export interface TerrainGeometryData {

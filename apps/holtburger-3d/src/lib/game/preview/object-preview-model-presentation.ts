@@ -18,8 +18,8 @@ import {
 import type { PreparedPhysicsScriptClosure } from "../behavior/physics-script-repository";
 import { multiplyMat4 } from "../math/matrices";
 import { Mat4 } from "../math/types";
-import type { ParticleDrawRange } from "../renderer/particle-render-routing";
-import type { ParticleRecordFrame } from "../renderer/webgl2-particle-pass";
+import type { ParticleDrawRange } from "../renderer/passes/particle-render-routing";
+import type { ParticleRecordFrame } from "../renderer/passes/webgl2-particle-pass";
 import {
 	composeObjectPartFrame,
 	composeObjectPartTransform,

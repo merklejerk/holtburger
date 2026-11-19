@@ -3,7 +3,6 @@ use holtburger_core::ClientViewEvent;
 use holtburger_core::client::types::ClientCommand;
 use holtburger_core::client::types::{ActiveCharacterConfirmation, BusyOperationKind};
 use holtburger_protocol::messages::combat::CombatMode;
-use holtburger_protocol::messages::trade::actions::ItemProfileActionData;
 use holtburger_scripting::{ScriptHost, ScriptHostConfig};
 use holtburger_world::context::WorldContext;
 use holtburger_world::context::WorldContextExt;
@@ -109,7 +108,7 @@ pub enum SalvagingPhase {
     /// Waiting for the current draft's core preview.
     Loading,
     /// Latest accepted evaluation, including missing details or rejection.
-    Reviewed(holtburger_world::crafting::salvage::SalvageEvaluation),
+    Reviewed(holtburger_core::client::salvage::SalvagePreviewEvaluation),
     /// Assessment finished without sufficient salvage evidence; manual assessment or requeuing can retry.
     AssessmentFailed { reason: String },
     /// Guarded submission is awaiting its dispatch receipt.

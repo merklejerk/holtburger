@@ -10,15 +10,15 @@ import type {
 } from "../scene";
 import { INCLUDE_ALL_SCENE_CULLING_GROUPS, SceneGraph } from "../scene";
 import type { DynamicEntityPresentationClass } from "../dynamic-entity-presentation-class";
-import { isEntityShadowCasterClass } from "./entity-shadow-policy";
+import { isEntityShadowCasterClass } from "./shadows/entity-shadow-policy";
 import {
 	createOutdoorPssmCasterBatch,
 	createOutdoorPssmCasterSelectionScratch,
 	planOutdoorShadowCastersForView,
 	type OutdoorPssmCasterWorld,
-} from "./outdoor-pssm-casters";
-import type { EntityShadowCasterShape } from "./entity-grounding";
-import { createDynamicDepthTestFixture } from "./dynamic-depth-test-fixture";
+} from "./shadows/outdoor-pssm-casters";
+import type { EntityShadowCasterShape } from "./overlays/entity-grounding";
+import { createDynamicDepthTestFixture } from "./webgl2/dynamic-depth-test-fixture";
 import type { TerrainDrawUnit } from "../terrain/types";
 import { TERRAIN_TYPE_COUNT } from "../terrain/pcode";
 import type { TextureArrayBinding } from "../textures/texture-manager";
@@ -28,7 +28,7 @@ import type {
 	TextureArrayKey,
 } from "../textures/types";
 import { RenderWorld } from "./render-world";
-import { CompiledObjectDrawStore } from "./compiled-object-draws";
+import { CompiledObjectDrawStore } from "./webgl2/compiled-object-draws";
 import type {
 	GeometryResourceKey,
 	Texture2DResourceKey,

@@ -115,22 +115,26 @@ pub fn get_lines<'a>(data: &'a GameData) -> Vec<EquipTabLine<'a>> {
         (
             PseudoEquipMask::MAIN_HAND_IMPLEMENTS.into(),
             "Main Hand",
-            Some(TargetSlot::MainHand),
+            Some(TargetSlot::EquipMask(
+                PseudoEquipMask::MAIN_HAND_IMPLEMENTS.into(),
+            )),
         ),
         (
             PseudoEquipMask::OFF_HAND_IMPLEMENTS.into(),
             "Off-Hand",
-            Some(TargetSlot::OffHand),
+            Some(TargetSlot::EquipMask(EquipMask::SHIELD)),
         ),
         (
             PseudoEquipMask::TOP_CLOTHES.into(),
             "Top Clothes",
-            Some(TargetSlot::TopClothes),
+            Some(TargetSlot::EquipMask(PseudoEquipMask::TOP_CLOTHES.into())),
         ),
         (
             PseudoEquipMask::BOTTOM_CLOTHES.into(),
             "Bottom Clothes",
-            Some(TargetSlot::BottomClothes),
+            Some(TargetSlot::EquipMask(
+                PseudoEquipMask::BOTTOM_CLOTHES.into(),
+            )),
         ),
         (EquipMask::HEAD_WEAR, "Head Wear", None),
         (EquipMask::HAND_WEAR, "Hand Wear", None),
@@ -168,13 +172,12 @@ pub fn get_lines<'a>(data: &'a GameData) -> Vec<EquipTabLine<'a>> {
         let mut items_in_slot: Vec<(&Entity, bool, bool)> = Vec::new();
         let mut is_occupied = false;
 
-        // Simplified context mask logic: use the target slot's mask if available, else the category mask
-        let check_mask = match target_slot {
-            Some(TargetSlot::MainHand) => PseudoEquipMask::MAIN_HAND_IMPLEMENTS.into(),
-            Some(TargetSlot::OffHand) => PseudoEquipMask::OFF_HAND_SLOT.into(),
-            Some(TargetSlot::TopClothes) => PseudoEquipMask::TOP_CLOTHES.into(),
-            Some(TargetSlot::BottomClothes) => PseudoEquipMask::BOTTOM_CLOTHES.into(),
-            _ => mask,
+        // Off-hand tracks dual-wielded melee weapons alongside shields for occupancy display,
+        // while equipping into the off-hand slot always targets EquipMask::SHIELD.
+        let check_mask = if name == "Off-Hand" {
+            PseudoEquipMask::OFF_HAND_SLOT.into()
+        } else {
+            mask
         };
 
         for item in &equippable_items {

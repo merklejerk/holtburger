@@ -43,7 +43,6 @@ fn apply_character_sheet(
         state.data.resistances = Default::default();
         state.data.armor = 0;
         state.data.vitae = 1.0;
-        state.data.player_enchantments.clear();
         state.data.resolved_enchantments = None;
         state.data.progression = Default::default();
         return UpdateResult::redraw();
@@ -86,7 +85,6 @@ fn log_busy_operation_result(
     let label = match operation {
         holtburger_core::BusyOperationKind::Use => "Use",
         holtburger_core::BusyOperationKind::UseWithTarget => "Use-with-target",
-        holtburger_core::BusyOperationKind::Salvage => "Salvage",
         holtburger_core::BusyOperationKind::SpellCast => "Spell cast",
         holtburger_core::BusyOperationKind::Buy => "Buy",
         holtburger_core::BusyOperationKind::Sell => "Sell",
@@ -135,16 +133,12 @@ pub(super) fn reduce_view_event(state: &mut GameState, event: &ClientViewEvent) 
             {
                 return UpdateResult::new();
             }
-            state.data.resolved_enchantments = snapshot.enchantments.as_ref().map(|effects| {
+            state.data.resolved_enchantments = snapshot.enchantments.as_ref().map(|resolved| {
                 crate::pages::game::data::TimedResolvedEnchantments {
-                    resolved: effects.resolved.clone(),
+                    resolved: resolved.clone(),
                     received_at: std::time::Instant::now(),
                 }
             });
-            state.data.player_enchantments = snapshot
-                .enchantments
-                .as_ref()
-                .map_or_else(Vec::new, |effects| effects.records.clone());
             return apply_character_sheet(state, snapshot.character_sheet.as_deref());
         }
         ClientViewEvent::BusyStateUpdated { busy } => {
@@ -159,11 +153,7 @@ pub(super) fn reduce_view_event(state: &mut GameState, event: &ClientViewEvent) 
             result.request_redraw(RedrawPriority::Immediate);
             handled = true;
         }
-        ClientViewEvent::PlayerEnchantmentsUpdated {
-            enchantments,
-            resolved,
-        } => {
-            state.data.player_enchantments = enchantments.clone();
+        ClientViewEvent::PlayerEnchantmentsUpdated { resolved } => {
             state.data.resolved_enchantments =
                 Some(crate::pages::game::data::TimedResolvedEnchantments {
                     resolved: resolved.clone(),

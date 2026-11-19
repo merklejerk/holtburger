@@ -118,29 +118,37 @@ type ScriptBusyOperation =
   | "none"
   | "use"
   | "use_with_target"
-  | "salvage"
   | "spell_cast"
   | "buy"
-  | "sell";
+  | "sell"
+  | "housing_purchase"
+  | "housing_maintenance"
+  | "housing_management";
 
 type ScriptChatChannelKind =
-  | "Say"
-  | "Tell"
-  | "Emote"
-  | "Fellowship"
-  | "Allegiance"
-  | "Vassals"
-  | "Patron"
-  | "Monarch"
-  | "CoVassals"
-  | "General"
-  | "Trade"
-  | "Lfg"
-  | "Roleplay"
-  | "Society"
-  | "Olthoi"
-  | "System"
-  | "Unknown";
+  | "say"
+  | "tell"
+  | "emote"
+  | "soul_emote"
+  | "fellowship"
+  | "fellowship_broadcast"
+  | "allegiance"
+  | "allegiance_broadcast"
+  | "vassals"
+  | "patron"
+  | "monarch"
+  | "co_vassals"
+  | "general"
+  | "trade"
+  | "lfg"
+  | "roleplay"
+  | "society"
+  | "society_celestial_hand"
+  | "society_eldrytch_web"
+  | "society_radiant_blood"
+  | "olthoi"
+  | "system"
+  | "unknown";
 
 type AttackHeight = "High" | "Medium" | "Low";
 
@@ -620,53 +628,53 @@ interface ScriptCombatFeedbackAttackCommenced {
 interface ScriptCombatFeedbackAttackerNotification {
   kind: "attacker_notification";
   data: {
-    defender_name: string;
-    damage_type: DamageType;
-    health_percent: number;
+    defenderName: string;
+    damageType: DamageType;
+    healthPercent: number;
     damage: number;
-    critical_hit: boolean;
-    attack_conditions: AttackConditions;
+    criticalHit: boolean;
+    attackConditions: AttackConditions;
   };
 }
 
 interface ScriptCombatFeedbackDefenderNotification {
   kind: "defender_notification";
   data: {
-    attacker_name: string;
-    damage_type: DamageType;
-    health_percent: number;
+    attackerName: string;
+    damageType: DamageType;
+    healthPercent: number;
     damage: number;
-    damage_location: DamageLocation;
-    critical_hit: boolean;
-    attack_conditions: AttackConditions;
+    damageLocation: DamageLocation;
+    criticalHit: boolean;
+    attackConditions: AttackConditions;
   };
 }
 
 interface ScriptCombatFeedbackEvasionAttackerNotification {
   kind: "evasion_attacker_notification";
   data: {
-    defender_name: string;
+    defenderName: string;
   };
 }
 
 interface ScriptCombatFeedbackEvasionDefenderNotification {
   kind: "evasion_defender_notification";
   data: {
-    attacker_name: string;
+    attackerName: string;
   };
 }
 
 interface ScriptCombatFeedbackVictimNotification {
   kind: "victim_notification";
   data: {
-    death_message: string;
+    deathMessage: string;
   };
 }
 
 interface ScriptCombatFeedbackKillerNotification {
   kind: "killer_notification";
   data: {
-    death_message: string;
+    deathMessage: string;
   };
 }
 

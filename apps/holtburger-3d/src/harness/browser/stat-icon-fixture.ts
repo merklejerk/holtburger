@@ -1,4 +1,4 @@
-import type { StatIconReferences } from "../../client/client-stat-artwork";
+import type { StatIconReferences } from "../../client/character/stat-artwork";
 /** Deterministic artwork identities for asset-independent production UI probes. */
 export const STAT_ICON_FIXTURE: StatIconReferences = [
 	...[

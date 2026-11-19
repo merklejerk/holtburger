@@ -4,8 +4,8 @@ import {
 	validateSummonPresentation,
 	type SummonFlickerTuning,
 } from "./summon-presentation";
-import { CLIENT_SUMMON_TUNING } from "../../../client/client-tuning";
-import { createSummonChainLink } from "../renderer/summon-chain-geometry";
+import { CLIENT_SUMMON_TUNING } from "../../../client/settings/tuning";
+import { createSummonChainLink } from "../renderer/overlays/summon-chain-geometry";
 
 const FLICKER: SummonFlickerTuning = {
 	leadInSeconds: 4,

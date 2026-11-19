@@ -1,76 +1,66 @@
-import type { ClientLocalMotionFeedback } from "../../client/client-host-contract";
-import type { ClientLockFeedback } from "../../client/client-lock-feedback-contract";
-import type { ClientGameplayPreferences } from "../../client/client-gameplay-options-contract";
+import type { ClientLocalMotionFeedback } from "../../client/session/host-contract";
+import type { ClientLockFeedback } from "../../client/inventory/lock-feedback";
 import type {
 	SalvagePreviewResult,
 	SalvageSubmitResult,
-} from "../../client/client-salvage-contract";
-import type { PlayerVisualCapture } from "../../client/client-object-preview-contract";
-import type { DeathLocationResult } from "../../client/client-death-contract";
-import type { ClientCombatOutcome } from "../../client/client-host-contract";
-import type { CharacterManagementState } from "../../client/client-host-contract";
+} from "../../client/inventory/salvage-state";
+import type { PlayerVisualCapture } from "../../client/character/object-preview-contract";
+import type { DeathLocationResult } from "../../client/combat/death-commands";
+import type { ClientCombatOutcome } from "../../client/session/host-contract";
+import type { CharacterManagementState } from "../../client/session/host-contract";
 import type {
 	ContractsSnapshot,
 	ContractMembershipChange,
-} from "../../client/client-contracts-contract";
-import type {
-	AllegianceSnapshot,
-	AllegiancePreferences,
-} from "../../client/client-allegiance-contract";
-import type { SquelchSnapshot } from "../../client/client-squelch-contract";
-import type {
-	FriendsSnapshot,
-	FriendsPreferences,
-} from "../../client/client-friends-contract";
-import type {
-	PartyPreferences,
-	PartySnapshot,
-} from "../../client/client-party-contract";
+} from "../../client/world/contracts-state";
+import type { AllegianceSnapshot } from "../../client/social/allegiance-state";
+import type { SquelchSnapshot } from "../../client/social/squelch-state";
+import type { FriendsSnapshot } from "../../client/social/friends-state";
+import type { PartySnapshot } from "../../client/social/party-state";
 import type {
 	HousingSnapshot,
 	HousingCrystal,
 	HousingPreviewResult,
 	HousingPaymentResult,
 	HousingManagementResult,
-} from "../../client/client-housing-contract";
-import type { TradeSnapshot } from "../../client/client-trade-contract";
+} from "../../client/housing/housing-contract";
+import type { TradeSnapshot } from "../../client/inventory/trade-state";
 import type {
 	BarberSnapshot,
 	BarberPreview,
-} from "../../client/client-barber-contract";
+} from "../../client/character/barber-state";
 import type {
 	VendorSnapshot,
 	VendorPreview,
 	VendorResult,
 	VendorPhase,
-} from "../../client/client-vendor-contract";
+} from "../../client/inventory/vendor-state";
 import type {
 	SpellInspectionContext,
 	SpellInspectionResult,
-} from "../../client/client-spell-inspection-contract";
+} from "../../client/magic/spells";
 import type {
 	ClientItemUseResult,
 	ClientItemUseFinished,
 	ClientLockedTarget,
 	ClientItemUseTargetResult,
-} from "../../client/client-item-use-contract";
-import type { ClientInventoryPreviewResult } from "../../client/client-inventory-contract";
-import type { ClientEntityDelta } from "../../client/client-entity-mirror";
+} from "../../client/inventory/item-use-sequence";
+import type { ClientInventoryPreviewResult } from "../../client/inventory/inventory-state";
+import type { ClientEntityDelta } from "../../client/world/entity-mirror";
 import type {
 	CharacterSheet,
 	ProgressionEvaluation,
 	ProgressionFeedback,
-} from "../../client/client-character-sheet-contract";
-import type { ObjectInspectionResult } from "../../client/client-object-inspection-contract";
+} from "../../client/character/character-sheet-contract";
+import type { ObjectInspectionResult } from "../../client/inventory/object-inspection-contract";
 import type {
 	ClientBook,
 	ClientBookOpened,
-} from "../../client/client-book-contract";
-import type { ObjectPreviewResult } from "../../client/client-object-preview-contract";
+} from "../../client/inventory/book-reader";
+import type { ObjectPreviewResult } from "../../client/character/object-preview-contract";
 import type { DynamicEntityEvent } from "../game/runtime/dynamic-entity-feed";
-import type { ExplorerFixedTickEnvelope } from "../../explorer/explorer-fixed-tick";
-import type { PossessionEventOutcome } from "../../explorer/explorer-entity-possession";
-import type { HostPhysicalFlyFailure } from "../../explorer/physical-fly-session";
+import type { ExplorerFixedTickEnvelope } from "../../explorer/world/fixed-tick";
+import type { PossessionEventOutcome } from "../../explorer/entities/entity-possession";
+import type { HostPhysicalFlyFailure } from "../../explorer/camera/physical-fly-session";
 import type { HostPhysicalFlyPath } from "../game/motion/host-physical-fly-path";
 import type {
 	RecallDestination,
@@ -93,17 +83,16 @@ import type {
 	ClientActionFeedback,
 	ClientServerText,
 	ClientConfirmation,
-	ClientEntityHealth,
 	ClientEntityCombatObserved,
 	ClientAppraisalFactsSettled,
 	ClientSummonEnded,
 	ClientCharacterMotionCapabilities,
 	ClientCharacterMotionFeedback,
-	ClientAppearanceOptions,
+	ClientCharacterPreferences,
 	ClientPreciseJumpEvaluation,
 	ClientPreciseJumpTransactionFeedback,
 	ClientEntitySelectionQueryResult,
-} from "../../client/client-host-contract";
+} from "../../client/session/host-contract";
 
 /** Bulk content commands sharing one connection-wide admission budget. */
 const CONTENT_HOST_COMMAND_NAMES = [
@@ -192,7 +181,7 @@ const CLIENT_HOST_COMMAND_NAMES = [
 	"queue_client_character_motion_event",
 	"submit_client_party",
 	"submit_client_friends",
-	"submit_client_contracts",
+	"abandon_client_contract",
 	"submit_client_squelch",
 	"submit_client_allegiance",
 	"set_client_party_updates",
@@ -223,7 +212,6 @@ const CLIENT_HOST_COMMAND_NAMES = [
 	"submit_client_inventory",
 	"auto_merge_client_container",
 	"close_client_container",
-	"equip_client_item",
 	"apply_client_equipment_set",
 	"preview_client_salvage",
 	"submit_client_salvage",
@@ -350,7 +338,6 @@ const CLIENT_HOST_EVENT_NAMES = [
 	"client-combat-mode-updated",
 	"client-combat-status-updated",
 	"client-spell-cast-target-updated",
-	"client-entity-health-updated",
 	"client-entity-combat-observed",
 	"client-appraisal-facts-settled",
 	"client-summon-ended",
@@ -463,13 +450,7 @@ export interface HostEventPayloadMap {
 	"client-player-entered": ClientPlayerEntered;
 	"client-player-spells-updated": { spellIds: number[] };
 	"client-player-enchantments-updated": unknown;
-	"client-character-preferences-updated": {
-		appearance: ClientAppearanceOptions;
-		gameplay: ClientGameplayPreferences;
-		party: PartyPreferences;
-		friends: FriendsPreferences;
-		allegiance: AllegiancePreferences;
-	};
+	"client-character-preferences-updated": ClientCharacterPreferences;
 	"client-friends-updated": { friends: FriendsSnapshot | null };
 	"client-contracts-updated": { contracts: ContractsSnapshot | null };
 	"client-contract-membership-changed": ContractMembershipChange;
@@ -501,7 +482,6 @@ export interface HostEventPayloadMap {
 	"client-confirmation-updated": {
 		readonly confirmation: ClientConfirmation | null;
 	};
-	"client-entity-health-updated": ClientEntityHealth;
 	"client-entity-combat-observed": ClientEntityCombatObserved;
 	"client-appraisal-facts-settled": ClientAppraisalFactsSettled;
 	"client-summon-ended": ClientSummonEnded;

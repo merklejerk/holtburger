@@ -10,7 +10,7 @@ import {
 	createEntityGroundingSelection,
 	createEntityGroundingSelectionScratch,
 	selectIndoorGroundingCasters,
-} from "./entity-grounding";
+} from "./overlays/entity-grounding";
 import { ViewSubmissionStoragePool } from "./view-submission-storage";
 
 describe("view submission storage", () => {

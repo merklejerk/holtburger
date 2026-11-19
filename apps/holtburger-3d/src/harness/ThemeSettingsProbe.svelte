@@ -3,19 +3,19 @@
 	import {
 		UiThemeSelection,
 		type UiThemeSettings,
-	} from "../app/ui-theme-selection";
-	import { createElectronUiThemeTransport } from "../app/ui-theme-transport";
-	import { withBundledUiThemes } from "../app/ui-bundled-themes";
+	} from "../app/theme/ui-theme-selection";
+	import { createElectronUiThemeTransport } from "../app/theme/ui-theme-transport";
+	import { withBundledUiThemes } from "../app/theme/ui-bundled-themes";
 	import { uiThemes } from "../app/mount";
-	import { createElectronClientSettingsTransport } from "../client/client-settings-transport";
-	import { createDefaultClientUserSettings } from "../client/client-settings-defaults";
-	import { createClientShortcuts } from "../client/ClientShortcutDock.svelte";
-	import { ClientSettingsPersistence } from "../client/client-settings-persistence";
-	import type { ClientUserSettingsPatch } from "../client/client-settings-sections";
-	import ClientPregameSettings from "../client/ClientPregameSettings.svelte";
-	import ClientSettingsPanel from "../client/ClientSettingsPanel.svelte";
+	import { createElectronClientSettingsTransport } from "../client/settings/settings-transport";
+	import { createDefaultClientUserSettings } from "../client/settings/settings-defaults";
+	import { createClientShortcuts } from "../client/hud/ClientShortcutDock.svelte";
+	import { ClientSettingsPersistence } from "../client/settings/settings-persistence";
+	import type { ClientUserSettingsPatch } from "../client/settings/settings-sections";
+	import ClientPregameSettings from "../client/pregame/ClientPregameSettings.svelte";
+	import ClientSettingsPanel from "../client/settings/ClientSettingsPanel.svelte";
 	import { provideAppInputPolicy } from "../lib/input/app-input-policy-context";
-	import "../app/themes/holtburger-pregame.css";
+	import "../app/theme/holtburger-pregame.css";
 
 	const defaults = createDefaultClientUserSettings(
 		{ width: innerWidth, height: innerHeight },

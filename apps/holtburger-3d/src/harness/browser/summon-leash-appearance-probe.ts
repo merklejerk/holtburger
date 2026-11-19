@@ -1,9 +1,9 @@
-import { createUiThemeLoader } from "../../app/ui-theme";
+import { createUiThemeLoader } from "../../app/theme/ui-theme";
 import {
 	observeSummonLeashColors,
 	readSummonLeashColors,
 	type ClientSummonLeashColors,
-} from "../../client/client-summon-leash-appearance";
+} from "../../client/combat/summon-leash-appearance";
 import themeUrl from "./themes/combat-indicators.css?url&no-inline";
 
 /** Real stylesheet commits and scoped CSS reach the existing runtime's rendered leash. */

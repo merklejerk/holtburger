@@ -1,6 +1,6 @@
 //! Shared interpretation of the player's live enchantment registry.
 //!
-//! ACE filters by affected stat and modifier operation before choosing a winner
+//! Server behavior filters by affected stat and modifier operation before choosing a winner
 //! for each spell category. The same spell can therefore contribute under several
 //! headings, and several categories can contribute under one heading.
 
@@ -12,19 +12,17 @@ use holtburger_common::properties::{EnchantmentTypeFlags as Flags, PropertyFloat
 use holtburger_protocol::messages::magic::Enchantment;
 use serde::{Deserialize, Serialize};
 
-use crate::inspection::VitalType as VitalPropertyType;
+use crate::inspection::SecondaryAttribute as VitalPropertyType;
 use crate::spell::SpellCatalog;
 use crate::stats::{AttributeType, SkillType, VitalType};
 
-/// The first spell ID ACE considers when building its set-spell membership from DAT tiers.
-/// ACE Server/Entity/SpellSet.cs:22.
+/// The first spell ID considered when building set-spell membership from DAT tiers.
 const FIRST_SET_SPELL_ID: u32 = 4730;
 
 /// SpellBase disposition used by retail's effects UI and enchantment tray totals.
 const BENEFICIAL_SPELL_FLAG: u32 = 0x4;
 
-/// Equal-power self auras preferred to their Other counterparts by ACE.
-/// ACE Entity/Models/PropertiesEnchantmentRegistryExtensions.cs:130.
+/// Equal-power self auras preferred to their Other counterparts by server tie rules.
 const PREFERRED_SELF_AURAS: [u16; 6] = [4395, 4400, 4405, 4414, 4417, 4418];
 
 /// Identity used by update and removal packets; layer is not stacking priority.
@@ -109,7 +107,8 @@ impl PlayerEnchantments {
         resolve_enchantments(&self.observations, &self.rules, now)
     }
 
-    pub fn wire(&self) -> Vec<Enchantment> {
+    #[cfg(test)]
+    pub(crate) fn wire(&self) -> Vec<Enchantment> {
         self.iter().copied().collect()
     }
 
@@ -119,7 +118,7 @@ impl PlayerEnchantments {
             .map(|observation| &observation.enchantment)
     }
 
-    /// ACE's modifier query: filter candidates before choosing one per category.
+    /// Server modifier query: filter candidates before choosing one per category.
     /// `handle_multiple` admits key-zero all-stat modifiers for this affected key.
     pub fn top_for(
         &self,
@@ -177,8 +176,7 @@ impl PlayerEnchantments {
             .collect()
     }
 
-    /// ACE adds attack/defense-wide additive queries after the ordinary skill query.
-    /// ACE Server/WorldObjects/Managers/EnchantmentManager.cs:759-772,1104-1122.
+    /// Server behavior adds attack/defense-wide additive queries after the ordinary skill query.
     pub fn skill_wide_additive(&self, skill: SkillType) -> f32 {
         self.skill_wide_selections(skill)
             .map_or(0.0, |(_, selections)| {
@@ -190,7 +188,7 @@ impl PlayerEnchantments {
             })
     }
 
-    /// The one ACE skill-wide query channel, with its selected and overridden spells.
+    /// The one skill-wide query channel, with its selected and overridden spells.
     pub fn skill_wide_selections(
         &self,
         skill: SkillType,
@@ -223,7 +221,6 @@ impl PlayerEnchantments {
 }
 
 /// Candidate predicate shared by gameplay queries and exported contribution groups.
-/// ACE Entity/Models/PropertiesEnchantmentRegistryExtensions.cs:198-226.
 #[derive(Clone, Copy)]
 struct EnchantmentQuery {
     required_flags: u32,
@@ -266,6 +263,62 @@ impl EnchantmentObservation {
     }
 }
 
+/// Elemental or physical damage resistance stat affected by enchantments.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ResistanceStat {
+    Slash,
+    Pierce,
+    Bludgeon,
+    Fire,
+    Cold,
+    Acid,
+    Electric,
+    Nether,
+}
+
+impl ResistanceStat {
+    pub fn from_float_key(key: u32) -> Option<Self> {
+        match PropertyFloat::from_repr(key)? {
+            PropertyFloat::ResistSlash => Some(Self::Slash),
+            PropertyFloat::ResistPierce => Some(Self::Pierce),
+            PropertyFloat::ResistBludgeon => Some(Self::Bludgeon),
+            PropertyFloat::ResistFire => Some(Self::Fire),
+            PropertyFloat::ResistCold => Some(Self::Cold),
+            PropertyFloat::ResistAcid => Some(Self::Acid),
+            PropertyFloat::ResistElectric => Some(Self::Electric),
+            PropertyFloat::ResistNether => Some(Self::Nether),
+            _ => None,
+        }
+    }
+
+    pub const fn float_property(self) -> PropertyFloat {
+        match self {
+            Self::Slash => PropertyFloat::ResistSlash,
+            Self::Pierce => PropertyFloat::ResistPierce,
+            Self::Bludgeon => PropertyFloat::ResistBludgeon,
+            Self::Fire => PropertyFloat::ResistFire,
+            Self::Cold => PropertyFloat::ResistCold,
+            Self::Acid => PropertyFloat::ResistAcid,
+            Self::Electric => PropertyFloat::ResistElectric,
+            Self::Nether => PropertyFloat::ResistNether,
+        }
+    }
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Slash => "Slash resistance",
+            Self::Pierce => "Pierce resistance",
+            Self::Bludgeon => "Bludgeon resistance",
+            Self::Fire => "Fire resistance",
+            Self::Cold => "Cold resistance",
+            Self::Acid => "Acid resistance",
+            Self::Electric => "Electric resistance",
+            Self::Nether => "Nether resistance",
+        }
+    }
+}
+
 /// The direct stat/property heading affected by a modifier.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "key", rename_all = "camelCase")]
@@ -273,6 +326,7 @@ pub enum AffectedStat {
     Attribute(u32),
     Vital(u32),
     Skill(u32),
+    Resistance(ResistanceStat),
     IntProperty(u32),
     FloatProperty(u32),
     Armor,
@@ -282,7 +336,7 @@ pub enum AffectedStat {
     Other(u32, u32),
 }
 
-/// ACE resolves additive and multiplicative modifiers in separate query contexts.
+/// Server resolves additive and multiplicative modifiers in separate query contexts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum EnchantmentOperation {
@@ -291,7 +345,7 @@ pub enum EnchantmentOperation {
     Other,
 }
 
-/// Independent ACE query that contributes beneath an affected-stat heading.
+/// Independent server query that contributes beneath an affected-stat heading.
 /// Attack/defense-wide skill effects are added after the ordinary skill query.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -345,18 +399,17 @@ pub struct ResolvedEnchantment {
 #[serde(rename_all = "camelCase")]
 pub struct EnchantmentLayerGroup {
     pub affected_stat: AffectedStat,
-    /// Shared display name for a known stat or property key; UIs choose final wording.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub stat_name: Option<String>,
+    /// Authoritative display label formatted by world for all client views.
+    pub stat_label: String,
     pub operation: EnchantmentOperation,
-    /// Distinguishes independent ACE queries beneath the same stat and category.
+    /// Distinguishes independent queries beneath the same stat and category.
     pub channel: EnchantmentChannel,
     pub spell_category: u16,
     pub effective: EnchantmentKey,
     pub overridden: Vec<EnchantmentKey>,
 }
 
-/// Reusable semantic snapshot; frontends choose labels, filters and display order.
+/// Reusable semantic snapshot; frontends choose filters and display order.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ResolvedEnchantments {
@@ -366,7 +419,7 @@ pub struct ResolvedEnchantments {
     pub cooldowns: Vec<crate::item_cooldowns::GroupCooldown>,
 }
 
-/// Authored spell disposition and set membership used by presentation and ACE's tie rule.
+/// Authored spell disposition and set membership used by presentation and tie rules.
 #[derive(Debug, Clone, Default)]
 pub struct EnchantmentRules {
     /// DAT disposition for ordinary effects; live modifier flags remain unmodified.
@@ -515,7 +568,7 @@ pub fn resolve_enchantments(
                 let winner = select_winner(observations, rules, now, &indices);
                 EnchantmentLayerGroup {
                     affected_stat,
-                    stat_name: stat_name(affected_stat),
+                    stat_label: stat_label(affected_stat),
                     operation,
                     channel,
                     spell_category,
@@ -552,23 +605,75 @@ fn select_winner(
     winner
 }
 
-fn stat_name(stat: AffectedStat) -> Option<String> {
-    match stat {
-        AffectedStat::Attribute(key) => {
-            AttributeType::from_repr(key).map(|value| value.to_string())
+fn property_label(symbol: &str) -> String {
+    match symbol {
+        "HealthRate" => return "Health regeneration rate".to_string(),
+        "StaminaRate" => return "Stamina regeneration rate".to_string(),
+        "ManaRate" => return "Mana regeneration rate".to_string(),
+        _ => {}
+    }
+    let mut words = String::with_capacity(symbol.len() + 8);
+    let chars: Vec<char> = symbol.chars().collect();
+    for (i, &ch) in chars.iter().enumerate() {
+        let prev_is_lower_or_digit =
+            i > 0 && (chars[i - 1].is_ascii_lowercase() || chars[i - 1].is_ascii_digit());
+        let prev_is_upper_next_lower = i > 0
+            && chars[i - 1].is_ascii_uppercase()
+            && ch.is_ascii_uppercase()
+            && chars
+                .get(i + 1)
+                .is_some_and(|next| next.is_ascii_lowercase());
+        if ch.is_ascii_uppercase() && (prev_is_lower_or_digit || prev_is_upper_next_lower) {
+            words.push(' ');
         }
+        if i == 0 {
+            words.push(ch.to_ascii_uppercase());
+        } else {
+            words.push(ch.to_ascii_lowercase());
+        }
+    }
+    if let Some(damage_type) = words.strip_prefix("Resist ") {
+        let mut chars = damage_type.chars();
+        if let Some(first) = chars.next() {
+            return format!(
+                "{}{} resistance",
+                first.to_ascii_uppercase(),
+                chars.as_str()
+            );
+        }
+    }
+    words
+}
+
+fn stat_label(stat: AffectedStat) -> String {
+    match stat {
+        AffectedStat::Attribute(key) => AttributeType::from_repr(key)
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| format!("Attribute {key}")),
         AffectedStat::Vital(key) => usize::try_from(key)
             .ok()
             .and_then(VitalPropertyType::from_repr)
-            .map(|value| value.to_string()),
-        AffectedStat::Skill(key) => SkillType::from_repr(key).map(|value| value.to_string()),
-        AffectedStat::IntProperty(key) => {
-            PropertyInt::from_repr(key).map(|value| value.to_string())
-        }
-        AffectedStat::FloatProperty(key) => {
-            PropertyFloat::from_repr(key).map(|value| value.to_string())
-        }
-        _ => None,
+            .map(|value| match value {
+                VitalPropertyType::MaxHealth => "Maximum health".to_string(),
+                VitalPropertyType::MaxStamina => "Maximum stamina".to_string(),
+                VitalPropertyType::MaxMana => "Maximum mana".to_string(),
+                other => other.to_string(),
+            })
+            .unwrap_or_else(|| format!("Vital {key}")),
+        AffectedStat::Skill(key) => SkillType::from_repr(key)
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| format!("Skill {key}")),
+        AffectedStat::Resistance(resistance) => resistance.label().to_string(),
+        AffectedStat::IntProperty(key) => PropertyInt::from_repr(key)
+            .map(|value| property_label(&value.to_string()))
+            .unwrap_or_else(|| format!("Integer property {key}")),
+        AffectedStat::FloatProperty(key) => PropertyFloat::from_repr(key)
+            .map(|value| property_label(&value.to_string()))
+            .unwrap_or_else(|| format!("Float property {key}")),
+        AffectedStat::Armor => "Armor".to_string(),
+        AffectedStat::Damage => "Damage".to_string(),
+        AffectedStat::DamageVariance => "Damage variance".to_string(),
+        AffectedStat::Other(a, b) => format!("Other effect {a} / {b}"),
     }
 }
 
@@ -613,6 +718,12 @@ fn query_for(
             AffectedStat::Attribute(key) => (Flags::ATTRIBUTE.bits(), key, true, false),
             AffectedStat::Vital(key) => (Flags::SECOND_ATT.bits(), key, true, false),
             AffectedStat::Skill(key) => (Flags::SKILL.bits(), key, true, false),
+            AffectedStat::Resistance(resistance) => (
+                Flags::FLOAT.bits(),
+                resistance.float_property() as u32,
+                false,
+                false,
+            ),
             AffectedStat::IntProperty(key) => (Flags::INT.bits(), key, false, false),
             AffectedStat::FloatProperty(key) => (Flags::FLOAT.bits(), key, false, false),
             AffectedStat::Armor => (Flags::BODY_ARMOR_VALUE.bits(), 0, false, true),
@@ -686,7 +797,10 @@ fn affected_contributions(
         targets.insert(ordinary(AffectedStat::IntProperty(key)));
     }
     if flags.contains(Flags::FLOAT) {
-        targets.insert(ordinary(AffectedStat::FloatProperty(key)));
+        let stat = ResistanceStat::from_float_key(key)
+            .map(AffectedStat::Resistance)
+            .unwrap_or(AffectedStat::FloatProperty(key));
+        targets.insert(ordinary(stat));
     }
     if flags.contains(Flags::BODY_ARMOR_VALUE) {
         targets.insert(ordinary(AffectedStat::Armor));
@@ -706,7 +820,7 @@ fn affected_contributions(
     targets
 }
 
-// ACE Entity/Enum/Skill.cs:263 and :290; includes legacy skills supported by ACE.
+// Includes legacy skills supported by server rules.
 const ATTACK_SKILLS: [SkillType; 20] = [
     SkillType::Axe,
     SkillType::Bow,
@@ -932,8 +1046,25 @@ mod tests {
         assert_eq!(axe_groups[0].effective.spell_id, 11);
         assert_eq!(axe_groups[1].channel, EnchantmentChannel::AttackSkills);
         assert_eq!(axe_groups[1].effective.spell_id, 12);
-        assert_eq!(player.get_skill_additive(SkillType::Axe), 4.0);
-        assert_eq!(player.get_skill_additive(SkillType::Shield), 0.0);
+        let axe_direct: f32 = player
+            .enchantments
+            .top_for(
+                (Flags::SKILL | Flags::ADDITIVE).bits(),
+                SkillType::Axe as u32,
+                true,
+                false,
+            )
+            .into_iter()
+            .map(|e| e.stat_mod_value)
+            .sum();
+        assert_eq!(
+            axe_direct + player.enchantments.skill_wide_additive(SkillType::Axe),
+            4.0
+        );
+        assert_eq!(
+            player.enchantments.skill_wide_additive(SkillType::Shield),
+            0.0
+        );
     }
 
     #[test]
@@ -964,7 +1095,7 @@ mod tests {
     }
 
     #[test]
-    fn groups_carry_canonical_stat_names_without_guessing_unknown_keys() {
+    fn groups_carry_authoritative_stat_labels_without_guessing_unknown_keys() {
         let now = Instant::now();
         let observations = [
             EnchantmentObservation {
@@ -989,6 +1120,16 @@ mod tests {
             },
             EnchantmentObservation {
                 enchantment: sample(
+                    20,
+                    96,
+                    10,
+                    Flags::SECOND_ATT | Flags::ADDITIVE | Flags::SINGLE_STAT,
+                    1,
+                ),
+                received_at: now,
+            },
+            EnchantmentObservation {
+                enchantment: sample(
                     19,
                     95,
                     10,
@@ -998,33 +1139,71 @@ mod tests {
                 received_at: now,
             },
             EnchantmentObservation {
-                enchantment: sample(14, 90, 10, Flags::INT | Flags::ADDITIVE, 360),
+                enchantment: sample(
+                    14,
+                    90,
+                    10,
+                    Flags::INT | Flags::ADDITIVE,
+                    PropertyInt::WeaponAuraDamage as u32,
+                ),
                 received_at: now,
             },
             EnchantmentObservation {
-                enchantment: sample(15, 91, 10, Flags::FLOAT | Flags::MULTIPLICATIVE, 64),
+                enchantment: sample(
+                    21,
+                    97,
+                    10,
+                    Flags::FLOAT | Flags::MULTIPLICATIVE,
+                    PropertyFloat::HealthRate as u32,
+                ),
                 received_at: now,
             },
             EnchantmentObservation {
-                enchantment: sample(16, 92, 10, Flags::FLOAT | Flags::ADDITIVE, 999),
+                enchantment: sample(
+                    15,
+                    91,
+                    10,
+                    Flags::FLOAT | Flags::MULTIPLICATIVE,
+                    PropertyFloat::ResistSlash as u32,
+                ),
+                received_at: now,
+            },
+            EnchantmentObservation {
+                enchantment: sample(16, 92, 10, Flags::INT | Flags::ADDITIVE, 999),
+                received_at: now,
+            },
+            EnchantmentObservation {
+                enchantment: sample(22, 98, 10, Flags::FLOAT | Flags::ADDITIVE, 999),
                 received_at: now,
             },
         ];
         let resolved = resolve_enchantments(&observations, &EnchantmentRules::default(), now);
-        let symbols: Vec<_> = resolved
+        let summary: Vec<_> = resolved
             .groups
             .iter()
-            .map(|group| group.stat_name.as_deref())
+            .map(|group| (group.affected_stat, group.stat_label.as_str()))
             .collect();
         assert_eq!(
-            symbols,
+            summary,
             [
-                Some("Strength"),
-                Some("Health"),
-                Some("Axe"),
-                Some("WeaponAuraDamage"),
-                Some("ResistSlash"),
-                None,
+                (AffectedStat::Attribute(1), "Strength"),
+                (AffectedStat::Vital(1), "Maximum health"),
+                (AffectedStat::Vital(2), "Health"),
+                (AffectedStat::Skill(1), "Axe"),
+                (
+                    AffectedStat::Resistance(ResistanceStat::Slash),
+                    "Slash resistance"
+                ),
+                (
+                    AffectedStat::IntProperty(PropertyInt::WeaponAuraDamage as u32),
+                    "Weapon aura damage"
+                ),
+                (AffectedStat::IntProperty(999), "Integer property 999"),
+                (
+                    AffectedStat::FloatProperty(PropertyFloat::HealthRate as u32),
+                    "Health regeneration rate"
+                ),
+                (AffectedStat::FloatProperty(999), "Float property 999"),
             ]
         );
     }

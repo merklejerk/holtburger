@@ -1,12 +1,12 @@
 <script lang="ts">
 	import { onDestroy, onMount } from "svelte";
-	import UiDialog from "../app/UiDialog.svelte";
-	import UiTabs from "../app/UiTabs.svelte";
-	import UiTabPanel from "../app/UiTabPanel.svelte";
+	import UiDialog from "../app/ui/UiDialog.svelte";
+	import UiTabs from "../app/ui/UiTabs.svelte";
+	import UiTabPanel from "../app/ui/UiTabPanel.svelte";
 	import type {
 		AppSettings,
 		AppSettingsSnapshot,
-	} from "../app/app-settings-contract";
+	} from "../app/desktop/app-settings-contract";
 	import { launcherTransport } from "./launcher-transport";
 	import { probeLauncherHardware } from "./launcher-hardware-info";
 

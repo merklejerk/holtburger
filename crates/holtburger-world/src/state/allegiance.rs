@@ -8,6 +8,40 @@ use holtburger_protocol::messages::allegiance::{
     AllegianceData, AllegianceNodes, AllegianceUpdateEventData,
 };
 
+/// Disclosed member facts consumed by relationship and contribution presentation.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AllegianceMember {
+    /// Character identity, independent of scene visibility.
+    pub guid: Guid,
+    /// Server-provided name.
+    pub name: String,
+    /// Shared rank title; absent for unsupported heritage, gender or rank.
+    pub title: Option<&'static str>,
+    /// Numeric allegiance rank.
+    pub rank: u16,
+    /// Level when supplied by the profile.
+    pub level: Option<u32>,
+    /// Last known presence.
+    pub online: bool,
+    /// Server-reported contribution.
+    pub contributed_xp: u32,
+}
+
+impl From<&AllegianceData> for AllegianceMember {
+    fn from(member: &AllegianceData) -> Self {
+        Self {
+            guid: member.guid,
+            name: member.name.clone(),
+            title: titles::rank_title(member.heritage, member.gender, member.rank),
+            rank: member.rank,
+            level: member.level,
+            online: member.flags & AllegianceData::LOGGED_IN != 0,
+            contributed_xp: member.contributed_xp,
+        }
+    }
+}
+
 /// Last authoritative relationship profile; unknown before the first server reply.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AllegianceState {

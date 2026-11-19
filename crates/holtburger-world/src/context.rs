@@ -1,7 +1,6 @@
 use crate::entity::Entity;
 use crate::state::WorldState;
 use crate::stats::{AttributeType, SkillType};
-use crate::vendor::VendorState;
 use holtburger_common::Guid;
 use holtburger_common::properties::{
     CombatUse, EquipMask, ItemType, PropertyInt, Usable, WorldObjectExt,
@@ -492,39 +491,7 @@ pub trait WorldContextExt: WorldContext {
         self.container_space_left(container_id) == e.items_capacity().unwrap_or(0)
     }
 
-    fn can_sell_to_vendor(&self, guid: Guid, vendor: Option<&VendorState>) -> bool {
-        let e = match self.get_entity(guid) {
-            Some(e) => e,
-            None => return false,
-        };
-
-        let itype = e.item_type().unwrap_or_default();
-
-        if itype.is_empty() || !e.is_sellable() || e.item_value() == 0 {
-            return false;
-        }
-
-        // If it's a container, it must be empty.
-        if !self.is_container_empty(guid) {
-            return false;
-        }
-
-        if let Some(vendor) = vendor
-            && (itype.bits() & vendor.merchandise_item_types) == 0
-        {
-            return false;
-        }
-
-        // Check for active pet
-        !e.has_active_pet()
-    }
-
-    /// Whole-item offer admission shared by UI hints and command validation.
-    fn can_add_to_trade(&self, guid: Guid) -> bool {
-        self.trade_item_rejection(guid).is_none()
-    }
-
-    /// Local restrictions supported by both clients; ACE owns unique-item and recipient checks.
+    /// Local restrictions supported by both clients; server owns unique-item and recipient checks.
     fn trade_item_rejection(&self, guid: Guid) -> Option<&'static str> {
         if !self.is_owned_by_player(guid) {
             return Some("You can only offer items you own.");

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { clientWindowSettingsSchema } from "../app/window-settings-contract.js";
+import { clientWindowSettingsSchema } from "../app/desktop/window-settings-contract.js";
 
 /** Server identity belongs to the launcher; game caches still use the selected endpoint. */
 export const launcherServerSchema = z

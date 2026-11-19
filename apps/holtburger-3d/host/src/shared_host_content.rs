@@ -450,12 +450,13 @@ pub async fn dispatch_shared_content(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::client_projection::{ClientExitCauseWire, ClientHostEvent, ClientLifecycleWire};
+    use crate::client_projection::{ClientHostEvent, ClientLifecycleWire};
     use crate::client_runtime::{ClientHostCommand, ClientHostRuntime};
     use crate::host_event_sink::ClientEventSink;
     use crate::host_mode::ClientLaunchConfiguration;
     use crate::protocol::{HostCommand, dispatch};
     use crate::runtime::HostRuntime;
+    use holtburger_core::ClientExitCause;
     use holtburger_core::client::connection::CONNECTION_TIMEOUT;
     use tokio::sync::mpsc;
 
@@ -563,10 +564,7 @@ mod tests {
                 .unwrap();
                 loop {
                     if let ClientHostEvent::ExitRequested(exit) = events.recv().await.unwrap() {
-                        assert!(matches!(
-                            exit.cause,
-                            ClientExitCauseWire::ExplicitDisconnect
-                        ));
+                        assert!(matches!(exit.cause, ClientExitCause::ExplicitDisconnect));
                         break;
                     }
                 }

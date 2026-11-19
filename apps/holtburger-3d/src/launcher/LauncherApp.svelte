@@ -1,9 +1,9 @@
 <script lang="ts">
 	import { onMount } from "svelte";
-	import { submitPregameOnEnter } from "../client/pregame-submit";
-	import ClientPregameScreen from "../client/ClientPregameScreen.svelte";
-	import UiDialog from "../app/UiDialog.svelte";
-	import { navigateVerticalButtons } from "../app/vertical-button-navigation";
+	import { submitPregameOnEnter } from "../client/pregame/pregame-submit";
+	import ClientPregameScreen from "../client/pregame/ClientPregameScreen.svelte";
+	import UiDialog from "../app/ui/UiDialog.svelte";
+	import { navigateVerticalButtons } from "../app/ui/vertical-button-navigation";
 	import EditIcon from "../assets/icons/hud-edit.svg?component";
 	import DeleteIcon from "../assets/icons/character-delete.svg?component";
 	import SelectionMarker from "../assets/icons/pregame-selection.svg?component";

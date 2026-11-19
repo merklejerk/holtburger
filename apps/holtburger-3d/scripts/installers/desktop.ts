@@ -19,7 +19,7 @@ import { verifyElectronPackage } from "../verify-electron-package.mjs";
 import {
 	distributionKindSchema,
 	releaseVersionSchema,
-} from "../../src/app/app-build-contract.ts";
+} from "../../src/app/desktop/app-build-contract.ts";
 import { APP_ROOT, readJson, run, runResult, type Runner } from "./native.ts";
 /** Stable application identity used by installer compilation. */
 const WINDOWS_APP_ID = "io.github.merklejerk.holtburger-3d";

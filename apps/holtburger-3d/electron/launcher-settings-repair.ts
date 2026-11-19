@@ -5,7 +5,7 @@ import {
 	launcherSelectionSchema,
 	type LauncherSettings,
 } from "../src/launcher/launcher-contract.js";
-import type { ClientWindowSettings } from "../src/app/window-settings-contract.js";
+import type { ClientWindowSettings } from "../src/app/desktop/window-settings-contract.js";
 import { repairSettingsValue } from "./settings-value-repair.js";
 
 // Catalog containers and the format version must be recognizable before salvage.

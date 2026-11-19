@@ -73,32 +73,32 @@ pub struct ConsumableFacts {
     pub availability: ConsumableAvailability,
 }
 
-/// The public charge signal used by retail and ACE ManaStone.cs.
+/// The public charge signal used by retail and server mana-stone updates.
 fn mana_stone_charged(entity: &Entity) -> bool {
     entity.ui_effects().unwrap_or(0) & 1 != 0
 }
 
-/// ACE LootGenerationFactory.cs leaves these mundane categories unmutated.
+/// Retail loot generation leaves these mundane categories unmutated.
 /// Empty stones retain the category but are exhausted as mana sources; explicitly binding
 /// an empty stone still selects its ordinary exact-instance drain action.
 pub fn consumable_facts(entity: &Entity) -> Option<ConsumableFacts> {
     use ConsumableAvailability::{Exhausted, Pending, Ready};
-    let (category, availability) = if entity.item_type()?.intersects(ItemType::MANA_STONE) {
-        (
-            ConsumableCategory::ChargedManaStone,
-            if mana_stone_charged(entity) {
-                Ready
-            } else {
-                Exhausted
-            },
-        )
-    } else if entity.flags.contains(ObjectDescriptionFlag::HEALER) {
+    let (category, availability) = if entity.flags.contains(ObjectDescriptionFlag::HEALER) {
         (
             ConsumableCategory::HealingKit,
             match entity.structure() {
                 Some(0) => Exhausted,
                 Some(_) => Ready,
                 None => Pending,
+            },
+        )
+    } else if entity.item_type()?.intersects(ItemType::MANA_STONE) {
+        (
+            ConsumableCategory::ChargedManaStone,
+            if mana_stone_charged(entity) {
+                Ready
+            } else {
+                Exhausted
             },
         )
     } else if entity.flags.contains(ObjectDescriptionFlag::FOOD) {
@@ -228,7 +228,7 @@ pub fn evaluate_item_use(
                 return Err("This item cannot be used on that target.".into());
             }
             // Retail uses public MANA_STONE and magical effect bit 1, not assessment-only mana
-            // totals. ACE ManaStone.cs broadcasts this effect on charge changes.
+            // totals; the server broadcasts this effect on charge changes.
             if entity
                 .item_type()
                 .is_some_and(|kind| kind.intersects(ItemType::MANA_STONE))
@@ -255,7 +255,7 @@ pub fn evaluate_item_use(
 }
 
 impl crate::WorldState {
-    /// Estimate from retained target appraisal and current skill. ACE Lock.cs uses template
+    /// Estimate from retained target appraisal and current skill. Retail server logic uses template
     /// LockpickMod; unknown templates deliberately assume +0. Instance overrides and
     /// changes since the appraisal cannot be observed.
     pub fn estimate_lockpick_success_percent(&self, source: Guid, target: Guid) -> Option<f64> {
@@ -281,10 +281,10 @@ impl crate::WorldState {
     }
 }
 
-/// ACE Lock.cs rejects these locks before making a skill roll.
+/// Retail server logic rejects these locks before making a skill roll.
 const UNPICKABLE_LOCK_DIFFICULTY: i32 = 9999;
 
-/// ACE SkillCheck.cs promotes its float32 factor to double. Effective skill has a zero floor.
+/// Retail skill checks promote the float32 factor to double. Effective skill has a zero floor.
 fn lockpick_success_percent(skill: u32, bonus: i32, difficulty: i32) -> f64 {
     if difficulty >= UNPICKABLE_LOCK_DIFFICULTY {
         return 0.0;
@@ -381,6 +381,13 @@ mod tests {
         assert_eq!(empty.identity, charged.identity);
         assert_eq!(empty.availability, ConsumableAvailability::Exhausted);
         assert_eq!(charged.availability, ConsumableAvailability::Ready);
+        let mut hybrid = item(4, ItemType::MANA_STONE, Usable::CONTAINED);
+        hybrid.wcid = Some(45);
+        hybrid.flags.insert(ObjectDescriptionFlag::HEALER);
+        assert_eq!(
+            consumable_facts(&hybrid).unwrap().identity.category,
+            ConsumableCategory::HealingKit
+        );
         let ordinary = item(3, ItemType::ARMOR, Usable::CONTAINED);
         assert_eq!(consumable_facts(&ordinary), None);
     }

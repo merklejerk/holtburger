@@ -246,6 +246,8 @@ fn acquiring_pack_recursively_tracks_known_contents() {
 
 #[test]
 fn equip_request_preserves_explicit_target_for_core() {
+    use holtburger_common::properties::EquipMask;
+    use holtburger_core::client::inventory_plan::{InventoryIntent, InventoryTarget};
     let player_guid = Guid(0x50000001);
     let weapon_guid = Guid(0x60000001);
     let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
@@ -253,10 +255,17 @@ fn equip_request_preserves_explicit_target_for_core() {
     let result = state
         .handle_action(AppAction::EquipInSlot {
             guid: weapon_guid,
-            slot: holtburger_core::client::types::TargetSlot::OffHand,
+            slot: holtburger_core::client::types::TargetSlot::EquipMask(EquipMask::SHIELD),
         })
         .unwrap();
-    assert!(
-        matches!(result.commands.as_slice(), [ClientCommand::GetAndWield { item, slot: Some(holtburger_core::client::types::TargetSlot::OffHand), .. }] if *item == weapon_guid)
-    );
+    assert!(matches!(
+        result.commands.as_slice(),
+        [ClientCommand::SubmitInventory {
+            intent: InventoryIntent {
+                item,
+                target: InventoryTarget::Equipment { mask },
+            },
+            ..
+        }] if *item == weapon_guid && *mask == EquipMask::SHIELD.bits()
+    ));
 }

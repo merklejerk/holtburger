@@ -25,7 +25,7 @@ import {
 	type LauncherCredentials,
 	type LauncherServer,
 } from "../src/launcher/launcher-contract.js";
-import type { ClientWindowSettings } from "../src/app/window-settings-contract.js";
+import type { ClientWindowSettings } from "../src/app/desktop/window-settings-contract.js";
 import type { ClientLaunchConfiguration } from "./client-launch.js";
 
 /** Catalog order is launch recency; servers without history retain their existing order. */

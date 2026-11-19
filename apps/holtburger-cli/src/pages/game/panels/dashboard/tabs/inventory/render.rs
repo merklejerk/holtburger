@@ -4,7 +4,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{List, ListItem, Paragraph};
 
-use super::super::classification::{classify_entity, entity_name_color};
+use super::super::classification::{classify_entity, emoji, entity_name_color};
 use super::tab::InventoryTab;
 use crate::pages::game::{GameData, ViewState};
 use crate::theme;
@@ -178,7 +178,7 @@ fn render_inventory_item(
         text_style = text_style.add_modifier(Modifier::BOLD);
     }
 
-    let type_marker = class.emoji();
+    let type_marker = emoji(class);
 
     let display_name = format_item_name(e, e.guid);
 

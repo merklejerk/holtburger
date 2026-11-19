@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { copyFile, cp, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { TRAVELERS_KIT_THEME_ID } from "../dist-electron/src/app/ui-theme-contract.js";
+import { TRAVELERS_KIT_THEME_ID } from "../dist-electron/src/app/theme/ui-theme-contract.js";
 
 /** Exercise custom filesystem themes once per Linux package format. */
 async function probeCustomTheme(read, profileDirectory, api) {

@@ -1,13 +1,13 @@
 <script lang="ts">
 	import { onMount, tick } from "svelte";
-	import ClientDebugPanel from "../../client/ClientDebugPanel.svelte";
-	import ExplorerFramePanel from "../../explorer/ExplorerFramePanel.svelte";
+	import ClientDebugPanel from "../../client/hud/ClientDebugPanel.svelte";
+	import ExplorerFramePanel from "../../explorer/panels/ExplorerFramePanel.svelte";
 	import {
 		RENDERER_CPU_PHASES,
 		RENDERER_GPU_SYSTEMS,
 		type RendererFrameDiagnosticsSnapshot,
 	} from "../../lib/game/renderer/renderer";
-	import { PerformanceSession } from "../../app/performance-session";
+	import { PerformanceSession } from "../../app/performance/performance-session";
 	import { EXPLORER_TUNING } from "../../explorer/explorer-tuning";
 
 	/** Optional real diagnostic facts with a controlled capability outcome for UI coverage. */

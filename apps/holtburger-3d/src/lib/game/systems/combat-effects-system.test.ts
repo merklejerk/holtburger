@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { CLIENT_COMBAT_EFFECTS_TUNING } from "../../../client/client-tuning";
+import { CLIENT_COMBAT_EFFECTS_TUNING } from "../../../client/settings/tuning";
 import { sceneVector3 } from "../../assets/ac-frame";
 import {
 	CombatEffectsSystem,

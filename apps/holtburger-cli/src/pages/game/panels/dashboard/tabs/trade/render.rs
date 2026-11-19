@@ -5,7 +5,8 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph};
 
 use super::super::classification::{
-    classify_entity, classify_vendor_item, entity_name_color, get_entity_color,
+    classify_entity, classify_vendor_item, emoji as class_emoji, entity_name_color,
+    get_entity_color,
 };
 use super::tab::TradeTab;
 use crate::pages::game::{GameData, ViewState};
@@ -63,7 +64,7 @@ pub fn render_trade_tab(
                     display_name = format_item_name(e, e.guid);
 
                     let class = classify_entity(e);
-                    emoji = class.emoji();
+                    emoji = class_emoji(class);
                     color = entity_name_color(e);
                 }
                 let is_selected = trade_focus == TradeFocus::Local && i == self_selected_index;
@@ -147,7 +148,7 @@ pub fn render_trade_tab(
                     display_name = format_item_name(e, e.guid);
 
                     let class = classify_entity(e);
-                    emoji = class.emoji();
+                    emoji = class_emoji(class);
                     color = entity_name_color(e);
                 }
                 let is_selected = trade_focus == TradeFocus::Partner && i == partner_selected_index;
@@ -263,7 +264,7 @@ pub fn render_trade_tab(
                 let display_name = format_item_name(m, m.guid);
 
                 let class = classify_vendor_item(m);
-                let emoji = class.emoji();
+                let emoji = class_emoji(class);
                 let color = get_entity_color(class);
                 let full_name = format!("[{}] {}", emoji, display_name);
 

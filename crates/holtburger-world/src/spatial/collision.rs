@@ -3709,6 +3709,8 @@ pub(super) fn separating_displacement(contacts: &[StaticContact], epsilon: f32) 
         })
 }
 
+/// Shifts `point` into `landblock`-local coordinates; collision integration solves in
+/// anchor-landblock local space because accumulating large absolute-world `f32` coordinates introduces centimeter-scale precision drift.
 fn anchor_to_landblock(point: Vector3, anchor: Guid, landblock: Guid) -> Vector3 {
     let anchor = landblock_key(anchor);
     Vector3::new(

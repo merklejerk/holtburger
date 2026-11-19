@@ -5,7 +5,7 @@ import {
 	clientHudPlacementSchemas,
 	clientCharacterSectionSchemas,
 	type ClientSettingsCollection,
-} from "../src/client/client-settings-sections.js";
+} from "../src/client/settings/settings-sections.js";
 
 /** A supported section normalized for disk, with notices only for discarded choices. */
 export interface RepairedSettingsEntry {

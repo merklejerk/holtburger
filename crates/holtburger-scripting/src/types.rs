@@ -16,6 +16,8 @@ use holtburger_protocol::messages::object::types::{
 };
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
+pub use holtburger_world::entity_classification::EntityClass as ScriptEntityKind;
+
 use crate::ScriptJsonValue;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -151,7 +153,6 @@ pub trait ScriptClientView {
     fn character_sheet(&self) -> Option<ScriptCharacterSheetView> {
         None
     }
-    fn target_entity(&self) -> Option<ScriptEntityView>;
     fn entity(&self, guid: Guid) -> Option<ScriptEntityView>;
     fn entity_bool_prop(&self, guid: Guid, prop: PropertyBool) -> Option<bool>;
     fn entity_int_prop(&self, guid: Guid, prop: PropertyInt) -> Option<i32>;
@@ -203,7 +204,7 @@ pub trait ScriptClientView {
 pub struct ScriptSelfView {
     pub guid: Guid,
     pub name: String,
-    pub position: ScriptWorldPosition,
+    pub position: WorldPosition,
     pub health: u32,
     pub health_max: u32,
     pub stamina: u32,
@@ -254,53 +255,19 @@ pub struct ScriptCharacterSkillView {
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum ScriptPositionRef {
-    Position(ScriptWorldPosition),
+    Position(WorldPosition),
     Guid(Guid),
-}
-
-impl From<ScriptWorldPosition> for ScriptPositionRef {
-    fn from(position: ScriptWorldPosition) -> Self {
-        Self::Position(position)
-    }
 }
 
 impl From<WorldPosition> for ScriptPositionRef {
     fn from(position: WorldPosition) -> Self {
-        Self::Position(position.into())
+        Self::Position(position)
     }
 }
 
 impl From<Guid> for ScriptPositionRef {
     fn from(guid: Guid) -> Self {
         Self::Guid(guid)
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ScriptWorldPosition {
-    pub landblock_id: Guid,
-    pub coords: holtburger_common::Vector3,
-    pub rotation: holtburger_common::Quaternion,
-}
-
-impl From<WorldPosition> for ScriptWorldPosition {
-    fn from(position: WorldPosition) -> Self {
-        Self {
-            landblock_id: position.landblock_id,
-            coords: position.coords,
-            rotation: position.rotation,
-        }
-    }
-}
-
-impl From<ScriptWorldPosition> for WorldPosition {
-    fn from(position: ScriptWorldPosition) -> Self {
-        Self {
-            landblock_id: position.landblock_id,
-            coords: position.coords,
-            rotation: position.rotation,
-        }
     }
 }
 
@@ -349,7 +316,6 @@ pub enum ScriptBusyOperation {
     None,
     Use,
     UseWithTarget,
-    Salvage,
     SpellCast,
     Buy,
     Sell,
@@ -366,7 +332,6 @@ impl ScriptBusyOperation {
         match kind {
             BusyOperationKind::Use => Self::Use,
             BusyOperationKind::UseWithTarget => Self::UseWithTarget,
-            BusyOperationKind::Salvage => Self::Salvage,
             BusyOperationKind::SpellCast => Self::SpellCast,
             BusyOperationKind::Buy => Self::Buy,
             BusyOperationKind::Sell => Self::Sell,
@@ -392,7 +357,7 @@ pub struct ScriptEntityView {
     pub name: Option<String>,
     pub kind: ScriptEntityKind,
     pub weenie_id: Option<u32>,
-    pub position: ScriptWorldPosition,
+    pub position: WorldPosition,
     pub profile: Option<ScriptEntityProfile>,
     pub container: Guid,
     pub wielder: Guid,
@@ -691,33 +656,6 @@ impl From<InterpretedMotionCommand> for ScriptMotionCommand {
     fn from(command: InterpretedMotionCommand) -> Self {
         Self::from_command(command)
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ScriptEntityKind {
-    Player,
-    Npc,
-    Vendor,
-    Monster,
-    Weapon,
-    Apparel,
-    Container,
-    Item,
-    Consumable,
-    Money,
-    Key,
-    Writable,
-    HealingKit,
-    ManaStone,
-    Door,
-    Portal,
-    LifeStone,
-    Chest,
-    Wand,
-    Tool,
-    StaticObject,
-    Unknown,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1042,13 +980,6 @@ pub enum ScriptIntent {
     Say {
         message: String,
     },
-    Tell {
-        target: String,
-        message: String,
-    },
-    Use {
-        guid: Guid,
-    },
     Emote {
         message: String,
     },
@@ -1126,15 +1057,18 @@ pub enum ScriptIntent {
     SetCombatMode {
         on: bool,
     },
-    Client(ScriptClientIntent),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ScriptClientIntent {
-    TargetEntity { guid: Guid },
-    Approach { guid: Guid },
-    Follow { guid: Guid },
-    Attack { guid: Guid },
+    TargetEntity {
+        guid: Guid,
+    },
+    Approach {
+        guid: Guid,
+    },
+    Follow {
+        guid: Guid,
+    },
+    Attack {
+        guid: Guid,
+    },
     CancelInteraction,
 }
 
@@ -1288,12 +1222,12 @@ mod tests {
     }
 
     #[test]
-    fn script_world_position_serializes_landblock_id_as_camel_case() {
-        let position = super::ScriptWorldPosition::from(WorldPosition {
+    fn world_position_serializes_landblock_id_as_camel_case() {
+        let position = WorldPosition {
             landblock_id: holtburger_common::Guid(0x0100_0001),
             coords: Vector3::new(1.0, 2.0, 3.0),
             rotation: Quaternion::identity(),
-        });
+        };
 
         let actual = to_value(position).unwrap();
         assert_eq!(
@@ -1304,10 +1238,7 @@ mod tests {
                 "rotation": { "w": 1.0, "x": 0.0, "y": 0.0, "z": 0.0 },
             })
         );
-        assert_eq!(
-            from_value::<super::ScriptWorldPosition>(actual).unwrap(),
-            position
-        );
+        assert_eq!(from_value::<WorldPosition>(actual).unwrap(), position);
     }
 
     #[test]

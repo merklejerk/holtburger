@@ -22,12 +22,12 @@ use holtburger_scripting::{
     ScriptPositionRef, ScriptSelfView, ScriptSource, ScriptTradeInfo, ScriptWorkflowEvent,
 };
 use holtburger_world::context::WorldContextExt as _;
+use holtburger_world::entity_classification::classify_entity;
 use holtburger_world::stats::{TrainingLevel, VitalType};
 use std::ffi::OsStr;
 use std::fs;
 use std::io::ErrorKind;
 
-use crate::pages::game::panels::dashboard::tabs::classification;
 use crate::pages::game::{GameData, GameState, ViewState};
 use crate::types::{AppAction, AppNotification, ChatMessageTags, Interaction, LocalConfirmation};
 
@@ -151,7 +151,7 @@ pub struct TuiScriptClientView<'a> {
 impl TuiScriptClientView<'_> {
     fn resolve_position_reference(&self, reference: ScriptPositionRef) -> Option<WorldPosition> {
         match reference {
-            ScriptPositionRef::Position(position) => Some(WorldPosition::from(position)),
+            ScriptPositionRef::Position(position) => Some(position),
             ScriptPositionRef::Guid(guid) => {
                 if Some(guid) == self.data.player_guid {
                     self.data.runtime_player_position()
@@ -209,9 +209,9 @@ impl TuiScriptClientView<'_> {
                 .is_some_and(|facts| facts.is_hostile),
             guid,
             name: (!name.is_empty()).then(|| name.to_string()),
-            kind: classification::classify_entity(entity).kind(),
+            kind: classify_entity(entity),
             weenie_id: entity.wcid,
-            position: entity_position.unwrap_or_default().into(),
+            position: entity_position.unwrap_or_default(),
             profile,
             container: entity.container_id().unwrap_or(Guid::NULL),
             wielder: entity.wielder_id().unwrap_or(Guid::NULL),
@@ -238,11 +238,7 @@ impl ScriptClientView for TuiScriptClientView<'_> {
         Some(ScriptSelfView {
             guid,
             name,
-            position: self
-                .data
-                .runtime_player_position()
-                .unwrap_or_default()
-                .into(),
+            position: self.data.runtime_player_position().unwrap_or_default(),
             health: self
                 .data
                 .vitals
@@ -281,11 +277,7 @@ impl ScriptClientView for TuiScriptClientView<'_> {
                 .unwrap_or_default(),
             encumbrance: self.data.player_encumbrance().unwrap_or_default(),
             capacity: self.data.player_capacity().unwrap_or_default(),
-            busy_operation: self
-                .view
-                .active_busy_operation
-                .map(ScriptBusyOperation::from_kind)
-                .unwrap_or_default(),
+            busy_operation: busy_script_operation(self.view),
             heading: self.data.runtime_heading().unwrap_or_default(),
             combat_mode: self.data.combat_mode,
         })
@@ -453,11 +445,6 @@ impl ScriptClientView for TuiScriptClientView<'_> {
         };
 
         from.heading_to(&to)
-    }
-
-    fn target_entity(&self) -> Option<ScriptEntityView> {
-        let target_guid = target_guid_from_interaction(self.view.active_interaction)?;
-        self.script_entity_view(target_guid)
     }
 
     fn entity(&self, guid: Guid) -> Option<ScriptEntityView> {
@@ -747,23 +734,29 @@ impl ScriptClientView for TuiScriptClientView<'_> {
     }
 
     fn pending_confirmation(&self) -> Option<ScriptConfirmation> {
-        if let Some(confirmation) = &self.view.active_confirmation {
-            return Some(ScriptConfirmation::Character(confirmation.clone()));
-        }
-
-        self.view
-            .local_confirmation
-            .as_ref()
-            .map(script_local_confirmation)
-            .map(ScriptConfirmation::Local)
+        pending_script_confirmation(self.view)
     }
 
     fn busy_operation(&self) -> ScriptBusyOperation {
-        self.view
-            .active_busy_operation
-            .map(ScriptBusyOperation::from_kind)
-            .unwrap_or_default()
+        busy_script_operation(self.view)
     }
+}
+
+fn pending_script_confirmation(view: &ViewState) -> Option<ScriptConfirmation> {
+    if let Some(confirmation) = &view.active_confirmation {
+        return Some(ScriptConfirmation::Character(confirmation.clone()));
+    }
+
+    view.local_confirmation
+        .as_ref()
+        .map(script_local_confirmation)
+        .map(ScriptConfirmation::Local)
+}
+
+fn busy_script_operation(view: &ViewState) -> ScriptBusyOperation {
+    view.active_busy_operation
+        .map(ScriptBusyOperation::from_kind)
+        .unwrap_or_default()
 }
 
 fn script_local_confirmation(local: &LocalConfirmation) -> ScriptLocalConfirmation {
@@ -792,20 +785,8 @@ pub(crate) fn workflow_projection(game: Option<&GameState>) -> WorkflowProjectio
 
     WorkflowProjection {
         target_guid: target_guid_from_interaction(game.view.active_interaction),
-        confirmation: if let Some(confirmation) = &game.view.active_confirmation {
-            Some(ScriptConfirmation::Character(confirmation.clone()))
-        } else {
-            game.view
-                .local_confirmation
-                .as_ref()
-                .map(script_local_confirmation)
-                .map(ScriptConfirmation::Local)
-        },
-        busy_operation: game
-            .view
-            .active_busy_operation
-            .map(ScriptBusyOperation::from_kind)
-            .unwrap_or_default(),
+        confirmation: pending_script_confirmation(&game.view),
+        busy_operation: busy_script_operation(&game.view),
     }
 }
 
@@ -1239,6 +1220,30 @@ mod tests {
     use std::path::PathBuf;
     use std::time::Instant;
 
+    fn with_script_view<R>(
+        data: &GameData,
+        view: &ViewState,
+        f: impl FnOnce(&TuiScriptClientView<'_>) -> R,
+    ) -> R {
+        let directories = ScriptDirectories::default();
+        let script_view = TuiScriptClientView {
+            directories: &directories,
+            data,
+            view,
+            server_time: None,
+            script_name: None,
+        };
+        f(&script_view)
+    }
+
+    fn with_default_script_view<R>(
+        data: &GameData,
+        f: impl FnOnce(&TuiScriptClientView<'_>) -> R,
+    ) -> R {
+        let view = ViewState::default();
+        with_script_view(data, &view, f)
+    }
+
     #[test]
     fn discoverable_script_basenames_reads_js_files_in_sorted_order() {
         let unique_dir = std::env::temp_dir().join(format!(
@@ -1555,17 +1560,11 @@ mod tests {
             ..ViewState::default()
         };
 
-        let script_view = TuiScriptClientView {
-            directories: &ScriptDirectories::default(),
-            data: &data,
-            view: &view,
-            server_time: None,
-            script_name: None,
-        };
-
-        let self_view = script_view
-            .self_entity()
-            .expect("player snapshot should be available");
+        let self_view = with_script_view(&data, &view, |script_view| {
+            script_view
+                .self_entity()
+                .expect("player snapshot should be available")
+        });
 
         assert_eq!(self_view.guid, player_guid);
         assert_eq!(self_view.health, 99);
@@ -1578,7 +1577,7 @@ mod tests {
         assert_eq!(self_view.capacity, 18_000.0);
         assert_eq!(self_view.busy_operation, ScriptBusyOperation::Buy);
         assert!((self_view.heading - heading).abs() < 1e-6);
-        assert_eq!(self_view.position, player_position.into());
+        assert_eq!(self_view.position, player_position);
     }
 
     #[test]
@@ -1723,16 +1722,9 @@ mod tests {
             ..ViewState::default()
         };
 
-        let script_view = TuiScriptClientView {
-            directories: &ScriptDirectories::default(),
-            data: &data,
-            view: &view,
-            server_time: None,
-            script_name: None,
-        };
-
         assert_eq!(
-            script_view.current_interaction(),
+            with_script_view(&data, &view, |script_view| script_view
+                .current_interaction()),
             Some(ScriptClientInteraction::TargetEntity { guid: target_guid })
         );
     }
@@ -1740,7 +1732,7 @@ mod tests {
     #[test]
     fn enchantments_projection_deduplicates_spell_ids_by_latest_end_time() {
         let mut data = GameData::new(Guid(0x5000_0004), "Player".to_string(), "World".to_string());
-        data.player_enchantments = vec![
+        let raw_enchantments = [
             Enchantment {
                 spell_id: 10,
                 layer: 1,
@@ -1768,10 +1760,8 @@ mod tests {
         ];
 
         let received_at = Instant::now();
-        let observations: Vec<_> = data
-            .player_enchantments
-            .iter()
-            .copied()
+        let observations: Vec<_> = raw_enchantments
+            .into_iter()
             .map(
                 |enchantment| holtburger_world::enchantments::EnchantmentObservation {
                     enchantment,
@@ -1788,15 +1778,7 @@ mod tests {
             received_at,
         });
 
-        let script_view = TuiScriptClientView {
-            directories: &ScriptDirectories::default(),
-            data: &data,
-            view: &ViewState::default(),
-            server_time: None,
-            script_name: None,
-        };
-
-        let projected = script_view.enchantments();
+        let projected = with_default_script_view(&data, |script_view| script_view.enchantments());
         assert_eq!(projected.len(), 2);
         assert_eq!(projected[0].spell_id, 10);
         assert!((134.0..=135.0).contains(&projected[0].end_time));
@@ -1824,16 +1806,12 @@ mod tests {
             rotation: Quaternion::identity(),
         };
 
-        let script_view = TuiScriptClientView {
-            directories: &ScriptDirectories::default(),
-            data: &data,
-            view: &ViewState::default(),
-            server_time: None,
-            script_name: None,
-        };
-
-        let distance = script_view.distance(from_position.into(), target_position.into());
-        let heading = script_view.heading_to(from_position.into(), target_position.into());
+        let (distance, heading) = with_default_script_view(&data, |script_view| {
+            (
+                script_view.distance(from_position.into(), target_position.into()),
+                script_view.heading_to(from_position.into(), target_position.into()),
+            )
+        });
 
         assert!((distance - 10.0).abs() < 1e-4, "distance was {distance}");
         assert!(
@@ -1854,15 +1832,7 @@ mod tests {
             EquipMask::CHEST_WEAR | EquipMask::UPPER_ARM_WEAR,
         );
 
-        let script_view = TuiScriptClientView {
-            directories: &ScriptDirectories::default(),
-            data: &data,
-            view: &ViewState::default(),
-            server_time: None,
-            script_name: None,
-        };
-
-        let equipment = script_view.equipment();
+        let equipment = with_default_script_view(&data, |script_view| script_view.equipment());
 
         assert_eq!(equipment.len(), ScriptEquipmentSlotKind::ALL.len());
 
@@ -1904,7 +1874,6 @@ mod tests {
             revision: 1,
             partner_guid,
             initiator_guid: partner_guid,
-            trade_stamp: 123.0,
             self_side: TradeSide {
                 guid: player_guid,
                 accepted: false,
@@ -1917,17 +1886,11 @@ mod tests {
             },
         });
 
-        let script_view = TuiScriptClientView {
-            directories: &ScriptDirectories::default(),
-            data: &data,
-            view: &ViewState::default(),
-            server_time: None,
-            script_name: None,
-        };
-
-        let trade_info = script_view
-            .current_trade_info()
-            .expect("trade info should be projected");
+        let trade_info = with_default_script_view(&data, |script_view| {
+            script_view
+                .current_trade_info()
+                .expect("trade info should be projected")
+        });
 
         assert_eq!(trade_info.partner_guid, partner_guid);
         assert_eq!(trade_info.partner_name.as_deref(), Some("Buddy"));
@@ -1940,15 +1903,10 @@ mod tests {
         let mut data = GameData::new(Guid(0x5000_0007), "Player".to_string(), "World".to_string());
         data.player_spells = vec![3, 1, 2];
 
-        let script_view = TuiScriptClientView {
-            directories: &ScriptDirectories::default(),
-            data: &data,
-            view: &ViewState::default(),
-            server_time: None,
-            script_name: None,
-        };
-
-        assert_eq!(script_view.spellbook(), vec![3, 1, 2]);
+        assert_eq!(
+            with_default_script_view(&data, |script_view| script_view.spellbook()),
+            vec![3, 1, 2]
+        );
     }
 
     #[test]
@@ -1956,16 +1914,10 @@ mod tests {
         let mut data = GameData::new(Guid(0x5000_0009), "Player".to_string(), "World".to_string());
         data.player_spells = vec![10, 20, 30];
 
-        let script_view = TuiScriptClientView {
-            directories: &ScriptDirectories::default(),
-            data: &data,
-            view: &ViewState::default(),
-            server_time: None,
-            script_name: None,
-        };
-
-        assert!(script_view.in_spellbook(20));
-        assert!(!script_view.in_spellbook(99));
+        with_default_script_view(&data, |script_view| {
+            assert!(script_view.in_spellbook(20));
+            assert!(!script_view.in_spellbook(99));
+        });
     }
 
     #[test]
@@ -1995,16 +1947,12 @@ mod tests {
         );
         data.player_pos = Some(from_position);
 
-        let script_view = TuiScriptClientView {
-            directories: &ScriptDirectories::default(),
-            data: &data,
-            view: &ViewState::default(),
-            server_time: None,
-            script_name: None,
-        };
-
-        let distance = script_view.distance(from_guid.into(), to_position.into());
-        let heading = script_view.heading_to(from_guid.into(), target_guid.into());
+        let (distance, heading) = with_default_script_view(&data, |script_view| {
+            (
+                script_view.distance(from_guid.into(), to_position.into()),
+                script_view.heading_to(from_guid.into(), target_guid.into()),
+            )
+        });
 
         assert!((distance - 10.0).abs() < 1e-4, "distance was {distance}");
         assert!(
@@ -2023,16 +1971,10 @@ mod tests {
             Entity::new(entity_guid, "Goblin".to_string(), WorldPosition::default()),
         );
 
-        let script_view = TuiScriptClientView {
-            directories: &ScriptDirectories::default(),
-            data: &data,
-            view: &ViewState::default(),
-            server_time: None,
-            script_name: None,
-        };
-
-        assert!(script_view.entity_exists(entity_guid));
-        assert!(!script_view.entity_exists(Guid(0xDEAD_BEEF)));
+        with_default_script_view(&data, |script_view| {
+            assert!(script_view.entity_exists(entity_guid));
+            assert!(!script_view.entity_exists(Guid(0xDEAD_BEEF)));
+        });
     }
 
     #[test]
@@ -2069,15 +2011,7 @@ mod tests {
         data.inventory =
             std::collections::HashSet::from([pack_guid, root_item_guid, pack_item_guid]);
 
-        let script_view = TuiScriptClientView {
-            directories: &ScriptDirectories::default(),
-            data: &data,
-            view: &ViewState::default(),
-            server_time: None,
-            script_name: None,
-        };
-
-        let inventory = script_view.inventory();
+        let inventory = with_default_script_view(&data, |script_view| script_view.inventory());
         assert_eq!(inventory.len(), 2);
 
         let player_container = inventory
@@ -2196,16 +2130,9 @@ mod tests {
         let mut data = GameData::default();
         data.entities.insert(guid, entity);
         let read = |data: &GameData| {
-            TuiScriptClientView {
-                data,
-                view: &ViewState::default(),
-                directories: &ScriptDirectories::default(),
-                server_time: None,
-                script_name: None,
-            }
-            .entity(guid)
-            .unwrap()
-            .is_hostile
+            with_default_script_view(data, |script_view| {
+                script_view.entity(guid).unwrap().is_hostile
+            })
         };
         assert!(!read(&data));
         data.entity_facts
@@ -2277,24 +2204,18 @@ mod tests {
         far_monster.flags |= ObjectDescriptionFlag::ATTACKABLE;
         data.entities.insert(far_monster_guid, far_monster);
 
-        let script_view = TuiScriptClientView {
-            directories: &ScriptDirectories::default(),
-            data: &data,
-            view: &ViewState::default(),
-            server_time: None,
-            script_name: None,
-        };
+        with_default_script_view(&data, |script_view| {
+            let nearby_monsters =
+                script_view.nearby_entities(Some(10.0), Some(vec![ScriptEntityKind::Monster]));
+            assert_eq!(nearby_monsters.len(), 1);
+            assert_eq!(nearby_monsters[0].guid, monster_guid);
+            assert_eq!(nearby_monsters[0].kind, ScriptEntityKind::Monster);
 
-        let nearby_monsters =
-            script_view.nearby_entities(Some(10.0), Some(vec![ScriptEntityKind::Monster]));
-        assert_eq!(nearby_monsters.len(), 1);
-        assert_eq!(nearby_monsters[0].guid, monster_guid);
-        assert_eq!(nearby_monsters[0].kind, ScriptEntityKind::Monster);
-
-        let nearby_npcs = script_view.nearby_entities(None, Some(vec![ScriptEntityKind::Npc]));
-        assert_eq!(nearby_npcs.len(), 1);
-        assert_eq!(nearby_npcs[0].guid, npc_guid);
-        assert_eq!(nearby_npcs[0].kind, ScriptEntityKind::Npc);
+            let nearby_npcs = script_view.nearby_entities(None, Some(vec![ScriptEntityKind::Npc]));
+            assert_eq!(nearby_npcs.len(), 1);
+            assert_eq!(nearby_npcs[0].guid, npc_guid);
+            assert_eq!(nearby_npcs[0].kind, ScriptEntityKind::Npc);
+        });
     }
 
     #[test]
@@ -2317,20 +2238,14 @@ mod tests {
         });
         data.entities.insert(entity_guid, entity);
 
-        let script_view = TuiScriptClientView {
-            directories: &ScriptDirectories::default(),
-            data: &data,
-            view: &ViewState::default(),
-            server_time: None,
-            script_name: None,
-        };
-
-        let entity_view = script_view
-            .entity(entity_guid)
-            .expect("entity snapshot should be available");
+        let entity_view = with_default_script_view(&data, |script_view| {
+            script_view
+                .entity(entity_guid)
+                .expect("entity snapshot should be available")
+        });
 
         assert_eq!(entity_view.motion_command, ScriptMotionCommand::Dead);
-        assert_eq!(entity_view.position, player_position.into());
+        assert_eq!(entity_view.position, player_position);
         assert_eq!(entity_view.distance_to_self, 0.0);
     }
 
@@ -2368,61 +2283,55 @@ mod tests {
         });
         data.entities.insert(entity_guid, entity);
 
-        let script_view = TuiScriptClientView {
-            directories: &ScriptDirectories::default(),
-            data: &data,
-            view: &ViewState::default(),
-            server_time: None,
-            script_name: None,
-        };
-
-        assert_eq!(
-            script_view.entity_int_prop(entity_guid, PropertyInt::Damage),
-            Some(42)
-        );
-        assert_eq!(
-            script_view.entity_bool_prop(entity_guid, PropertyBool::Attackable),
-            Some(true)
-        );
-        assert!(matches!(
-            script_view.entity_int64_prop(entity_guid, PropertyInt64::AvailableExperience),
-            Some(12_345)
-        ));
-        assert_eq!(
-            script_view.entity_float_prop(entity_guid, PropertyFloat::DefaultScale),
-            Some(1.25)
-        );
-        assert_eq!(
-            script_view
-                .entity_string_prop(entity_guid, PropertyString::LongDesc)
-                .as_deref(),
-            Some("A sturdy olthoi")
-        );
-        assert_eq!(
-            script_view.entity_data_prop(entity_guid, PropertyDataId::MotionTable),
-            Some(Guid(0x1234_5678))
-        );
-        assert_eq!(
-            script_view.entity_instance_prop(entity_guid, PropertyInstanceId::Container),
-            Some(player_guid)
-        );
-        let entity_view = script_view
-            .entity(entity_guid)
-            .expect("entity view should exist");
-        assert_eq!(entity_view.container, player_guid);
-        assert_eq!(entity_view.wielder, player_guid);
-        assert!(matches!(
-            entity_view.profile,
-            Some(ScriptEntityProfile::Armor(ArmorProfile {
-                slashing: 1.0,
-                piercing: 2.0,
-                bludgeoning: 3.0,
-                cold: 4.0,
-                fire: 5.0,
-                acid: 6.0,
-                nether: 7.0,
-                lightning: 8.0,
-            }))
-        ));
+        with_default_script_view(&data, |script_view| {
+            assert_eq!(
+                script_view.entity_int_prop(entity_guid, PropertyInt::Damage),
+                Some(42)
+            );
+            assert_eq!(
+                script_view.entity_bool_prop(entity_guid, PropertyBool::Attackable),
+                Some(true)
+            );
+            assert!(matches!(
+                script_view.entity_int64_prop(entity_guid, PropertyInt64::AvailableExperience),
+                Some(12_345)
+            ));
+            assert_eq!(
+                script_view.entity_float_prop(entity_guid, PropertyFloat::DefaultScale),
+                Some(1.25)
+            );
+            assert_eq!(
+                script_view
+                    .entity_string_prop(entity_guid, PropertyString::LongDesc)
+                    .as_deref(),
+                Some("A sturdy olthoi")
+            );
+            assert_eq!(
+                script_view.entity_data_prop(entity_guid, PropertyDataId::MotionTable),
+                Some(Guid(0x1234_5678))
+            );
+            assert_eq!(
+                script_view.entity_instance_prop(entity_guid, PropertyInstanceId::Container),
+                Some(player_guid)
+            );
+            let entity_view = script_view
+                .entity(entity_guid)
+                .expect("entity view should exist");
+            assert_eq!(entity_view.container, player_guid);
+            assert_eq!(entity_view.wielder, player_guid);
+            assert!(matches!(
+                entity_view.profile,
+                Some(ScriptEntityProfile::Armor(ArmorProfile {
+                    slashing: 1.0,
+                    piercing: 2.0,
+                    bludgeoning: 3.0,
+                    cold: 4.0,
+                    fire: 5.0,
+                    acid: 6.0,
+                    nether: 7.0,
+                    lightning: 8.0,
+                }))
+            ));
+        });
     }
 }

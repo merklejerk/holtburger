@@ -1,8 +1,8 @@
 import { cpus, machine, release, totalmem, type, version } from "node:os";
 import { app, clipboard, screen, type BrowserWindow } from "electron";
 import { z } from "zod";
-import { hardwareInfoRequestSchema } from "../src/app/hardware-info-contract.js";
-import type { AppSettings } from "../src/app/app-settings-contract.js";
+import { hardwareInfoRequestSchema } from "../src/app/desktop/hardware-info-contract.js";
+import type { AppSettings } from "../src/app/desktop/app-settings-contract.js";
 import { appSettingsRequireRestart } from "./app-settings.js";
 
 /** Select known diagnostic fields; Chromium may also expose paths and machine-specific data. */

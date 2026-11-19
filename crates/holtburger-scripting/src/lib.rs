@@ -18,17 +18,17 @@ pub use holtburger_common::properties::{
 pub use holtburger_protocol::messages::object::types::{
     ArmorProfile, CreatureProfile, WeaponProfile,
 };
+pub use holtburger_world::entity_classification::EntityClass as ScriptEntityKind;
 pub use host::ScriptHost;
 pub use types::{
     ScriptBusyOperation, ScriptCharacterAttributeView, ScriptCharacterSheetView,
     ScriptCharacterSkillView, ScriptCharacterVitalView, ScriptChatChannelKind, ScriptChatEvent,
-    ScriptClientIntent, ScriptClientInteraction, ScriptClientView, ScriptCombatFeedback,
-    ScriptCombatInfo, ScriptConfirmation, ScriptContainerView, ScriptEnchantmentView,
-    ScriptEntityKind, ScriptEntityProfile, ScriptEntityView, ScriptEquipmentSlotKind,
-    ScriptEquipmentSlotView, ScriptEvent, ScriptFetchAllowedHost, ScriptFetchPolicy,
-    ScriptHostConfig, ScriptIntent, ScriptLifecycleEvent, ScriptLocalConfirmation,
-    ScriptLocalConfirmationKind, ScriptMessageStyle, ScriptMotionCommand, ScriptPartyMemberView,
-    ScriptPartyView, ScriptPositionRef, ScriptPostError, ScriptPostErrorCode, ScriptPostRequest,
-    ScriptPostResponse, ScriptSelfView, ScriptSource, ScriptTradeInfo, ScriptWorkflowEvent,
-    ScriptWorldPosition,
+    ScriptClientInteraction, ScriptClientView, ScriptCombatFeedback, ScriptCombatInfo,
+    ScriptConfirmation, ScriptContainerView, ScriptEnchantmentView, ScriptEntityProfile,
+    ScriptEntityView, ScriptEquipmentSlotKind, ScriptEquipmentSlotView, ScriptEvent,
+    ScriptFetchAllowedHost, ScriptFetchPolicy, ScriptHostConfig, ScriptIntent,
+    ScriptLifecycleEvent, ScriptLocalConfirmation, ScriptLocalConfirmationKind, ScriptMessageStyle,
+    ScriptMotionCommand, ScriptPartyMemberView, ScriptPartyView, ScriptPositionRef,
+    ScriptPostError, ScriptPostErrorCode, ScriptPostRequest, ScriptPostResponse, ScriptSelfView,
+    ScriptSource, ScriptTradeInfo, ScriptWorkflowEvent,
 };

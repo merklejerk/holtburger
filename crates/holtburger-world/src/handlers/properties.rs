@@ -34,16 +34,8 @@ pub(crate) fn handle_message(
             let target_guid = state.apply_property_update_to_target(data.guid, &update);
             if target_guid == state.player.guid {
                 state.player.property_retention.observe(&update);
-                match data.property {
-                    p if p == PropertyInt::Level as u32
-                        || p == PropertyInt::AvailableSkillCredits as u32 =>
-                    {
-                        state.emit_level_info(events);
-                    }
-                    p if p == PropertyInt::CombatMode as u32 => {
-                        events.push(WorldEvent::CombatModeUpdated(state.player_combat_mode()));
-                    }
-                    _ => {}
+                if data.property == PropertyInt::CombatMode as u32 {
+                    events.push(WorldEvent::CombatModeUpdated(state.player_combat_mode()));
                 }
                 state.emit_player_derived_stats(events);
             }
@@ -73,18 +65,6 @@ pub(crate) fn handle_message(
             let target_guid = state.apply_property_update_to_target(data.guid, &update);
             if target_guid == state.player.guid {
                 state.player.property_retention.observe(&update);
-                match data.property {
-                    p if p
-                        == holtburger_common::properties::PropertyInt64::TotalExperience as u32
-                        || p == holtburger_common::properties::PropertyInt64::AvailableExperience
-                            as u32
-                        || p == holtburger_common::properties::PropertyInt64::AvailableLuminance
-                            as u32 =>
-                    {
-                        state.emit_level_info(events);
-                    }
-                    _ => {}
-                }
             }
             events.push(WorldEvent::PropertiesUpdated {
                 guid: target_guid,

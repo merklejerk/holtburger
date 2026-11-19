@@ -27,10 +27,21 @@ impl From<&FriendData> for FriendState {
     }
 }
 
+fn serialize_members<S>(
+    members: &BTreeMap<Guid, FriendState>,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    serializer.collect_seq(members.values())
+}
+
 /// The last accepted friend list. Absence at the character boundary means not yet received.
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct FriendsState {
     /// Records keyed by character identity; ordering for display belongs to the frontend.
+    #[serde(serialize_with = "serialize_members")]
     pub members: BTreeMap<Guid, FriendState>,
 }
 

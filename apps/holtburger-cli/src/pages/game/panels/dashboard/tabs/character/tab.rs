@@ -1,6 +1,6 @@
 use crossterm::event::{KeyCode, KeyEvent};
 use holtburger_core::ClientProgressionQuote;
-use holtburger_protocol::messages::magic::Enchantment;
+use holtburger_world::enchantments::EnchantmentKey;
 use ratatui::Frame;
 use ratatui::layout::Rect;
 
@@ -12,7 +12,7 @@ use crate::types::{
 
 #[derive(Debug, Clone)]
 enum CharacterSelection {
-    Enchantment(Enchantment),
+    Enchantment(EnchantmentKey),
     Progression(ClientProgressionQuote),
     None,
 }
@@ -142,14 +142,12 @@ fn get_selection_at_index(data: &GameData, index: usize) -> Option<CharacterSele
     lines.get(index).map(|line| match line {
         CharTabLine::Enchantment(e) | CharTabLine::Miscellaneous(e) => {
             let key = e.key();
-            let enchantment = data
-                .player_enchantments
-                .iter()
-                .find(|enchantment| {
-                    enchantment.spell_id == key.spell_id && enchantment.layer == key.layer
+            data.resolved_enchantments
+                .as_ref()
+                .and_then(|enchantments| enchantments.find_instance(key))
+                .map_or(CharacterSelection::None, |_| {
+                    CharacterSelection::Enchantment(key)
                 })
-                .expect("displayed enchantment is missing its raw inspection record");
-            CharacterSelection::Enchantment(*enchantment)
         }
         CharTabLine::Stat {
             progression: Some(evaluation),

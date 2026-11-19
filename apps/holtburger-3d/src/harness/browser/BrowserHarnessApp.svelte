@@ -1,19 +1,21 @@
 <script lang="ts">
 	import { verifySelectionTheme } from "./entity-selection-theme-probe";
-	import { readEntitySelectionColors } from "../../app/entity-selection-theme";
+	import { readEntitySelectionColors } from "../../app/theme/entity-selection-theme";
 	import {
 		SummonRuntimeProbe,
 		type SummonRuntimeProof,
 	} from "./summon-runtime-probe";
 	import { runSummonGpuFixture, type SummonGpuProof } from "./summon-gpu-probe";
-	import { probeRealizedCycleTargeting } from "./realized-cycle-targeting-probe";
-	import { startPresentationFrameLoop } from "../../app/presentation-frame-loop";
+	import { startPresentationFrameLoop } from "../../app/performance/presentation-frame-loop";
 	import { probeCombatEffectsAppearance } from "./combat-effects-appearance-probe";
 	import {
 		CombatEffectsRuntimeProbe,
 		type CombatEffectsRuntimeProof,
 	} from "./combat-effects-runtime-probe";
-	import type { CombatEffectsFixtureResult } from "../../lib/game/renderer/webgl2-combat-effects-fixture";
+	import {
+		runCombatEffectsFixture,
+		type CombatEffectsFixtureResult,
+	} from "./webgl2-fixtures/webgl2-combat-effects-fixture";
 	import { KeyboardInputPolicy } from "../../lib/input/keyboard-input-policy";
 	import { ViewportInputGate } from "../../lib/input/viewport-input-gate";
 	import { AppInput } from "../../lib/input/app-input";
@@ -21,10 +23,10 @@
 	import { onMount, tick as svelteTick } from "svelte";
 	import { PortalTransitionController } from "../../lib/client/portal-transition-controller";
 	import type { PortalTransitionPresentationReceipt } from "../../lib/client/portal-transition-presentation";
-	import { resolveExplorerOutdoorFocusPose } from "../../explorer/explorer-camera-framing";
-	import { ExplorerCameraInputController } from "../../explorer/explorer-camera-input-controller";
+	import { resolveExplorerOutdoorFocusPose } from "../../explorer/camera/camera-framing";
+	import { ExplorerCameraInputController } from "../../explorer/camera/camera-input-controller";
 	import { EXPLORER_TUNING } from "../../explorer/explorer-tuning";
-	import type { BakedDrawMergeCensus } from "../../lib/game/renderer/baked-draw-merge-census";
+	import type { BakedDrawMergeCensus } from "../../lib/game/renderer/webgl2/baked-draw-merge-census";
 	import { MapRenderer } from "../../lib/game/map/map-renderer";
 	import { MAP_DEFAULT_VIEW_DIAMETERS } from "../../lib/game/map/map-appearance";
 	import {
@@ -36,7 +38,7 @@
 	import {
 		createColorGradeParameters,
 		type ColorGradeParameters,
-	} from "../../lib/game/renderer/color-grade-policy";
+	} from "../../lib/game/renderer/passes/color-grade-policy";
 	import { HttpLandblockContentSource } from "../../lib/assets/http-landblock-content-source";
 	import type {
 		HttpLandblockProfileDiagnostic,
@@ -50,9 +52,8 @@
 		createSyntheticNameplateWorkload,
 		SyntheticNameplateSetupVisualSource,
 		type SyntheticNameplateWorkload,
-		syntheticTargetingAnimationSource,
 	} from "./synthetic-nameplate-workload";
-	import { OPENED_CONTAINER_NAMEPLATE_ICON_ID } from "../../lib/game/renderer/nameplate-icon-source";
+	import { OPENED_CONTAINER_NAMEPLATE_ICON_ID } from "../../lib/game/renderer/overlays/nameplate-icon-source";
 	import {
 		DynamicOnlyLandblockSource,
 		WithoutAuthoredDynamicsLandblockSource,
@@ -83,14 +84,25 @@
 	} from "../../lib/game/camera/projection-clearance";
 	import { Vec3, type Mat4 } from "../../lib/game/math/types";
 	import { transformPoint3 } from "../../lib/game/math/matrices";
+	import { WebGL2Device } from "../../lib/game/renderer/webgl2/webgl2-device";
 	import {
-		WebGL2Device,
+		probeWebGL2ContextLossPolicy,
+		runWebGL2PortalScopeAtlasTargetsFixture,
 		type WebGL2ContextLossPolicyProbe,
-	} from "../../lib/game/renderer/webgl2-device";
-	import type { WebGL2PortalScopeAtlasTargetsFixtureResult } from "../../lib/game/renderer/webgl2-portal-scope-atlas-targets-fixture";
-	import type { WebGL2PortalScopeAtlasExecutorFixtureResult } from "../../lib/game/renderer/webgl2-portal-scope-atlas-executor-fixture";
-	import type { WebGL2PssmFixtureResult } from "../../lib/game/renderer/webgl2-pssm-fixture";
-	import type { WebGL2EntitySelectionFixtureResult } from "../../lib/game/renderer/webgl2-entity-selection-fixture";
+		type WebGL2PortalScopeAtlasTargetsFixtureResult,
+	} from "./webgl2-fixtures/webgl2-portal-scope-atlas-targets-fixture";
+	import {
+		runWebGL2PortalScopeAtlasExecutorFixture,
+		type WebGL2PortalScopeAtlasExecutorFixtureResult,
+	} from "./webgl2-fixtures/webgl2-portal-scope-atlas-executor-fixture";
+	import {
+		runWebGL2PssmFixture,
+		type WebGL2PssmFixtureResult,
+	} from "./webgl2-fixtures/webgl2-pssm-fixture";
+	import {
+		runWebGL2EntitySelectionFixture,
+		type WebGL2EntitySelectionFixtureResult,
+	} from "./webgl2-fixtures/webgl2-entity-selection-fixture";
 	import {
 		refineEntitySelectionCandidates,
 		type EntitySelectionRefinement,
@@ -98,7 +110,7 @@
 	import {
 		runPortalTransitionPresentationFixture,
 		type PortalTransitionPresentationFixtureResult,
-	} from "../../lib/game/renderer/webgl2-portal-transition-presentation-fixture";
+	} from "./webgl2-fixtures/webgl2-portal-transition-presentation-fixture";
 	import {
 		GamePresentationRuntime,
 		type PortalTransitionRuntimeDiagnostics,
@@ -125,24 +137,24 @@
 		type ObjectPreviewResources,
 		type ObjectPreviewHandle,
 	} from "../../lib/game/preview/object-preview-controller";
-	import type { ObjectPreviewRendererDiagnostics } from "../../lib/game/renderer/webgl2-preview-renderer";
+	import type { ObjectPreviewRendererDiagnostics } from "../../lib/game/renderer/webgl2/webgl2-preview-renderer";
 	import { PresentationAssetService } from "../../lib/game/runtime/presentation-asset-service";
 	import { validateRenderScale } from "../../lib/game/renderer/render-scale";
 	import {
 		createEntityShadowSettings,
 		type EntityShadowMode,
 		type EntityShadowSettings,
-	} from "../../lib/game/renderer/entity-shadow-policy";
+	} from "../../lib/game/renderer/shadows/entity-shadow-policy";
 	import type { RenderExtent } from "../../lib/game/renderer/render-extent";
 	import type {
 		PortalExecutionProbeResult,
 		WebGL2Renderer,
-	} from "../../lib/game/renderer/webgl2-renderer";
+	} from "../../lib/game/renderer/webgl2/webgl2-renderer";
 	import {
 		isTextureFilteringPolicy,
 		type TextureFilteringCapabilities,
 		type TextureFilteringPolicy,
-	} from "../../lib/game/renderer/texture-filtering-policy";
+	} from "../../lib/game/renderer/webgl2/texture-filtering-policy";
 	import { resolveSceneEnvironment } from "../../lib/game/environment/scene-environment";
 	import { resolvePhysicalFlyViewDirection } from "../../lib/game/motion/host-physical-fly-path";
 	import type { HostCameraPlacement } from "../../lib/game/motion/host-placed-path";
@@ -157,7 +169,7 @@
 		createExplorerRelocationRequest,
 		createExplorerSpawnRequest,
 		parseExplorerWcid,
-	} from "../../explorer/explorer-entity-commands";
+	} from "../../explorer/entities/entity-commands";
 	import type {
 		DynamicEntityEvent,
 		DynamicEntityMotion,
@@ -180,14 +192,14 @@
 		ExplorerPossessionIntent,
 		PossessionEventQueueReceipt,
 		PossessionMotionProbe,
-	} from "../../explorer/explorer-entity-possession";
+	} from "../../explorer/entities/entity-possession";
 	import type { PossessionTickResponse } from "./http-explorer-entity-host";
-	import type { ExplorerFixedTickEnvelope } from "../../explorer/explorer-fixed-tick";
+	import type { ExplorerFixedTickEnvelope } from "../../explorer/world/fixed-tick";
 	import {
 		installTerrainGlTrace,
 		type TerrainGlTrace,
 	} from "./terrain-gl-trace";
-	import { parseResidenceInput } from "../../explorer/world-input";
+	import { parseResidenceInput } from "../../explorer/camera/world-input";
 	import { loadPortalTransitionAssets } from "../../lib/client/portal-transition-assets";
 
 	const CAMERA_FOV_DEGREES = 90;
@@ -632,10 +644,6 @@
 		readonly probeDynamicViews: () => ReturnType<typeof probeDynamicViews>;
 		/** Compare one plural entity with each single-domain material control. */
 		readonly probeDynamicDomains: () => ReturnType<typeof probeDynamicDomains>;
-		/** Exercise posed-volume cycle acquisition through the real gameplay adapter and input owner. */
-		readonly probeRealizedCycleTargeting: () => ReturnType<
-			typeof probeRealizedCycleTargeting
-		>;
 		/** Compare merged blend output with independent equations on a synthetic triangle. */
 		readonly probeDynamicBlendFlags: () => ReturnType<
 			typeof probeDynamicBlendFlags | typeof probeMixedTransparency
@@ -4446,29 +4454,33 @@
 				);
 				textureFilteringCapabilities = device.getTextureFilteringCapabilities();
 				if (fixture === "portal-scope-atlas") {
-					portalScopeAtlasTargets = device.probePortalScopeAtlasTargets();
-					portalScopeAtlasExecutor = device.probePortalScopeAtlasExecutor();
-					portalContextLossPolicy = await WebGL2Device.probeContextLossPolicy(
+					portalScopeAtlasTargets = device.runDiagnostic((gl) =>
+						runWebGL2PortalScopeAtlasTargetsFixture(gl),
+					);
+					portalScopeAtlasExecutor = device.runDiagnostic((gl) =>
+						runWebGL2PortalScopeAtlasExecutorFixture(gl),
+					);
+					portalContextLossPolicy = await probeWebGL2ContextLossPolicy(
 						EXPLORER_TUNING.portalTransition.visual,
 					);
 				}
 				if (fixture === "outdoor-pssm") {
-					outdoorPssm = device.probeOutdoorPssm();
+					outdoorPssm = device.runDiagnostic((gl) => runWebGL2PssmFixture(gl));
 				}
-				if (fixture === "summons") {
-					const gl = canvasElement?.getContext("webgl2");
-					if (gl === null || gl === undefined)
-						throw new Error(
-							"Summon probe requires an installed WebGL2 canvas.",
-						);
-					summons = runSummonGpuFixture(gl);
-				}
+				if (fixture === "summons")
+					summons = device.runDiagnostic((gl) => runSummonGpuFixture(gl));
 				if (fixture === "combat-effects")
-					combatEffects = device.probeCombatEffects();
+					combatEffects = device.runDiagnostic((gl) =>
+						runCombatEffectsFixture(gl),
+					);
 				if (fixture === "entity-selection") {
 					verifySelectionTheme(document);
-					entitySelection = device.probeEntitySelection(
-						readEntitySelectionColors(canvas),
+					entitySelection = device.runDiagnostic((gl) =>
+						runWebGL2EntitySelectionFixture(
+							gl,
+							EXPLORER_TUNING.portalTransition.visual,
+							readEntitySelectionColors(canvas),
+						),
 					);
 				}
 				pipeline =
@@ -4490,7 +4502,7 @@
 					contentSource,
 				);
 				presentationAssets = await PresentationAssetService.build({
-					animationSource: syntheticTargetingAnimationSource(contentSource),
+					animationSource: contentSource,
 					particleEmitterSource: contentSource,
 					physicsScriptSource: contentSource,
 					setupVisualSource,
@@ -4866,72 +4878,6 @@
 						);
 					},
 					probeSyntheticAppearanceReplacement,
-					probeRealizedCycleTargeting: async () => {
-						const activeRuntime = runtime;
-						const canvas = canvasElement;
-						const anchor = spawnedEntities[0];
-						const previousCamera = cameraEvidence;
-						const radii = lastInterestRadii;
-						const target = activeRuntime?.sceneInterestState().resolvedTarget;
-						const coordinator = sceneInterestCoordinator;
-						const content = contentSource;
-						const entities = [...spawnedEntities];
-						if (
-							!activeRuntime ||
-							!canvas ||
-							anchor === undefined ||
-							previousCamera === null ||
-							previousCamera.envCellId !== null ||
-							radii === null ||
-							target === null ||
-							target === undefined ||
-							coordinator === undefined ||
-							content === undefined
-						)
-							throw new Error(
-								"Realized targeting probe requires a synthetic outdoor entity and an active runtime.",
-							);
-						if (frameHandle !== undefined)
-							window.cancelAnimationFrame(frameHandle);
-						try {
-							return await probeRealizedCycleTargeting(
-								activeRuntime,
-								anchor,
-								canvas,
-								content,
-							);
-						} finally {
-							activeRuntime.updateSceneInterest(
-								await coordinator.request(target.requested, radii).promise,
-							);
-							setOutdoorCamera(
-								previousCamera.landblockId,
-								previousCamera.position,
-								previousCamera.yawDegrees,
-								previousCamera.pitchDegrees,
-							);
-							await activeRuntime.replaceDynamicEntitySnapshot(entities);
-							const deadline = performance.now() + 20_000;
-							while (true) {
-								activeRuntime.tick(performance.now());
-								await activeRuntime.reevaluateDynamicEntityEligibility();
-								let restored = 0;
-								activeRuntime.visitRealizedEntitySelectionBounds(
-									() => restored++,
-								);
-								if (restored === entities.length) break;
-								if (performance.now() > deadline)
-									throw new Error(
-										"Realized targeting probe failed to restore its borrowed world.",
-									);
-								await new Promise<void>((resolve) =>
-									requestAnimationFrame(() => resolve()),
-								);
-							}
-							activeRuntime.render(performance.now() / 1000);
-							frameHandle = window.requestAnimationFrame(frame);
-						}
-					},
 					probeDynamicDomains: () => {
 						const current = spawnedEntities[0];
 						if (

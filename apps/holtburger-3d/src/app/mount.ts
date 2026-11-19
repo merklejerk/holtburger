@@ -1,6 +1,6 @@
 import type { Component } from "svelte";
 import { mount } from "svelte";
-import { createUiThemeLoader, UI_THEME_CHANGED_EVENT } from "./ui-theme";
+import { createUiThemeLoader, UI_THEME_CHANGED_EVENT } from "./theme/ui-theme";
 import "./ui-base.css";
 
 /** The application owns one document-wide theme selection. */

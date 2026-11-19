@@ -1,10 +1,10 @@
 <script lang="ts">
 	import { onMount } from "svelte";
-	import UiDialog from "../app/UiDialog.svelte";
+	import UiDialog from "../app/ui/UiDialog.svelte";
 	import AddIcon from "../assets/icons/hud-add.svg?component";
 	import SortIcon from "../assets/icons/sort.svg?component";
 	import LoadingSpinner from "../assets/icons/loading-spinner.svg?component";
-	import ClientPregameExpandableRow from "../client/ClientPregameExpandableRow.svelte";
+	import ClientPregameExpandableRow from "../client/pregame/ClientPregameExpandableRow.svelte";
 	import { launcherTransport } from "./launcher-transport";
 	import type { ServerDirectory } from "./server-directory-contract";
 

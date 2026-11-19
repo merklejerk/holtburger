@@ -3,7 +3,7 @@ import { z } from "zod";
 import {
 	contentFailureSchema,
 	type ContentFailure,
-} from "../src/app/content-startup-contract.js";
+} from "../src/app/desktop/content-startup-contract.js";
 import { replaceLocalFile } from "./replace-local-file.js";
 
 const savedContentSchema = z.discriminatedUnion("kind", [

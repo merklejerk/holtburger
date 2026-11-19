@@ -334,17 +334,8 @@ impl WorldState {
             return;
         }
 
-        self.player.last_emitted_derived_stats = Some(current.clone());
-        events.push(WorldEvent::DerivedStatsUpdated(Box::new(
-            crate::DerivedStatsData {
-                attributes: current.attributes,
-                vitals: current.vitals,
-                skills: current.skills,
-                resistances: current.resistances,
-                armor: current.armor,
-                vitae: current.vitae,
-            },
-        )));
+        self.player.last_emitted_derived_stats = Some(current);
+        events.push(WorldEvent::DerivedStatsUpdated);
     }
 
     /// Stable public entry point for applying a decoded game message to world state.
@@ -524,6 +515,7 @@ impl WorldState {
         self.squelch = None;
         self.allegiance = None;
         self.trade = None;
+        self.trade_revision = 0;
         self.world_container = super::WorldContainerState::Closed;
         self.entity_dependencies = Default::default();
         self.entity_lifecycle = Default::default();

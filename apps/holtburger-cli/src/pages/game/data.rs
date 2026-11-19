@@ -11,7 +11,6 @@ use holtburger_core::{PlayerCharacterOptions, RuntimeBodyViewCache};
 use holtburger_dat::file_type::SkillTable;
 use holtburger_protocol::messages::EquipMask;
 use holtburger_protocol::messages::combat::{AttackHeight, CombatMode};
-use holtburger_protocol::messages::magic::Enchantment;
 use holtburger_world::SelfMovementKinematics;
 use holtburger_world::SpatialEntitySample;
 use holtburger_world::context::WorldContext;
@@ -44,6 +43,26 @@ impl TimedResolvedEnchantments {
             &self.resolved.cooldowns,
             self.received_at.elapsed().as_secs_f64(),
         )
+    }
+
+    pub fn find_instance(
+        &self,
+        key: holtburger_world::enchantments::EnchantmentKey,
+    ) -> Option<(
+        &holtburger_world::enchantments::ResolvedEnchantment,
+        Option<f64>,
+    )> {
+        let elapsed = self.received_at.elapsed().as_secs_f64();
+        self.resolved
+            .instances
+            .iter()
+            .find(|instance| instance.key == key)
+            .map(|instance| {
+                let remaining = instance
+                    .remaining_seconds
+                    .map(|seconds| (seconds - elapsed).max(0.0));
+                (instance, remaining)
+            })
     }
 }
 
@@ -275,8 +294,6 @@ pub struct GameData {
     pub player_pos: Option<WorldPosition>,
     /// Last grounded state reported by the server for the player.
     pub player_grounded: Option<bool>,
-    /// Active enchantments on the player.
-    pub player_enchantments: Vec<Enchantment>,
     /// Shared per-stat stacking interpretation for character presentation.
     pub resolved_enchantments: Option<TimedResolvedEnchantments>,
     /// List of learned spell IDs.
@@ -336,7 +353,6 @@ impl Default for GameData {
             vitae: 1.0,
             player_pos: None,
             player_grounded: None,
-            player_enchantments: Vec::new(),
             resolved_enchantments: None,
             player_spells: Vec::new(),
             player_options: None,

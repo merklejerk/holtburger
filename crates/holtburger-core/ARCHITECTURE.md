@@ -1,520 +1,135 @@
-# Core Engine Architecture ⚙️
-
-This crate is the "Brain" and behavior host of the client. It binds together the pure networking from [`holtburger-session`](../holtburger-session) and the data tracking from [`holtburger-world`](../holtburger-world) into a single, cohesive engine.
-
-In addition to orchestration, this crate is allowed to provide reusable client-side behaviors when they are broadly useful across multiple frontends. The key boundary is not "high-level vs low-level" in the abstract, but whether a behavior is a reusable engine capability or a frontend-specific policy.
-
-This crate translates complex network packets into meaningful gameplay events without suffocating the application in massive struct clones or lock contention, and it may also host optional controllers that sit on top of the core movement and interaction primitives.
-
-## Key Components
-
-### 1. The Client ([src/client/mod.rs](src/client/mod.rs))
-
-The top-level entry point. It instantiates the `Session` (networking) from `holtburger-session` and the `WorldState` (data graph) from `holtburger-world`, driving the main async event loop.
-
-#### Bootstrap & Config
-
-To instantiate a client, we use the `ClientBuilder` ([src/client/builder.rs](src/client/builder.rs)). This configures credentials, server endpoints, optional debug features, and runtime asset loading. `ClientRuntimeBuilder::load_assets(&ContentRepository)` is where the builder reads the specific startup assets it needs and assembles `WorldBootstrap`.
-
-#### Event Streams
-
-We use a narrow runtime surface that keeps protocol and UI concerns distinct without inventing an extra public bus:
-
-1. **Session bytes / decoded `GameMessage`**: `holtburger-session` hands reassembled payload bytes to core, and core decodes them into protocol types at the core-to-world boundary.
-2. **`WorldEvent`** (World): World-layer events emitted by `holtburger-world`, including authoritative mutations and packet-scoped processing outcomes.
-3. **`ClientViewEvent`** ([src/client/types.rs](src/client/types.rs)): The unified semantic delta-event feed exposed to frontends, scripts, and harnesses.
-   - Consumers (like `holtburger-cli`) subscribe to `ClientViewEvent` because it broadcasts granular semantic deltas (like `PropertyUpdated { guid, update }`) instead of massive `Box<Entity>` clones.
-   - Low-level raw packet dumping, when needed for diagnostics, is configured explicitly through `ClientRuntimeBuilder::message_dump_dir(...)` instead of a general-purpose runtime event bus.
-
-#### Interaction
-
-- **ClientCommand**: Commands sent from the UI to the engine (e.g., `DriveMovement`, `Use`). Handled in [src/client/commands.rs](src/client/commands.rs).
-- **Producer-Only Pattern**: The Core Engine is strictly _producer-only_ for the public event streams. It never consumes its own broadcast events internally (that would introduce latency and state drift). It uses synchronous direct logic to move from decoded protocol -> state -> view.
-
-### Character management and visual captures
-
-`client/character_selection.rs` owns the retained server roster, advertised capacity, and
-`CharacterManagementState`. Commands guard lifecycle and overlapping create/delete/restore/entry
-operations. A creation dispatch is not confirmation: core reconciles the confirmed GUID/name once
-from the server response, retaining rejection or uncertain completion through application
-snapshots and cold events. A roster refresh does not erase unresolved creation. Frontends keep
-server slot metadata when ordering rows and do not independently insert creation results.
-
-`client/object_preview.rs` captures accepted body and direct attachment facts without loading
-assets or retaining entities. The world-owned announced equipment/attachment roster determines
-completeness, including children whose descriptions have not arrived. Pending equipment is
-distinct from unavailable content; worn appearance is already composed into the body, while held
-equipment retains accepted holding locations and child placements. No server-only classification
-is guessed to replace an absent relationship.
-
-`client/player_visual.rs` retains the latest complete character-owned capture. Relevant cold
-events mark it dirty, and the existing entity-facts publication passes storage invalidation from
-the sole destructive storage-change collector. Evaluation follows the complete message mutation;
-unchanged values are not republished. Movement and script-scale ramps do not trigger capture.
-Saved visuals deliberately use accepted base scale, opaque visibility, and default idle rather
-than current motion/fade state; inspector captures can retain effective scale/translucency.
-Application replacement snapshots carry the same capture as deltas, so recovery cannot lose a
-one-time equipment update. Retirement clears this level without querying the old world.
-
-Endpoint scoping, local persistence, picker framing, and creation UI policy belong to the app.
-
-### Vendor execution
-
-World owns `VendorDraft` evaluation: sale eligibility, source quantities, per-object
-rounded prices, compatible-stack keys, and currency projections. Core's
-`client/vendor_transaction.rs` owns execution under the existing busy-operation
-lifetime. `VendorTrade` sends Sell first, retains matching source receipts and
-failures, and transitions directly to Buy after the sale's terminal `UseDone`,
-including a partial or refused sale. There is no idle gap, pre-buy balance recheck,
-rollback, or retry. The terminal typed receipt preserves transferred sale sources
-and any sale issue independently of the purchase outcome. Timeouts and failed sends
-stop execution without advancing to the next phase.
-
-Standalone `Buy` and `Sell` commands share completion handling, preserving the
-TUI's separate workflows. The 3D host projects catalog/quote/result contracts;
-h3d owns draft editing, visual merging, categories, gestures, and HUD geometry.
-Display groups retain all source identities, so partial outcomes can remove only
-fulfilled contributions. They never become physical inventory stacks or entities.
-
-### Housing execution and information
-
-World retains effective-home/crystal/access/search facts and owns payment accounting.
-Core's focused `client/housing*.rs` modules own initial home queries, retained query
-loading, account-owner classification, candidate resolution, requirement-targeted auto-fill,
-and submitted payment/management execution. Preview operations explicitly quote, add to
-a requirement, or fill it; core validates current template compatibility and preserves
-unrelated row accounting. H3D owns tabs and draft-only row gestures. The first completed
-character activation queries housing;
-teleport and frontend tab focus do not. Complete home replies finish a home query;
-maintenance deltas and rejected crystal profiles cannot finish it or a dependent HAR read.
-Returning to the character roster or terminating the session retires submitted admission,
-then clears housing facts, read deadlines, and crystal-opening intent. Housing replies
-received outside initial entry or the active world are discarded before world reduction;
-they cannot restore the previous character's facts in a replacement snapshot.
-
-`client/busy_operation.rs` owns admission, deadline, cancellation, and terminal busy
-publication. Vendor, housing payment, and housing management keep their own completion
-evidence. Housing never completes from generic UseDone. Payment requires matching
-profile facts plus exact expected source consumption; internal recovery retains the
-original deadline and never retries payment or recreates crystal-opening intent.
-Permission edits finish with a dispatch receipt, leaving success/failure to server feedback.
-Core loads named HAR when the effective home is ready and schedules two delayed reads
-after permission edits. One coordinator coalesces edits behind outstanding reads, retains
-refreshing state across scheduled delays, and bounds the complete sequence. Returned
-values never validate the edit or determine another read. Background refreshes do not
-retain inventory mutation admission or prevent another administrative edit. H3D retains
-requested checkbox values in its session owner until the refresh sequence finishes;
-undisclosed booleans default unchecked, while undisclosed requested values remain local
-intentions. Hook visibility uses explicit Show/Hide requests.
-Abandonment shares inventory admission
-because ACE removes the deed, and may select another account home afterward. Hook/boot
-requests have dispatch receipts rather than invented completion facts. Read-only search
-and home/access queries do not acquire the inventory mutation owner.
-
-The host projects typed commands, replacement snapshots, and terminal receipts. H3D owns
-candidate editing, confirmations, window/tab lifetime, range-dismissal policy, search
-presentation, landscape-only home markers, and existing toast display. Server wire replies
-lack client request IDs; local sequence/home epochs guard admission and consumer ownership,
-but cannot prove perfect correlation of same-home/same-crystal late replies.
-
-### Command and Controller Boundary
-
-The core crate exposes two layers of client-facing behavior:
-
-1. **Primitives**: low-level commands and systems that directly map to protocol or authoritative local-state responsibilities.
-   - Examples: `DriveMovement(MovementCommand::...)`, snap-facing, resolved motion-state execution, movement prediction, position sync, and handling server-controlled movement.
-2. **Controllers**: optional, reusable higher-level behaviors built on top of those primitives.
-   - Examples: approach a target until an arrival distance, maintain combat range, desired-attack maintenance, combat-facing assistance, or sticky-melee steering.
-
-Applications are free to use these controllers, ignore them, or layer their own policies above the primitive command surface. The core crate should not force every client into one control model, but it may provide shared controllers when the behavior is likely to be useful across a TUI, a 3D client, tools, or automated harnesses.
-
-[`KinematicBoomController`](src/kinematic_boom.rs) is one such reusable behavior. It retains
-third-person reach, filtered target-pivot, clearance-recovery, and last-safe camera state while
-delegating static collision queries and placed-path authoring to an injected world collision
-snapshot. It is not a registered spatial body and owns no scheduler, possession lifecycle,
-transport, pointer gesture, or presentation clock. Applications adapt their actor path into target
-samples, advance the controller on their chosen fixed timeline, and publish the resulting
-collision-safe camera path with authoritative residency. Each control leg casts the camera envelope
-from a target-relative origin; the resulting radial endpoint owns placement. Bidirectional sweeps
-check whether successive endpoints admit interpolation, including geometry closing onto the old
-camera. Blocked interpolation publishes a discontinuity at the radial endpoint instead of sliding
-or retaining a camera body behind the obstruction. Stationary endpoints need no continuity sweep.
-
-The client composition services this controller in `client/camera_service.rs` on a dedicated
-worker against the latest immutable query input. Camera input and lifecycle serialization do not
-acquire the world lock used for crowd simulation. World lifecycle explicitly permits or suspends
-ordinary servicing; snapshot presence controls query availability, not permission. Reset retires
-registration, placement, and input together, and worker shutdown joins before releasing retained
-handles. Explorer's worker and possession permissions belong to its app-local host composition.
-
-Camera clearance is independent of the target seed. The controller retains a latest requested
-projection revision/radius and an optional committed revision/radius. Each tick attempts the
-requested envelope over the sampled target path and acknowledges it only on successful publication.
-If growth fails, one bounded retry uses the committed radius while retaining the pending request;
-a larger sphere fitting at the previous target position cannot prove that it fits along this tick's
-path. Diagnostics include both attempts. Each origin is settled for the camera radius because the
-target body can fit where a larger projection cannot. Settlement accepts only contact-pass and
-separation settings; movement-substep settings belong to the independent free-sphere motion solver.
-
-The current primitive movement surface lives in [src/client/movement_types.rs](src/client/movement_types.rs). It defines resolved movement commands built around a composite `MotionState`, plus one-shot `SnapFacing` and `Stop`. A motion state represents longitudinal, lateral, and turn axes independently, so diagonal translation does not require a named locomotion variant. [src/client/movement/mod.rs](src/client/movement/mod.rs) remains the sole executor boundary that owns local prediction, packet-edge synthesis, and direct server-facing movement behavior.
-
-[src/client/character_motion.rs](src/client/character_motion.rs) provides the reusable, clock-free character input interpreter. It accepts replaceable semantic drive snapshots and monotonically sequenced jump lifecycle edges, suppresses translation during a standing-long-jump charge, and emits an actor-neutral `JumpAttempt`. Frontends retain raw-key arbitration, charge timing, and presentation; actor-specific resolvers retain eligibility and launch-kinematics policy; world physics retains velocity and contact authority.
-
-[src/client/character_kinematics.rs](src/client/character_kinematics.rs) owns validated actor-specific movement and jump capabilities. Motion-table base speeds remain separate from the effective run-rate scalar supplied by the actor-owning layer, so skill, burden, enchantment, and exhaustion policy do not leak into the controller or physical body.
-
-Player jump launch uses retail's interpreter baseline (walk 3.12, run 4.0, sidestep 1.25), not the
-body's animation-derived grounded speeds. World jump
-capabilities carry run rate, height, and burden without requiring run/turn clips. Ordinary and
-precise launch share `retail_jump_kinematics`; missing Ready/Falling only limits presentation.
-
-[src/client/character_jump.rs](src/client/character_jump.rs) is the pure release-time resolver. Charge timing and launch capability deliberately do not share a profile: `JumpChargeProfile` describes the frontend gesture, while each call to `resolve_character_jump` receives fresh `CharacterJumpKinematics`. This permits a future actor adapter to sample mutable capabilities and resource policy for every accepted attempt without teaching the interpreter about skills or caching those facts on a physical body. The resolver computes one `ResolvedJump`; later orchestration must pass that same result to local launch and packet construction instead of deriving either velocity again. Gameplay capability sourcing, resource transactions, packet emission, and player prediction remain outside this contract.
-
-The public boundary is `MovementCommand`:
-
-- `MovementCommand::SetMotion` expresses one continuous resolved longitudinal, lateral, gait, and turning state.
-- `MovementCommand::PulseMotion` expresses a resolved state with an explicit expiry.
-- `MovementCommand::SnapFacing` and `MovementCommand::Stop` remain one-shot primitives.
-- `MovementSystem` ingests those commands, coalesces them at the physics boundary, and decides on tick whether a `MoveToState`, stop pulse, or `AutonomousPosition` sync is actually required.
-
-Movement packet metadata and motion-style fallback remain movement-internal concerns on the normal public path. Frontends submit intent; core derives packet-shaping details from world state unless a specialized override path is explicitly justified later.
-
-Frontend adoption pattern today:
-
-1. Hold a reusable controller instance such as [src/client/controllers/approach_target.rs](src/client/controllers/approach_target.rs), [src/client/controllers/maintain_range.rs](src/client/controllers/maintain_range.rs), or [src/client/controllers/combat.rs](src/client/controllers/combat.rs) in frontend state.
-2. Feed it world-derived inputs on ticks or relevant events.
-3. Interpret its emitted effect vocabulary, such as approach pursuit intent, stop/finish effects, or combat-facing intents, in the frontend's own orchestration layer.
-4. Execute those effects through the frontend's preferred runtime path. Command-channel frontends submit `MovementCommand` values through `ClientCommand::DriveMovement`.
-
-The important ownership rule is that frontends submit intent, not packet cadence. Core decides when a drive or stop intent actually requires a server-visible `MoveToState` edge and when a stop pulse is still owed.
-
-The same split applies to entity motion coming back from the server:
-
-1. `holtburger-world` reduces retail-current movement packets into `EntityNetworkMotion`, whose
-   type distinguishes an uninitialized generation from initialized idle or active movement.
-2. The retained state becomes `MotionOrder` only at the shared support resolver; local character
-   intent is a different source adapter into that same motion runtime, root-actuation boundary,
-   and physical solver.
-3. `holtburger-core` projects the resulting playing-clip and body levels into client-view events
-   for frontends that want to render or inspect motion.
-4. Shared gameplay decisions such as combat-target viability should consume world-derived semantics, not re-derive meaning from raw motion updates inside each frontend.
-
-Render-oriented consumers should keep that boundary explicit: core publishes a frontend-facing runtime-body view contract over `ClientViewEvent`, frontends keep mirrored read caches keyed by `SpatialBodyId`, and those caches are updated mechanically rather than ticked into an independent truth.
-
-Projection lifecycle is intentionally authoritative-first. Delta-only motion and kinematics events may refresh cached projection inputs for already tracked entities, but they do not bootstrap tracking and they do not resume suspended projection on their own. The sync model is an initial snapshot plus deltas, with an explicit reset-and-resnapshot on forced repositions and teleports. Bootstrap and reset must therefore come from dedicated runtime-body snapshot/reset events rather than from event-free local ticking.
-
-This is the client runtime-body contract and is distinct from the focused dynamic-entity feed described under Shared Dynamic Entity Contracts. That feed hydrates once per mount or webview remount through a listener-before-snapshot request and has no reset, replay, acknowledgement, or delivery-recovery protocol.
-
-The required delivery contract for frontend-owned navigation or rendering is:
-
-1. world owns canonical `SpatialBody` runtime advancement and future constraint resolution;
-2. core emits runtime-body view snapshots and deltas derived from that world-owned state;
-3. frontends keep mirrored read caches only;
-4. no cache outside `holtburger-world` may become a second advancing runtime store.
-
-That boundary keeps 3D-client rendering needs compatible with shared combat logic: frontends can observe motion directly, but they should not become the authority for interpreting death motion or similar gameplay signals.
-
-The current kernel lives under [src/client/controllers/mod.rs](src/client/controllers/mod.rs). After extracting real movement and combat controllers, it has been refined down to the proven shared surface and currently standardizes only:
-
-- a broad controller trait shape
-- coarse lifecycle status
-- a small structured update containing `status` and controller-defined `effects`
-
-It intentionally does not standardize a scheduler, claim system, universal reason ontology, or one closed effect enum. Those decisions stay outside the kernel because the current controller set still does not justify them.
-
-### 2. Specialized Systems
-
-#### Auth & Connection ([src/client/auth.rs](src/client/auth.rs))
-
-Manages the multi-stage handshake with GLS (Global Login Service) and the World server. Handles ticket exchange and character selection.
-
-#### Movement ([src/client/movement/mod.rs](src/client/movement/mod.rs))
-
-The `MovementSystem` runs on the shared fixed 30ms client physics cadence. It ingests resolved movement commands, supplies local ordinary actuation, and pushes reliable synchronization with the server's authoritative position.
-
-Today, this module owns resolved motion expiry, edge-based movement packet emission, stop-pulse obligations, snap-facing execution, and server-directed `MoveTo`/`TurnTo` command lifecycle. A classified `ServerDirectedMotionState` retains command ownership and its target; it does not retain contact or physical velocity. Physical composition samples the world-owned runtime body: heading remains eligible while unsupported, MoveTo translation and distance completion require `Grounded`, and TurnTo completes from normalized heading agreement. Navigation composition selects `DirectedMotionSupport::PositionOnly`, using admitted full-XYZ travel and containment instead of a grounded-body prerequisite. This matches retail's separate turn/translation nodes and contact-gated MoveTo progress while leaving the ballistic vector in `SpatialBody::retained` untouched.
-
-Packet-scoped self authority policy separately selects a world-owned position confirmation or explicit reset. Local authored input advances the same world-owned `MotionRuntimeRegistry` cursor consumed by presentation and root actuation. `SpatialBody` reconciliation composes with that ordinary drive inside the shared spatial tick. Frontend steering translates approach/follow/scoot decisions into `PlayerDriveIntent::ClientDirected` commands; `ClientDirectedCommand` makes acquisition, updates, settlement, and release explicit. Settlement stops at the committed pose and carries no replacement position.
-
-The client admits physical elapsed time before authored advancement and hook consumption. One
-producer sample feeds each body's ordinary actuation and independent reference for the admitted
-tick. After the world publishes accepted body state, core forwards supported timed motion or
-explicit local drive intent to locomotion presentation, and canonical body changes to movement/render
-consumers. Visual locomotion never supplies root motion or hooks to a later tick.
-
-For a locally controlled playable body, world motion selection uses whole-interval mean rates
-when a requested locomotion component is missing: native rates where supported, standard player
-table `0x09000001` rates for absent components. Complete native movement keeps exact root motion.
-Core consumes one resolved physical offset through the existing support/scale gate and solver.
-Native playback owns animation, collision poses, and hooks; server-directed/remote motion retains
-its existing authority.
-
-Server-authored actions do not create another controller. World admission emits transient action
-edges separately from the retained steady order, and the same `MotionRuntimeRegistry` used by bulk
-remote advancement owns selection, FIFO order, completion, and return-to-steady playback. For the
-local character, `MovementSystem::advance_local_authored_motion` is only the adapter that advances
-that same runtime inside the local fixed-tick transaction and returns its exact authored offset to
-the existing solver. Remote players and creatures use the bulk adapter; entity category never
-selects a different animation or root-motion implementation.
-
-Client-authored command-list actions enter that same registry when `MovementSystem` constructs the
-outbound pulse. The predicted edge and wire item share one command, speed, and 15-bit stamp; the
-world's existing local autonomous-echo policy rejects the later echo so playback cannot duplicate.
-
-Local social commands expose world-owned readiness and request-correlated motion outcomes.
-Readiness requires both the combat-mode property and accepted motion stance to permit the command;
-those server updates can arrive separately. The movement executor reports requests cancelled
-before admission, and the world playback owner reports admission, unsupported animation routes,
-interruption, and exact completion. Caller identities remain separate from wrapping wire stamps.
-A held pose completes only after its exit returns to ordinary locomotion. A new local soul emote
-supersedes a held social pose; a one-shot replacement exits it and finishes at standing instead
-of returning to it. Terminal outcomes survive body removal; placement-epoch changes retire caller
-identities before surviving playback can publish a result under the replacement scope. h3d owns
-temporary peace excursions and combat restoration; these outcomes do not impose that policy on
-other clients.
-
-Reusable combat execution lives in [src/client/combat_runtime.rs](src/client/combat_runtime.rs)
-and [src/client/combat_engagement.rs](src/client/combat_engagement.rs). Core owns attack request
-eligibility, busy state, feedback, and engagement lifetime; frontends select the desired engagement.
-After charge timing, melee requests reach ACE without local range, visibility, or collision-preparation
-admission. ACE owns range/visibility and directs approach when necessary. Server-directed approach
-and frontend steering use the same movement executor. Accepted server swing actions enter playback
-independently of local crowd collision; collision still constrains physical translation.
-World-owned sticky targeting supplies authored clearance and rate-limited pursuit without becoming
-a second translation owner.
-
-## Movement Model
-
-The ownership boundaries are explicit:
-
-1. Frontends own input mapping and steering policy. The TUI's approach/follow/scoot state lives
-   in `apps/holtburger-cli/src/navigation.rs`; 3D control policy stays in its app.
-2. Core accepts typed `PlayerDriveIntent` values. `CharacterDrive` combines manual axes;
-   `ClientDirectedCommand` scopes target-directed control. Core owns their lifecycle, admitted
-   motion timing, packet construction/publication, and server-directed command handling.
-3. World owns canonical runtime poses, authored motion selection, physical collision,
-   containment, and reconciliation. The composition selected by the runtime builder chooses
-   which existing world products execute a tick; it does not create a second world.
-
-Jump input interpretation remains independent of keyboard state, a frontend charge clock,
-actor capabilities, and body physics. Physical composition resolves supported jump attempts;
-navigation composition reports them as unsupported. Protocol motion styles and authoritative
-sequences remain shared by both compositions.
-
-## Internal Data Flow
-
-### Movement composition and reduced clients
-
-The frontend owns steering: approach/follow targets, arrival distances, and input mapping.
-The frontend selects movement/body behavior through `ClientRuntimeBuilder`
-`physical_movement_source` or `navigation_movement_source`, independently supplying a
-`SceneContentSource` for environment geometry. Full body preparation uses `ClientBodySource`;
-reduced body preparation reads `SetupContentSource`. The coordinator uses one scene query and
-residency path regardless of body behavior. The frontend owns HBA/HNAV selection.
-`MovementSystem` executes the selected behavior
-inside the same runtime, authoritative world, motion lifecycle, and packet publisher.
-
-Physical composition retains full local/remote collision behavior. Navigation composition uses
-point-valid local commitment and room-shell/terrain remote prediction. Core-owned
-`NavigationProgress` holds uncommitted intent progress across known voids; it never supplies world
-queries or packet positions. World receives only valid committed endpoints. Missing/ambiguous
-coverage waits without banking travel. An input pulse is consumed once; simulation ticks between
-pulses preserve progress. Intent cancellation, source replacement, correction, and world epochs
-retire/rebase that progress. Accepted cell changes retain the normal immediate publication trigger.
-
-For gameplay requests, a reduced client delegates eligibility decisions it cannot simulate to
-ACE rather than permanently rejecting requests for missing local physical results. Missile
-requests in navigation mode therefore reach ACE without a solved grounded-body requirement;
-physical mode retains its grounded gate. Existing target, busy, ownership, range, and available
-scene checks remain meaningful. This rule does not authorize invalid position reports, treat
-unavailable content as open space, or invent local capabilities: navigation still reports local
-jumping as unsupported because it cannot produce that movement.
-
-The content layer provides static products; world owns canonical bodies, containment queries,
-reconciliation, and interaction semantics. The execution policy does not fork those owners or
-weaken the physical composition to satisfy TUI presentation requirements.
+# Core Engine Architecture (`holtburger-core`)
+
+`holtburger-core` orchestrates `holtburger-session` (transport) and `holtburger-world`
+(authoritative state) into a reusable client runtime. It drives authentication and world entry, runs
+the fixed-tick movement and simulation loop, executes guarded multi-step gameplay workflows, hosts
+shared spatial and camera utilities, and publishes semantic deltas (`ClientViewEvent`) plus
+recovery snapshots to frontends and scripts.
+
+## Core Design Rules
+
+- **Explicit Session Lifetimes**: `ClientRuntime` partitions mutable state by exact lifecycle scope
+  (`ConnectionSessionState`, `CharacterSessionState`, and `PortalResyncState`) so disconnect,
+  character logout, and portal transitions reset atomically without per-field state leaks.
+- **Honest Observation vs. Transition Boundaries**: Status and view emitters (such as
+  `send_status_event(&self)`) are strictly read-only; state retirement happens only inside explicit
+  lifecycle transitions (`retire_portal_epoch`, `retire_character_state`,
+  `retire_character_session`, `finish_disconnect`).
+- **Producer-Only Event Stream**: `ClientRuntime` translates `GameMessage`s and `WorldEvent`s
+  synchronously into `ClientViewEvent`s and entity/presentation updates. It never subscribes to its
+  own broadcast channel.
+- **Reusable Engine Capabilities, Frontend-Owned UX**: `core` owns protocol sequencing,
+  busy/admission guards, and reusable controllers (`KinematicBoomController`, character motion/jump
+  resolvers), while keybindings, HUD layout, camera gestures, and target-selection UX stay in
+  `apps/holtburger-cli` and `apps/holtburger-3d`.
+
+---
+
+## Module Map
+
+### Crate Root (`crates/holtburger-core/src/`)
+
+| Module | Responsibility |
+| :--- | :--- |
+| [`src/client/`](src/client) | `ClientRuntime` orchestrator and its 9 domain submodules (detailed below). |
+| `src/dynamic_entity.rs`, `src/dynamic_entity_view.rs` | Source-neutral `DynamicEntityDefinition` validation, DAT setup/physics preparation, stateless `SpatialScene` body installation, and `DynamicEntityView` projection shared by live Client and offline Explorer hosts. |
+| `src/kinematic_boom.rs` | Reusable collision-safe third-person camera boom controller (`KinematicBoomController`) operating over immutable world collision snapshots. |
+| `src/simulation_scene.rs`, `src/content_assets.rs` | Scene residency/interest coordination and `ContentAssetService` runtime asset loading from `holtburger-content`. |
+| `src/character_gen/` | Character-creation validation, heritage/skill/attribute point budgets, and appearance assembly. |
+
+### Client Runtime Submodules (`crates/holtburger-core/src/client/`)
+
+| Submodule | Responsibility |
+| :--- | :--- |
+| [`client/mod.rs`](src/client/mod.rs) | `ClientRuntime` root, `ConnectionSessionState`, `CharacterSessionState`, `PortalResyncState`, retirement transitions, and `WorldEvent` $\rightarrow$ `ClientViewEvent` projection. |
+| [`client/session/`](src/client/session) | `ClientRuntimeBuilder`, GLS/world handshake (`connection.rs`, `lifecycle.rs`), inbound `messages.rs`, outbound `commands.rs`, `busy_operation.rs`, fixed-tick `simulation.rs`, `event_ordering.rs`, and public `ClientCommand` / `ClientViewEvent` (`types.rs`). |
+| [`client/motion/`](src/client/motion) | 30ms `MovementSystem` (`movement/`), `PlayerDriveIntent` & `CharacterDrive` (`movement_types.rs`), clock-free `character_motion.rs` & `character_jump.rs`, `character_kinematics.rs`, reduced `navigation_body.rs`, `collision.rs` demand coordinator, `precise_jump*.rs`, and `rest_posture.rs`. |
+| [`client/camera/`](src/client/camera) | Dedicated worker service (`camera_service.rs`) and client camera runtime (`runtime.rs`) driving `KinematicBoomController` off the simulation lock. |
+| [`client/entities/`](src/client/entities) | Replicated `ClientEntitySnapshot` / `ClientEntityDelta` + `PlayerEntitySummary` (`entity_facts.rs`), dynamic-entity feed adapter (`dynamic_entity_view.rs`), script/sound `entity_cues.rs`, and `selection_query.rs`. |
+| [`client/combat/`](src/client/combat) | `combat_runtime.rs`, `combat_engagement.rs`, `combat_attribution.rs`, `combat_feedback.rs`, and server combat text parsing. |
+| [`client/character/`](src/client/character) | Character roster/creation reconciliation (`character_selection.rs`), `character_sheet.rs`, `progression.rs`, `player_visual.rs` & `object_preview.rs` captures, `barber.rs`, `contracts.rs`, and `spell_inspection.rs`. |
+| [`client/inventory/`](src/client/inventory) | Unified `SubmitInventory` planning & execution (`inventory_plan.rs`, `inventory_storage.rs`, `inventory_runtime.rs`), multi-step `equipment_plan.rs` / `equipment_runtime.rs`, `salvage.rs` (`SalvageApproval` revision token), `vendor_transaction.rs` (`VendorTrade`), `trade.rs`, `item_use.rs`, `appraisal.rs`, `corpse.rs`, `world_container.rs`, and `lock_feedback.rs`. |
+| [`client/social/`](src/client/social) | Fellowship (`party.rs`), `allegiance.rs`, `friends.rs`, and `squelch.rs` command/query flows. |
+| [`client/world_nav/`](src/client/world_nav) | Housing home/crystal queries, quotes, payment, and coalesced HAR management (`housing*.rs`), `recall.rs`, and `map_teleport.rs`. |
+
+---
+
+## Lifetime & Data Flow
 
 ```mermaid
-sequenceDiagram
-    participant Net as Session (UDP Transport)
-    participant Core as Client Engine (Orchestrator)
-    participant World as WorldState (Data Authority)
-    participant View as ClientViewEvent (Delta Stream)
-    participant UI as Consumer (TUI/Local Projection)
-
-    Net->>Core: Reassembled Message Bytes
-    Core->>Core: Decode GameMessage
-    Core->>World: Mutate Authority (e.g. Spawn)
-    World->>Core: WorldEvent (e.g EntitySpawned)
-    Core->>View: Emit as Semantic Delta
-    View->>UI: Process In-Place Projection Update
+flowchart LR
+    Builder["ClientRuntimeBuilder<br/>+ WorldBootstrap"] --> Runtime["ClientRuntime"]
+    subgraph Lifetimes["Explicit Composite Lifetimes"]
+        Conn["ConnectionSessionState<br/>(cleared on disconnect)"]
+        Char["CharacterSessionState<br/>(cleared on logout / roster return)"]
+        Portal["PortalResyncState<br/>(cleared on portal / world epoch)"]
+    end
+    Runtime --> Conn
+    Runtime --> Char
+    Runtime --> Portal
+    Sess["holtburger-session"] <-->|"GameMessage / Actions"| Runtime
+    Runtime <-->|"mutations + SpatialScene ticks"| World["holtburger-world"]
+    Runtime -->|"ClientViewEvent + snapshots"| App["3D Host Sidecar / TUI / Scripts"]
 ```
 
-1. **Networking**: `holtburger-session` reassembles decrypted UDP payloads.
-2. **Engine**: `Client` decodes `GameMessage`, performs any core-owned handling, and emits intents to `holtburger-world`'s `WorldState`.
-3. **Authority**: `WorldState` performs the mutation and emits a `WorldEvent`.
-4. **Projection**: `Client` translates decoded protocol handling and `WorldEvent` output directly into granular `ClientViewEvent` deltas.
-5. **UI**: Consumers receive the delta and mutate their local cached models safely without lock contention (`Arc<RwLock>`) or massive memory allocations.
+---
 
-## 🛠️ Developer Onboarding
+## Key Architectural Seams
 
-### Adding a new Message Handler
+### 1. Physical vs. Navigation Movement Compositions
+`ClientRuntimeBuilder` configures `MovementSystem` (`client/motion/movement/`) with one of two
+compositions over the same authoritative `WorldState`, `MotionRuntimeRegistry`, and packet
+publisher:
+- **Physical composition** (`physical_movement_source` + `ClientBodySource`): Full swept
+  static/dynamic collision, grounded support, local jump execution (`character_jump.rs`), and crowd
+  contact solving for the 3D client and physics harnesses.
+- **Navigation composition** (`navigation_movement_source` + `SetupContentSource`): Point-valid
+  containment and room-shell/terrain remote prediction for reduced clients (such as the TUI),
+  delegating physical-only eligibility gates to the server without inventing invalid positions or
+  weakening `holtburger-world`'s physical solver.
 
-1. **Identify**: Establish the opcode and wire contract from verified protocol evidence.
-2. **Update Protocol**: Add the message structure to `holtburger-protocol`.
-3. **Handle in Core**: Add a case to the core loop in [src/client/messages.rs](src/client/messages.rs).
-4. **Update State**: If the message changes the world, add a method to `holtburger-world` and emit a `WorldEvent`.
-5. **Map to View**: Update the direct `ClientViewEvent` emission in [src/client/messages.rs](src/client/messages.rs) or `emit_world_view_projection` inside [src/client/mod.rs](src/client/mod.rs) to share the new delta with the UI.
+### 2. Snapshot + Delta Replication & Dynamic Entity Feed
+- **Application & Entity Snapshots**: Reconnects and webview remounts hydrate from
+  `ClientApplicationSnapshot` (character sheet, enchantments, vendor, trade, barber, housing,
+  social, character preferences) plus `ClientEntitySnapshot` (`PlayerEntitySummary` + per-entity
+  `ClientEntityFacts`), then stay synchronized via single-channel semantic deltas.
+- **Source-Neutral Dynamic Entities & Camera**: `dynamic_entity_view.rs` projects `WorldState`
+  entities and `SpatialScene` routes (`DynamicEntityPlacedPath`, `CorrectionSnap`, stationary
+  membership refreshes) into the same `DynamicEntityView` shape used by the Explorer host.
+  `camera_service.rs` advances `KinematicBoomController` on a dedicated worker against immutable
+  collision snapshots without contending on the world simulation lock.
 
-### Adding or Refactoring a Reusable Controller
+### 3. Guarded Workflow Pattern
+Stateful client workflows (`SubmitInventory`, equipment swaps, `VendorTrade`, `Trade`,
+`SalvageSubmit` via `SalvageApproval` revision tokens, and housing payment/management) follow a
+strict three-way split:
+1. **World** computes pure eligibility, capacity, pricing, and workmanship quotes over
+   authoritative state.
+2. **Core** owns admission (`busy_operation.rs`, `inventory_runtime.rs`, `equipment_runtime.rs`),
+   multi-step request sequencing, authority-held revision tokens, and timeout/uncertainty receipts
+   without optimistic rollback hacks.
+3. **Frontends** own draft UI state, confirmations, sorting, and drag/drop gestures, reconciling
+   views from replicated snapshots and terminal receipts.
 
-1. **Prove the behavior is shared**: Confirm that the behavior is likely useful across multiple clients or modes of control.
-2. **Identify the primitive surface**: Separate the controller's decision-making from the low-level commands it needs to emit.
-3. **Make state explicit**: Keep controller state isolated from the transport and world-plumbing responsibilities.
-4. **Define lifecycle and interruption rules**: Be explicit about what blocks, pauses, interrupts, cancels, or completes the controller.
-5. **Keep adoption optional**: Frontends should opt into controllers rather than being forced through them.
-6. **Keep the kernel small and evidence-driven**: Prefer controller-local vocabularies and only promote helpers or shared terminology that multiple real controllers demonstrably need.
+---
 
-## Migration Path Toward Reusable Controllers
+## Developer Onboarding
 
-We do not need a flag day refactor. The current movement behavior can evolve incrementally:
-
-1. **Document current controllers explicitly**
-   - Document how frontends own reusable controllers and submit emitted plans or direct intents for execution.
-2. **Separate primitive helpers from controller logic**
-   - Extract helpers for heading changes, locomotion state, stop/cancel, and sync from the current approach loop.
-3. **Isolate controller state**
-   - Keep approach-specific state and heuristics grouped together behind a clearer controller boundary.
-4. **Introduce additional reusable controllers**
-   - Examples include combat-facing assistance or maintain-range behavior.
-5. **Let applications arbitrate controller usage**
-   - Frontends decide when to invoke or suspend a controller based on local UX needs.
-
-The end state is a core library that owns robust movement and interaction primitives, plus a catalog of optional higher-level controllers that clients can compose as needed.
-
-## Shared Dynamic Entity Contracts
-
-`dynamic_entity.rs` and `dynamic_entity_view.rs` own the source-neutral seam between an entity
-producer and everything downstream. Shared code begins only after a producer registry has
-assembled its facts, and it never claims producer authority.
-
-- `DynamicEntityDefinition` is the validated definition: identity, immutable content identities,
-  lossless appearance, mutually exclusive world-initial or attached placement, validated scalars,
-  and the complete effective `EffectiveEntityPhysicsState`. It holds no catalog path, SQL row,
-  frontend node, asset payload, or producer handle.
-- Content preparation (`prepare_dynamic_entity_setup`, `prepare_dynamic_entity_physics`) resolves
-  DAT/setup facts and rejects unsupported combinations with typed reasons — including the measured
-  moving-physics-BSP boundary — before any scene mutation.
-- The body operations (`install_dynamic_entity_body`, `replace_dynamic_entity_body`,
-  `remove_dynamic_entity_body`, `set_dynamic_entity_physical_configuration`) apply a complete
-  optional physical configuration to a caller-supplied `SpatialScene`. The client uses
-  `WorldState`'s scene and the Explorer uses the host simulation's; the operations are identical
-  and hold no state.
-- `project_dynamic_entity_view` is a pure projection of registry semantics, joining a body view
-  only for the world arm and forwarding bodyless attachment facts directly. It is the only
-  producer of `DynamicEntityView`, so the client adapter
-  (`client/dynamic_entity_view.rs`) and the Explorer host emit identical shapes. The view carries
-  no semantic motion object. For client entities it carries the world-resolved effective motion
-  table identity needed to prepare the projected clip; world roots remain solver-owned while
-  attached roots inherit transform authority from their parent.
-- Client simulation carries a `ClientBodyMotion` for each simulated movement: physical motion owns
-  an accepted `PlacedMotionPath`, pose-only projection explicitly permits endpoint interpolation,
-  and correction snaps have no transit. Publication cannot infer pose-only movement from a missing
-  physical route. `DynamicEntityPlacedPath::from_motion` is shared with Explorer and preserves every
-  accepted boundary and membership; its separate endpoint rotations retain shortest-arc normalized
-  interpolation. Camera waypoints and frontend placement consume that same published route.
-- Stationary room-membership refreshes are pose-stable tick updates and need no movement result.
-  The frontend distinguishes pose changes from membership changes: it updates an idle root directly,
-  or refreshes the endpoint of an earlier still-playing path without replacing its timing or animation.
-  Earlier path legs retain their placement proofs until arrival.
-- Client fixed ticks publish one per-body placement consequence. Integrated bodies retain the
-  ordinary host duration; an ordinary far correction uses `CorrectionSnap`, clears frontend path
-  interpolation immediately, and does not increment generation or masquerade as teleport/reset.
-  Packet-time upserts carry the current runtime pose, and the 3D runtime keys scene-spatial
-  placement only by pose plus membership so contact/vector level changes cannot rewrite a root or
-  cancel its active host path.
-
-`material_appearance_input` is the single projection from the shared `EntityAppearance` into the
-content resolver's ObjDesc shape. The Explorer's visual source consumes it directly; there is no
-second copy.
-
-Two producer registries remain intentionally distinct — `WorldState` for the network client and an
-app-local registry for the Explorer — and neither is generalized into a universal store.
-
-The network client's collision coordinator is the sole producer of client-local physical demand.
-It joins authoritative entity state, retained vectors, authored root motion, pose reconciliation,
-and prepared content before each simulation transaction. Target retention and integration demand
-are derived independently; presentation, reporting, or decodable setup content alone do not create
-solver work. Compatible state/demand changes reuse installed prepared geometry, while incompatible
-content facts remove stale physical state before asynchronous preparation. Pose-only projection
-discovers candidates directly from `WorldState` and `SpatialScene`; no synchronized body-ID mirror
-or stateful simulation owner exists.
+1. **Adding a server message flow**: Decode in `holtburger-protocol` $\rightarrow$ mutate and emit
+   a `WorldEvent` in `holtburger-world` $\rightarrow$ handle runtime/workflow consequences in
+   `client/session/messages.rs` $\rightarrow$ project semantic deltas in
+   `emit_world_view_projection` (`client/mod.rs`) and include persistent character state on
+   `ClientApplicationSnapshot`.
+2. **Adding a client command**: Add a typed `ClientCommand` variant in `client/session/types.rs`
+   $\rightarrow$ validate lifecycle/busy admission in `client/session/commands.rs` or its domain
+   submodule $\rightarrow$ store any transient tracking inside `CharacterSessionState` or
+   `PortalResyncState` so retirement resets it automatically.
+3. **Documenting edge cases**: Place protocol, timing, and retail quirks directly on the enforcing
+   Rust types and functions rather than appending PR-level transcripts to this overview.
 
 ## Dependencies
 
-- **`holtburger-session`**: Network tracking, transport, and packet parsing.
-- **`holtburger-world`**: The World State graph and entity tracking.
-- **`holtburger-protocol`**: Binary packet structures.
-- **`holtburger-dat`**: File access (DATs).
-
-For controlled grounded characters, simulation samples an optional local locomotion order before
-solving, using resolved manual/autonomous intent rather than raw keys or accepted velocity. It
-supplies that order only to the local body's presentation; remotes continue to supply accepted
-supported motion. World owns support/charge/action precedence. Intent ends on stop or expiry, with
-no separate presentation lease or retained controller flag. Free-flight transactions skip this
-character-only preparation and do not acquire motion-table/run-stat requirements.
-
-### Equipment changes
-
-`client/equipment_plan.rs` resolves a single requested assignment through world-owned public equipment facts and allocates every displaced item before mutation. Callers supply per-outgoing-item preferred containers and an explicit fallback order. Core validates currently carried real containers and reserves capacity across all removals; it does not choose inventory organization policy. The incoming item’s future free slot is not credited.
-
-The entity snapshot/delta feed also carries world's equipped `ProjectileSupply`, independently
-of attack timing and engagement state. Core appraises an unresolved projectile source once per
-continuous pending source; a fresh entity description permits a new request. Rejected or unanswered
-appraisals leave supply unknown without repeated requests. Frontends consume the published supply
-at their display cadence; they do not classify weapons or subtract locally for shots.
-
-`client/equipment_runtime.rs` owns combat staging, ordered unequips, and wield completion for all command consumers. It waits for accepted storage/equipment state between requests, revalidates the remaining plan, and stops on rejection, lifecycle invalidation, or timeout without rollback. Manual combat commands cancel pending restoration. Timeout reports uncertainty because the outstanding wire request may still complete. Ownership is released when sending the final request; wield confirmation is needed only when combat restoration depends on it. Frontends submit equipment intent and do not maintain a second equipment executor. Placement policy is retained across peace prerequisites and execution revalidation. H3D learns each item’s last observed owned container from accepted entity facts and persists that history in a character settings section; equipped items and recovery gaps retain their history. Automatic overflow becomes the newly remembered container.
-
-`client/salvage.rs` evaluates ordered whole-item batches and compares world-produced review
-inputs again before dispatch. Read-only discovery/preview and guarded submission have correlated
-results; host command enqueue acceptance is not a dispatch receipt. Salvage does not acquire a
-completion-wait busy operation: server yield messages are optional, grouped by skill, and have no
-request identity. `messages.rs` publishes these as Salvaging chat, while inventory updates remain
-authoritative. Frontends own their drafts and confirmations. Mixed-material batches are supported.
-
-`client/inventory_plan.rs` is the shared identity-based evaluator for item insertion,
-append, merge-only targets, splits, equipment targets, pickup, ground drop, give, and
-native pack exchanges. Explicit ammo-slot drops top up matching equipped stacks before
-replacement planning, leaving any remainder in the source slot; full matching stacks
-reject instead of replacing. Preview and submission share this decision. Pickup
-admission comes from world's `pickup_candidate`.
-Stack pickups first seek a carried stack that can absorb the entire quantity, in
-main-pack then native pack/item order; otherwise they allocate a slot for the whole
-source without partially merging. Container preference affects only slot allocation;
-ground drop and give support owned carried and equipped sources. Give recipient
-admission comes from world's coarse `give_recipient_candidate`; the resolved plan
-carries the authoritative source quantity in the signed wire range. `inventory_storage.rs`
-shares current-capacity allocation between pickup, splits, and equipment
-replacement; none credits a slot that a later action might free.
-`inventory_runtime.rs` sends standalone requests without a completion-wait lock.
-Only dependent pack exchanges and equipment sequences exclude competing local
-inventory/combat requests until their final request is sent. Pack exchange confirms
-its first move and revalidates the target before sending the second. Frontend sort policy selects the semantic intent; core
-has no knowledge of display sorting or pointer gestures. Existing action feedback
-reports failures, while accepted world state drives frontend contents and equipment.
-
-### Contracts journal
-
-World classifies incremental membership activity once. Core forwards
-`ContractMembershipChanged` only while InWorld, keeping entering-world login
-hydration silent. Full-table publication, recovery reads, and retirement do not
-create or replay activity. Frontends choose notification wording and presentation;
-the Journal panel is not a notification owner.
-
-`client/contracts.rs` initializes an empty character registry before login
-trackers, publishes world's resolved snapshots for events and recovery, and
-clears facts on character retirement. Tracker events use existing character
-identity/sequence admission; portals retain the registry. `AbandonContract`
-requires an active in-world character and retained ID, sends the protocol action,
-and leaves membership unchanged until a server deletion. There is no pending
-mutation, rollback, timeout, or retry owner for this command.
+- **`holtburger-session`**: Encrypted UDP transport and packet framing.
+- **`holtburger-world`**: Authoritative entity graph, player model, and canonical `SpatialScene`.
+- **`holtburger-protocol`**: Wire message and game-action codecs.
+- **`holtburger-dat`** & **`holtburger-common`**: Static asset codecs and shared primitives.

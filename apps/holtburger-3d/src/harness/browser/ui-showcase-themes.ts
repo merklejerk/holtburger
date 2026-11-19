@@ -2,13 +2,11 @@ import { onDestroy } from "svelte";
 import {
 	UiThemeSelection,
 	type UiThemeSettings,
-} from "../../app/ui-theme-selection";
+} from "../../app/theme/ui-theme-selection";
 import { uiThemes } from "../../app/mount";
 import steelUrl from "./themes/steel.css?url&no-inline";
 import opaqueUrl from "./themes/opaque.css?url&no-inline";
-import { withBundledUiThemes } from "../../app/ui-bundled-themes";
-
-export { steelUrl };
+import { withBundledUiThemes } from "../../app/theme/ui-bundled-themes";
 
 /** Extra diagnostic stylesheet; shipped choices come from the production composition. */
 const fixtureThemeTransport = withBundledUiThemes({

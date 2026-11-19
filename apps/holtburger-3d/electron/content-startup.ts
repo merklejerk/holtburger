@@ -5,7 +5,7 @@ import type {
 	ContentFailure,
 	ContentStartupPhase,
 	ContentStartupSnapshot,
-} from "../src/app/content-startup-contract.js";
+} from "../src/app/desktop/content-startup-contract.js";
 
 /** One process receives one explicit selection or a bounded discovery root. */
 export type HostContentSelection =

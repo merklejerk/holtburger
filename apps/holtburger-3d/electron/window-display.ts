@@ -1,12 +1,12 @@
 import type { BaseWindow } from "electron";
-import { APP_WINDOW_TUNING } from "../src/app/app-tuning.js";
+import { APP_WINDOW_TUNING } from "../src/app/desktop/app-tuning.js";
 import {
 	WINDOW_CONTENT_PRESETS,
 	type WindowContentSize,
 	type WindowDisplayRequest,
 	type WindowDisplaySnapshot,
-} from "../src/app/window-display-contract.js";
-import type { ClientWindowSettings } from "../src/app/window-settings-contract.js";
+} from "../src/app/desktop/window-display-contract.js";
+import type { ClientWindowSettings } from "../src/app/desktop/window-settings-contract.js";
 
 /** Native operations needed by the app-local display owner, also usable by focused probes. */
 type DisplayWindow = Pick<

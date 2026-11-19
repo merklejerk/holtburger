@@ -5,12 +5,12 @@ import {
 	changeNativeFullscreen,
 	restoreWindowGeometry,
 } from "./window-display";
-import { APP_WINDOW_TUNING } from "../src/app/app-tuning";
+import { APP_WINDOW_TUNING } from "../src/app/desktop/app-tuning";
 import {
 	WINDOW_CONTENT_PRESETS,
 	type WindowDisplayRequest,
-} from "../src/app/window-display-contract";
-import { clientWindowSettingsSchema } from "../src/app/window-settings-contract";
+} from "../src/app/desktop/window-display-contract";
+import { clientWindowSettingsSchema } from "../src/app/desktop/window-settings-contract";
 
 const NATIVE_DECORATION_HEIGHT = 30;
 

@@ -136,20 +136,22 @@ pub enum EntityDescription {
         object_flags: u32,
         /// Received template identity consumed by selected diagnostics and inventory grouping.
         wcid: Option<u32>,
-        /// Server-maintained coin total across the player's packs, unknown before receipt.
-        #[serde(rename = "pyrealBalance")]
-        pyreal_balance: Option<u32>,
-        /// Local player's encumbrance/capacity ratio for inventory presentation; absent until
-        /// the root roster and required world inputs arrive, and on non-player entities.
-        burden: Option<f32>,
-        /// Local-player sigil activation for equipment UI; absent before PlayerDescription
-        /// and on non-player entities. Consumers never interpret raw property bits.
-        #[serde(rename = "aetheriaActivation")]
-        aetheria_activation: Option<crate::equipment::AetheriaActivation>,
         /// Consumed by the effective health subscription controller.
         #[serde(rename = "healthQuery")]
         health_query: HealthQueryEligibility,
     },
+}
+
+/// Local-player aggregate inventory/equipment facts, kept off per-entity descriptions.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlayerEntitySummary {
+    /// Server-maintained coin total across the player's packs, unknown before receipt.
+    pub pyreal_balance: Option<u32>,
+    /// Local player's encumbrance/capacity ratio; absent until root roster and inputs arrive.
+    pub burden: Option<f32>,
+    /// Local-player sigil activation for equipment UI; absent before PlayerDescription.
+    pub aetheria_activation: Option<crate::equipment::AetheriaActivation>,
 }
 
 /// Accepted storage relationship exposed to identity and inventory consumers.
@@ -331,7 +333,7 @@ pub(crate) fn lock_tool_facts(
     wcid: Option<u32>,
 ) -> Option<LockToolFacts> {
     use holtburger_common::properties::{ItemType, ObjectDescriptionFlag};
-    // ACE Lockpick.cs supplies this specific flag; it takes precedence over broad item bits.
+    // Server lockpick logic supplies this specific flag; it takes precedence over broad item bits.
     if flags.contains(ObjectDescriptionFlag::LOCKPICK) {
         Some(LockToolFacts::Lockpick {
             bonus: wcid.and_then(holtburger_content::lockpick_bonus),
@@ -414,7 +416,7 @@ pub struct ClientEntityFacts {
     pub storage: StorageCoverage,
 }
 
-/// ACE Player_Combat.cs CheckPKStatusVsTarget permits harmful player actions for matching
+/// Retail PvP combat rules permit harmful player actions for matching
 /// PK/PKLite types, or either Free participant. Missing player identity cannot establish a threat.
 fn player_pvp_threat(player: ObjectDescriptionFlag, target: ObjectDescriptionFlag) -> bool {
     if !player.contains(ObjectDescriptionFlag::PLAYER)
@@ -429,6 +431,24 @@ fn player_pvp_threat(player: ObjectDescriptionFlag, target: ObjectDescriptionFla
 }
 
 impl WorldState {
+    /// Local-player aggregate inventory/equipment facts, kept off per-entity descriptions.
+    pub fn player_entity_summary(&self) -> PlayerEntitySummary {
+        if self.player.guid == Guid::NULL {
+            return PlayerEntitySummary::default();
+        }
+        PlayerEntitySummary {
+            pyreal_balance: self
+                .player_int_property(PropertyInt::CoinValue)
+                .map(|value| u32::try_from(value).expect("coin balance must be non-negative")),
+            burden: if self.storage_coverage(self.player.guid) == Some(RosterCoverage::Announced) {
+                self.player_burden()
+            } else {
+                None
+            },
+            aetheria_activation: self.player_aetheria_activation(),
+        }
+    }
+
     /// Retained visible entities plus owned declarations and the established player root.
     pub fn client_entity_guids(&self) -> BTreeSet<Guid> {
         let mut guids: BTreeSet<_> = self
@@ -544,21 +564,6 @@ impl WorldState {
                     equipment_cantrip,
                     object_flags: entity.flags.bits(),
                     wcid: entity.wcid,
-                    pyreal_balance: entity.get_int_prop(PropertyInt::CoinValue).map(|value| {
-                        u32::try_from(value).expect("coin balance must be non-negative")
-                    }),
-                    burden: if guid == self.player.guid
-                        && self.storage_coverage(guid) == Some(RosterCoverage::Announced)
-                    {
-                        self.player_burden()
-                    } else {
-                        None
-                    },
-                    aetheria_activation: if guid == self.player.guid {
-                        self.player_aetheria_activation()
-                    } else {
-                        None
-                    },
                     health_query: if creature == Some(true) {
                         HealthQueryEligibility::Eligible
                     } else {
@@ -602,7 +607,7 @@ impl WorldState {
             crate::ResolvedScenePlacement::Unresolved(_) => SceneAvailability::Unavailable,
             _ => SceneAvailability::Available,
         };
-        // ACE.Entity/Enum/ItemType.cs defines Creature = 0x10; disposition is independent.
+        // Public ItemType::CREATURE is bit 0x10; disposition is independent.
         // Selection rays also reject UiHidden. Storage/attachments are not independent targets.
         let targeting = match entity.zip(creature) {
             Some((entity, is_creature))
@@ -1400,6 +1405,10 @@ mod tests {
         let mut entity = Entity::new(player, "Player".into(), Default::default());
         entity.set_int_prop(PropertyInt::ItemType, ItemType::CREATURE.bits() as i32);
         world.entities.insert(entity);
+        assert_eq!(
+            world.player_entity_summary(),
+            PlayerEntitySummary::default()
+        );
         assert!(matches!(
             world
                 .client_entity_facts(player)
@@ -1409,9 +1418,6 @@ mod tests {
             EntityDescription::Known {
                 object_flags: 0,
                 wcid: None,
-                pyreal_balance: None,
-                burden: None,
-                aetheria_activation: None,
                 ..
             }
         ));
@@ -1420,17 +1426,7 @@ mod tests {
             .get_mut(player)
             .unwrap()
             .set_int_prop(PropertyInt::CoinValue, 12345);
-        assert!(matches!(
-            world
-                .client_entity_facts(player)
-                .unwrap()
-                .unwrap()
-                .description,
-            EntityDescription::Known {
-                pyreal_balance: Some(12345),
-                ..
-            }
-        ));
+        assert_eq!(world.player_entity_summary().pyreal_balance, Some(12345));
     }
 
     #[test]
@@ -1540,9 +1536,6 @@ mod tests {
                 object_flags: holtburger_common::properties::ObjectDescriptionFlag::ATTACKABLE
                     .bits(),
                 wcid: Some(123),
-                pyreal_balance: None,
-                burden: None,
-                aetheria_activation: None,
                 health_query: HealthQueryEligibility::Ineligible,
             }
         );
@@ -1594,9 +1587,6 @@ mod tests {
                 consumable: None,
                 object_flags: 0,
                 wcid: None,
-                pyreal_balance: None,
-                burden: None,
-                aetheria_activation: None,
                 health_query: HealthQueryEligibility::Eligible,
             }
         );

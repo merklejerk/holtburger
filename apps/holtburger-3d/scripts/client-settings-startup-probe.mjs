@@ -122,7 +122,7 @@ try {
 			const themes = window.holtburgerThemes;
 			if (!themes || !Array.isArray(await themes.list())) throw new Error("Theme discovery preload bridge is missing");
 			const { createDefaultClientUserSettings } =
-				await import("/src/client/client-settings-defaults.ts");
+				await import("/src/client/settings/settings-defaults.ts");
 			const defaults = createDefaultClientUserSettings(
 				{ width: window.innerWidth, height: window.innerHeight }, 0
 			);

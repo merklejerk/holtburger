@@ -103,6 +103,34 @@ fn application_snapshot_restores_the_character_after_event_lag() {
         | holtburger_common::properties::EnchantmentTypeFlags::ADDITIVE
         | holtburger_common::properties::EnchantmentTypeFlags::BENEFICIAL)
         .bits();
+    let resolved_enchantments = holtburger_world::enchantments::ResolvedEnchantments {
+        cooldowns: Vec::new(),
+        instances: vec![holtburger_world::enchantments::ResolvedEnchantment {
+            key: holtburger_world::enchantments::EnchantmentKey {
+                spell_id: 123,
+                layer: 0,
+            },
+            spell_category: 7,
+            power_level: 5,
+            kind: holtburger_world::enchantments::EnchantmentKind::Beneficial,
+            remaining_seconds: None,
+            stat_mod_type: effect_flags,
+            stat_mod_key: 0,
+            stat_mod_value: 2.0,
+        }],
+        groups: vec![holtburger_world::enchantments::EnchantmentLayerGroup {
+            affected_stat: holtburger_world::enchantments::AffectedStat::Armor,
+            stat_label: "Armor".into(),
+            operation: holtburger_world::enchantments::EnchantmentOperation::Additive,
+            channel: holtburger_world::enchantments::EnchantmentChannel::Ordinary,
+            spell_category: 7,
+            effective: holtburger_world::enchantments::EnchantmentKey {
+                spell_id: 123,
+                layer: 0,
+            },
+            overridden: Vec::new(),
+        }],
+    };
     let snapshot = ClientApplicationSnapshot {
         barber: Default::default(),
         character_management: holtburger_core::client::types::CharacterManagementState::Idle,
@@ -120,49 +148,9 @@ fn application_snapshot_restores_the_character_after_event_lag() {
         housing: Default::default(),
         connection: None,
         trade: Default::default(),
+        vendor: None,
         known_spells: None,
-        enchantments: Some(
-            holtburger_core::client::types::ClientPlayerEnchantmentsSnapshot {
-                records: vec![holtburger_protocol::messages::magic::Enchantment {
-                    spell_id: 123,
-                    layer: 0,
-                    spell_category: 7,
-                    power_level: 5,
-                    duration: -1.0,
-                    stat_mod_type: effect_flags,
-                    stat_mod_value: 2.0,
-                    ..Default::default()
-                }],
-                resolved: holtburger_world::enchantments::ResolvedEnchantments {
-                    cooldowns: Vec::new(),
-                    instances: vec![holtburger_world::enchantments::ResolvedEnchantment {
-                        key: holtburger_world::enchantments::EnchantmentKey {
-                            spell_id: 123,
-                            layer: 0,
-                        },
-                        spell_category: 7,
-                        power_level: 5,
-                        kind: holtburger_world::enchantments::EnchantmentKind::Beneficial,
-                        remaining_seconds: None,
-                        stat_mod_type: effect_flags,
-                        stat_mod_key: 0,
-                        stat_mod_value: 2.0,
-                    }],
-                    groups: vec![holtburger_world::enchantments::EnchantmentLayerGroup {
-                        affected_stat: holtburger_world::enchantments::AffectedStat::Armor,
-                        stat_name: None,
-                        operation: holtburger_world::enchantments::EnchantmentOperation::Additive,
-                        channel: holtburger_world::enchantments::EnchantmentChannel::Ordinary,
-                        spell_category: 7,
-                        effective: holtburger_world::enchantments::EnchantmentKey {
-                            spell_id: 123,
-                            layer: 0,
-                        },
-                        overridden: Vec::new(),
-                    }],
-                },
-            },
-        ),
+        enchantments: Some(resolved_enchantments.clone()),
         character_options: None,
         combat_mode: CombatMode::NonCombat,
         social_motion_ready: true,
@@ -198,7 +186,6 @@ fn application_snapshot_restores_the_character_after_event_lag() {
     assert_eq!(state.data.level_info.as_ref().unwrap().level, 10);
     assert_eq!(state.data.armor, 20);
     assert!(state.data.resolved_enchantments.is_some());
-    assert_eq!(state.data.player_enchantments[0].spell_id, 123);
     let lines = crate::pages::game::panels::dashboard::tabs::character::render::get_char_tab_lines(
         &state.data,
     );
@@ -217,11 +204,9 @@ fn application_snapshot_restores_the_character_after_event_lag() {
     stale.enchantments = None;
     state.handle_view_event(ClientViewEvent::ApplicationSnapshot(Box::new(stale)));
     assert!(state.data.resolved_enchantments.is_some());
-    assert_eq!(state.data.player_enchantments[0].spell_id, 123);
     assert_eq!(state.data.armor, 20);
     state.handle_view_event(ClientViewEvent::CharacterSheetUpdated(None));
     assert!(state.data.resolved_enchantments.is_none());
-    assert!(state.data.player_enchantments.is_empty());
     assert!(
         result
             .commands

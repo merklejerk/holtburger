@@ -1,7 +1,7 @@
 import { EventEmitter } from "node:events";
 import { describe, expect, it, vi } from "vitest";
 import { observeWindowGeometry } from "./window-geometry";
-import { APP_PERSISTENCE_TUNING } from "../src/app/app-tuning.js";
+import { APP_PERSISTENCE_TUNING } from "../src/app/desktop/app-tuning.js";
 
 describe("surface geometry lifetime", () => {
 	it("captures final source geometry, detaches listeners, and prevents delayed cross-writes", async () => {

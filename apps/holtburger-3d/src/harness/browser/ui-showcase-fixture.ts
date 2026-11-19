@@ -1,11 +1,11 @@
 import type { MapWaypointTarget } from "../../lib/game/map/map-waypoint";
 import { sceneMapPoint } from "../../lib/game/map/map-coordinates";
-import type { ResolvedEnchantments } from "../../client/client-enchantments-contract";
-import type { ClientVital } from "../../client/client-host-contract";
-import type { CharacterSheet } from "../../client/client-character-sheet-contract";
-import type { ClientActionBar } from "../../client/client-action-bar-state";
-import { initialActionBar } from "../../client/client-action-bar-state";
-import { EQUIPMENT_SLOTS } from "../../client/client-inventory-equipment";
+import type { ResolvedEnchantments } from "../../client/magic/enchantments-view";
+import type { ClientVital } from "../../client/session/host-contract";
+import type { CharacterSheet } from "../../client/character/character-sheet-contract";
+import type { ClientActionBar } from "../../client/hud/action-bar-state";
+import { initialActionBar } from "../../client/hud/action-bar-state";
+import { EQUIPMENT_SLOTS } from "../../client/inventory/inventory-equipment";
 
 /** Fixed presentation order shared by controls and initial session vitals. */
 export const SHOWCASE_VITAL_KINDS = ["health", "stamina", "mana"] as const;

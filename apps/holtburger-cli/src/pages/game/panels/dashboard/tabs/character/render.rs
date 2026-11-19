@@ -5,10 +5,9 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{List, ListItem, Paragraph};
 use std::collections::{BTreeMap, HashMap};
 
-use holtburger_common::properties::PropertyFloat;
 use holtburger_core::{ClientProgressionEvaluation, ClientProgressionUnavailable};
 use holtburger_world::enchantments::{
-    AffectedStat, EnchantmentKind, EnchantmentOperation, ResolvedEnchantment,
+    AffectedStat, EnchantmentKind, EnchantmentOperation, ResistanceStat, ResolvedEnchantment,
 };
 use holtburger_world::progression::{ProgressionIntent, ProgressionUnavailable, StatTarget};
 use holtburger_world::stat_breakdown::{AttributeFormulaBreakdown, SkillFormulaBreakdown};
@@ -49,10 +48,9 @@ impl DisplayedEnchantment {
     }
 }
 
-/// Shared stat identity and its TUI rows, including overridden contributions.
-#[derive(Default)]
+/// Shared stat label and its TUI rows, including overridden contributions.
 struct StatEnchantments {
-    name: Option<String>,
+    name: String,
     rows: Vec<DisplayedEnchantment>,
 }
 
@@ -368,7 +366,7 @@ pub fn get_char_tab_lines(data: &GameData) -> Vec<CharTabLine> {
             let section = grouped
                 .entry(group.affected_stat)
                 .or_insert_with(|| StatEnchantments {
-                    name: group.stat_name.clone(),
+                    name: group.stat_label.clone(),
                     rows: Vec::new(),
                 });
             let effective = instances
@@ -537,20 +535,20 @@ pub fn get_char_tab_lines(data: &GameData) -> Vec<CharTabLine> {
         append_stat_enchantments(&mut lines, &mut grouped, AffectedStat::Armor);
 
         let mut resists = vec![
-            (PropertyFloat::ResistSlash, data.resistances.slash),
-            (PropertyFloat::ResistPierce, data.resistances.pierce),
-            (PropertyFloat::ResistBludgeon, data.resistances.bludgeon),
-            (PropertyFloat::ResistFire, data.resistances.fire),
-            (PropertyFloat::ResistCold, data.resistances.cold),
-            (PropertyFloat::ResistAcid, data.resistances.acid),
-            (PropertyFloat::ResistElectric, data.resistances.electric),
-            (PropertyFloat::ResistNether, data.resistances.nether),
+            (ResistanceStat::Slash, data.resistances.slash),
+            (ResistanceStat::Pierce, data.resistances.pierce),
+            (ResistanceStat::Bludgeon, data.resistances.bludgeon),
+            (ResistanceStat::Fire, data.resistances.fire),
+            (ResistanceStat::Cold, data.resistances.cold),
+            (ResistanceStat::Acid, data.resistances.acid),
+            (ResistanceStat::Electric, data.resistances.electric),
+            (ResistanceStat::Nether, data.resistances.nether),
         ];
-        resists.sort_by_key(|a| a.0.to_string());
+        resists.sort_by_key(|a| a.0.float_property().to_string());
 
-        for (prop, val) in resists {
+        for (resistance, val) in resists {
             lines.push(CharTabLine::Stat {
-                label: format!("{:?}", prop),
+                label: format!("{:?}", resistance.float_property()),
                 value: format!("{:.2}", val),
                 formula: None,
                 progression: None,
@@ -560,7 +558,7 @@ pub fn get_char_tab_lines(data: &GameData) -> Vec<CharTabLine> {
             append_stat_enchantments(
                 &mut lines,
                 &mut grouped,
-                AffectedStat::FloatProperty(prop as u32),
+                AffectedStat::Resistance(resistance),
             );
         }
     }
@@ -570,9 +568,9 @@ pub fn get_char_tab_lines(data: &GameData) -> Vec<CharTabLine> {
     // 5. Misc
     if !grouped.is_empty() {
         lines.push(CharTabLine::Header("MISC"));
-        for (affected_stat, section) in grouped {
+        for (_affected_stat, section) in grouped {
             lines.push(CharTabLine::Stat {
-                label: affected_stat_label(affected_stat, section.name.as_deref()),
+                label: section.name,
                 value: String::new(),
                 formula: None,
                 progression: None,
@@ -603,23 +601,6 @@ fn append_stat_enchantments(
 ) {
     if let Some(section) = grouped.remove(&stat) {
         lines.extend(section.rows.into_iter().map(CharTabLine::Enchantment));
-    }
-}
-
-fn affected_stat_label(stat: AffectedStat, name: Option<&str>) -> String {
-    if let Some(name) = name {
-        return name.to_owned();
-    }
-    match stat {
-        AffectedStat::Attribute(key) => format!("Attribute {key}"),
-        AffectedStat::Vital(key) => format!("Vital {key}"),
-        AffectedStat::Skill(key) => format!("Skill {key}"),
-        AffectedStat::IntProperty(key) => format!("Integer property {key}"),
-        AffectedStat::FloatProperty(key) => format!("Float property {key}"),
-        AffectedStat::Armor => "Armor".to_string(),
-        AffectedStat::Damage => "Damage".to_string(),
-        AffectedStat::DamageVariance => "Damage variance".to_string(),
-        AffectedStat::Other(flags, key) => format!("Other effect {flags:#x} / {key}"),
     }
 }
 

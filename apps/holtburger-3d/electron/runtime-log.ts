@@ -1,7 +1,7 @@
 import type {
 	RuntimeLogEntry,
 	RuntimeLogSnapshot,
-} from "../src/app/runtime-log-contract.js";
+} from "../src/app/desktop/runtime-log-contract.js";
 
 const MAX_ENTRIES = 256;
 const MAX_MESSAGE_LENGTH = 4096;

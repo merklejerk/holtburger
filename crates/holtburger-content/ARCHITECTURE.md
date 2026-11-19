@@ -138,8 +138,8 @@ and the frontend stride-one mesh consume it rather than maintaining separate has
 [`src/object_collision.rs`](src/object_collision.rs) resolves each placement's retail collision
 representation for explicit objects, generated scenery, building shells, EnvCell structures, and
 indoor statics: per-part physics BSPs with polygons when any part carries one, otherwise the
-setup's authored cylsphere volumes, otherwise its collision spheres
-(`CPhysicsObj::find_obj_collisions` precedence). Shapes remain shared through the resolved-asset
+setup's authored cylsphere volumes, otherwise its collision spheres (matching retail
+collision-shape precedence). Shapes remain shared through the resolved-asset
 cache while placements retain component-wise SetupModel part scales; volume shapes require the
 uniform whole-object scale retail applies to them. Every placed collider carries a landblock-space
 axis-aligned bounds box for broad-phase rejection and cell-shadow registration, and each placed
@@ -217,7 +217,7 @@ before an entity animating from a table may activate.
 - aperture meshes, draw ranges, batching, atlases, culling trees, or portal traversal policy
 - durable success diagnostics, source-attempt ledgers, or renderer snapshots
 
-`apps/holtburger-3d/src-tauri` owns presentation enrichment and binary landblock layer-bundle
+`apps/holtburger-3d/host` owns presentation enrichment and binary landblock layer-bundle
 production. The browser owns final baked/instanced draw units, runtime visibility, committed
 bounds, and spatial structures.
 

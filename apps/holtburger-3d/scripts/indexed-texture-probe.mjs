@@ -22,13 +22,13 @@ try {
 		appType: "custom",
 	});
 	const object = await server.ssrLoadModule(
-		"/src/lib/game/renderer/webgl2-object-program.ts",
+		"/src/lib/game/renderer/webgl2/webgl2-object-program.ts",
 	);
 	const sky = await server.ssrLoadModule(
-		"/src/lib/game/renderer/webgl2-sky-program.ts",
+		"/src/lib/game/renderer/passes/webgl2-sky-program.ts",
 	);
 	const particle = await server.ssrLoadModule(
-		"/src/lib/game/renderer/webgl2-particle-program.ts",
+		"/src/lib/game/renderer/passes/webgl2-particle-program.ts",
 	);
 	const sources = {
 		object: object.createObjectFragmentShader(false),

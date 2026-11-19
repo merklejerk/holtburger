@@ -89,7 +89,7 @@ impl<'de> Deserialize<'de> for HostCommand {
 pub enum HostEvent {
     ClientBarberUpdated(holtburger_core::client::barber::BarberSnapshot),
     ClientBarberPreview(holtburger_core::client::barber::BarberPreviewResult),
-    ClientCharacterSheetUpdated(Option<Box<crate::client_projection::ClientCharacterSheetWire>>),
+    ClientCharacterSheetUpdated(Option<Box<holtburger_core::ClientCharacterSheet>>),
     ClientProgressionEvaluated {
         #[serde(rename = "requestId")]
         request_id: u32,
@@ -121,12 +121,10 @@ pub enum HostEvent {
     ClientCharacterMotionCapabilitiesUpdated(
         Option<crate::client_projection::ClientCharacterMotionCapabilitiesWire>,
     ),
-    ClientCharacterMotionFeedback(crate::client_projection::ClientCharacterMotionFeedbackWire),
+    ClientCharacterMotionFeedback(holtburger_core::ClientCharacterMotionFeedback),
     ClientLocalMovementDisplaced(()),
     ClientPreciseJumpEvaluation(crate::client_projection::ClientPreciseJumpEvaluationWire),
-    ClientPreciseJumpTransactionFeedback(
-        crate::client_projection::ClientPreciseJumpTransactionFeedbackWire,
-    ),
+    ClientPreciseJumpTransactionFeedback(holtburger_core::PreciseJumpTransactionFeedback),
     ClientSpellInspectionContext(holtburger_core::client::spell_inspection::SpellInspectionContext),
     ClientSpellInspectionResult(holtburger_core::client::spell_inspection::SpellInspectionResult),
     ClientObjectInspectionResult(holtburger_world::inspection::ObjectInspectionResult),
@@ -186,18 +184,6 @@ pub enum HostEvent {
         owner: holtburger_common::Guid,
         cause: holtburger_world::summon::SummonEndCause,
     },
-    /// Entity identity and its latest server-reported health fraction.
-    ClientEntityHealthUpdated {
-        guid: holtburger_common::Guid,
-        #[serde(rename = "worldGeneration")]
-        world_generation: u64,
-        #[serde(rename = "instanceSequence")]
-        instance_sequence: u16,
-        #[serde(rename = "healthFraction")]
-        health_fraction: f32,
-        #[serde(rename = "observedAt")]
-        observed_at: holtburger_core::DynamicEntityHostTime,
-    },
     /// Proven sticky-targeted hostile attack action or offensive player combat action.
     ClientEntityCombatObserved {
         guid: holtburger_common::Guid,
@@ -236,13 +222,7 @@ pub enum HostEvent {
         spell_ids: Vec<u32>,
     },
     ClientPlayerEnchantmentsUpdated(holtburger_world::enchantments::ResolvedEnchantments),
-    ClientCharacterPreferencesUpdated {
-        appearance: crate::client_projection::ClientAppearanceOptions,
-        gameplay: crate::client_gameplay::ClientGameplayPreferences,
-        party: crate::client_party::ClientPartyPreferences,
-        friends: crate::client_friends::ClientFriendsPreferences,
-        allegiance: crate::client_allegiance::ClientAllegiancePreferences,
-    },
+    ClientCharacterPreferencesUpdated(crate::client_projection::ClientCharacterPreferences),
     /// Partial allegiance publication.
     ClientAllegianceUpdated {
         allegiance: crate::client_allegiance::ClientAllegianceSnapshot,
@@ -260,7 +240,7 @@ pub enum HostEvent {
     ClientContractMembershipChanged(holtburger_world::state::contracts::ContractMembershipChange),
     /// Current friend list projection.
     ClientFriendsUpdated {
-        friends: Option<crate::client_friends::ClientFriendsSnapshot>,
+        friends: Option<holtburger_world::state::friends::FriendsState>,
     },
     ClientPartyUpdated {
         party: Option<crate::client_party::ClientPartySnapshot>,
@@ -702,19 +682,6 @@ impl ClientEventSink for StdioEventSink {
                 owner,
                 cause,
             },
-            crate::client_projection::ClientHostEvent::EntityHealthUpdated {
-                guid,
-                world_generation,
-                instance_sequence,
-                health_fraction,
-                observed_at,
-            } => HostEvent::ClientEntityHealthUpdated {
-                guid,
-                world_generation,
-                instance_sequence,
-                health_fraction,
-                observed_at,
-            },
             crate::client_projection::ClientHostEvent::EntityCombatObserved {
                 guid,
                 world_generation,
@@ -756,19 +723,9 @@ impl ClientEventSink for StdioEventSink {
             crate::client_projection::ClientHostEvent::PlayerEnchantmentsUpdated(resolved) => {
                 HostEvent::ClientPlayerEnchantmentsUpdated(resolved)
             }
-            crate::client_projection::ClientHostEvent::CharacterPreferencesUpdated {
-                appearance,
-                gameplay,
-                party,
-                friends,
-                allegiance,
-            } => HostEvent::ClientCharacterPreferencesUpdated {
-                appearance,
-                gameplay,
-                party,
-                friends,
-                allegiance,
-            },
+            crate::client_projection::ClientHostEvent::CharacterPreferencesUpdated(preferences) => {
+                HostEvent::ClientCharacterPreferencesUpdated(preferences)
+            }
             crate::client_projection::ClientHostEvent::AllegianceUpdated { allegiance } => {
                 HostEvent::ClientAllegianceUpdated { allegiance }
             }
@@ -1669,23 +1626,31 @@ mod tests {
         let request = rmp_serde::to_vec_named(&serde_json::json!({
             "kind": "request",
             "id": 1,
-            "command": { "command": "equip_client_item", "guid": 91, "alternate": true, "storage": { "preferred": { "92": 7 }, "fallback": [1, 7] } },
+            "command": {
+                "command": "submit_client_inventory",
+                "intent": { "item": 91, "target": { "kind": "equip-preferred", "alternate": true } },
+                "storage": { "preferred": { "92": 7 }, "fallback": [1, 7] }
+            },
         }))
         .unwrap();
         let mut reader = Cursor::new(framed_payload(request));
         let Some(InboundFrame::Request {
             command:
-                HostCommand::Client(ClientHostCommand::EquipClientItem {
-                    guid,
-                    alternate: true,
-                    storage,
-                }),
+                HostCommand::Client(ClientHostCommand::SubmitClientInventory { intent, storage }),
             ..
         }) = read_frame(&mut reader).unwrap()
         else {
             panic!("equipment request did not decode into the client command");
         };
-        assert_eq!(guid, holtburger_common::Guid(91));
+        assert_eq!(
+            intent,
+            holtburger_core::client::inventory_plan::InventoryIntent {
+                item: holtburger_common::Guid(91),
+                target: holtburger_core::client::inventory_plan::InventoryTarget::EquipPreferred {
+                    alternate: true,
+                },
+            }
+        );
         assert_eq!(
             storage.preferred[&holtburger_common::Guid(92)],
             holtburger_common::Guid(7)
@@ -1735,8 +1700,11 @@ mod tests {
         for key in ["01", "0", "invalid", "4294967296"] {
             let request = rmp_serde::to_vec_named(&serde_json::json!({
                 "kind": "request", "id": 1,
-                "command": { "command": "equip_client_item", "guid": 91, "alternate": false,
-                    "storage": { "preferred": { key: 7 }, "fallback": [1] } },
+                "command": {
+                    "command": "submit_client_inventory",
+                    "intent": { "item": 91, "target": { "kind": "equip-preferred", "alternate": false } },
+                    "storage": { "preferred": { key: 7 }, "fallback": [1] }
+                },
             }))
             .unwrap();
             let mut reader = Cursor::new(framed_payload(request));
@@ -1830,6 +1798,21 @@ mod tests {
             panic!("client chat did not decode into the client inventory");
         };
         assert_eq!(message, "Hello world");
+
+        let abandon = rmp_serde::to_vec_named(&serde_json::json!({
+            "kind": "request",
+            "id": 4,
+            "command": { "command": "abandon_client_contract", "id": 99 },
+        }))
+        .unwrap();
+        let mut reader = Cursor::new(framed_payload(abandon));
+        assert!(matches!(
+            read_frame(&mut reader).unwrap(),
+            Some(InboundFrame::Request {
+                command: HostCommand::Client(ClientHostCommand::AbandonClientContract { id: 99 }),
+                ..
+            })
+        ));
     }
 
     #[test]

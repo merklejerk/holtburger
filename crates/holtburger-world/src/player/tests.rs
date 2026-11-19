@@ -424,7 +424,7 @@ fn skill_breakdown_reconciles_formula_bonuses_and_selected_modifiers() {
 }
 
 #[test]
-fn stat_mutation_events_store_the_same_breakdowns_as_cached_values() {
+fn stat_mutations_store_the_same_breakdowns_as_cached_values() {
     use super::mutations::{SkillUpdateParams, VitalUpdateParams};
     use crate::stat_breakdown::SkillFormulaBreakdown;
     use holtburger_dat::file_type::XpTable;
@@ -433,45 +433,38 @@ fn stat_mutation_events_store_the_same_breakdowns_as_cached_values() {
     let xp_table = XpTable::default();
     let skill_table = test_skill_table();
     let vital_table = SecondaryAttributeTable::synthetic();
-    let mut events = Vec::new();
     for (attribute, start) in [
         (stats::AttributeType::StrengthAttr, 90),
         (stats::AttributeType::CoordinationAttr, 90),
         (stats::AttributeType::EnduranceAttr, 100),
     ] {
-        player.update_attribute(attribute as u32, 0, start, 0, &xp_table, &mut events);
+        player.update_attribute(attribute as u32, 0, start, 0, &xp_table);
         let cached = &player.attributes[&attribute];
         assert_eq!(cached.current, cached.breakdown.finalization.result);
     }
-    player.update_vital(
-        VitalUpdateParams {
-            vital_id: stats::VitalType::Health as u32,
-            ranks: 1,
-            start: 100,
-            current: 150,
-            xp: 0,
-            xp_table: &xp_table,
-            secondary_attribute_table: &vital_table,
-        },
-        &mut events,
-    );
+    player.update_vital(VitalUpdateParams {
+        vital_id: stats::VitalType::Health as u32,
+        ranks: 1,
+        start: 100,
+        current: 150,
+        xp: 0,
+        xp_table: &xp_table,
+        secondary_attribute_table: &vital_table,
+    });
     let health = &player.vitals[&stats::VitalType::Health];
     assert_eq!(health.base, 151);
     assert_eq!(health.buffed_max, health.breakdown.finalization.result);
     assert_eq!(health.breakdown.formula.as_ref().unwrap().base_result, 50);
 
-    player.update_skill(
-        SkillUpdateParams {
-            skill_id: stats::SkillType::HeavyWeapons as u32,
-            ranks: 10,
-            status: stats::TrainingLevel::Trained as u32,
-            init: 0,
-            xp: 0,
-            xp_table: &xp_table,
-            calculation: test_skill_context(&skill_table),
-        },
-        &mut events,
-    );
+    player.update_skill(SkillUpdateParams {
+        skill_id: stats::SkillType::HeavyWeapons as u32,
+        ranks: 10,
+        status: stats::TrainingLevel::Trained as u32,
+        init: 0,
+        xp: 0,
+        xp_table: &xp_table,
+        calculation: test_skill_context(&skill_table),
+    });
     let skill = &player.skills[&stats::SkillType::HeavyWeapons];
     assert_eq!(skill.base, 70);
     assert_eq!(skill.current, skill.breakdown.finalization.result);
@@ -479,11 +472,6 @@ fn stat_mutation_events_store_the_same_breakdowns_as_cached_values() {
         skill.breakdown.formula,
         SkillFormulaBreakdown::Applied(_)
     ));
-    let event_skill = events.iter().find_map(|event| match event {
-        WorldEvent::SkillUpdated(updated) => Some(updated),
-        _ => None,
-    });
-    assert_eq!(event_skill, Some(skill));
 }
 
 #[test]
@@ -522,11 +510,11 @@ fn overridden_enchantment_change_publishes_breakdown_without_value_change() {
             .len(),
         1
     );
-    assert!(events.iter().any(|event| matches!(
-        event,
-        WorldEvent::DerivedStatsUpdated(stats)
-            if stats.attributes.iter().any(|value| value == attribute)
-    )));
+    assert!(
+        events
+            .iter()
+            .any(|event| matches!(event, WorldEvent::DerivedStatsUpdated))
+    );
 }
 
 #[test]
@@ -1066,13 +1054,13 @@ fn test_magic_purge_bad_enchantments_preserves_vitae() {
     assert!(
         events
             .iter()
-            .any(|e| matches!(e, WorldEvent::PlayerEnchantmentsUpdated { .. }))
+            .any(|e| matches!(e, WorldEvent::PlayerEnchantmentsUpdated))
     );
-    let derived_vitae = events.iter().find_map(|e| match e {
-        WorldEvent::DerivedStatsUpdated(data) => Some(data.vitae),
-        _ => None,
-    });
-    assert_eq!(derived_vitae, Some(0.95));
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, WorldEvent::DerivedStatsUpdated))
+    );
 }
 
 #[test]
@@ -1595,11 +1583,11 @@ fn test_magic_purge_enchantments_preserves_vitae() {
     assert!(state.player.enchantments.iter().any(|e| e.spell_id == 666));
     assert_eq!(state.player_vitae(), 0.88);
 
-    let latest_derived_vitae = events.iter().rev().find_map(|e| match e {
-        WorldEvent::DerivedStatsUpdated(data) => Some(data.vitae),
-        _ => None,
-    });
-    assert_eq!(latest_derived_vitae, Some(0.88));
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, WorldEvent::DerivedStatsUpdated))
+    );
 }
 
 #[test]

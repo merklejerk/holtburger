@@ -6,7 +6,7 @@ use holtburger_common::properties::{
 use serde::{Deserialize, Serialize};
 
 /// Retail vendor acceptance bounds apply to unit value, not the whole stack.
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VendorValueLimits {
     /// Inclusive lower bound; `None` represents the wire's unbounded sentinel.
     pub minimum: Option<u32>,

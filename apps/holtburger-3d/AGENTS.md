@@ -35,7 +35,7 @@ target.
   appropriate shared runtime subsystem.
 - Keep the host sidecar physically mode-specific: shared static content belongs
   in `host/src/shared_host_content.rs`, Explorer authority in
-  `host/src/explorer_host.rs`, client authority in `host/src/client_runtime.rs`,
+  `host/src/explorer_host.rs`, client authority in `host/src/client_runtime/`,
   and the narrow client wire projection in `host/src/client_projection.rs`.
   Do not reintroduce a universal host sink, authority trait, or command
   dispatcher. Non-colliding spatial projection helpers belong to
@@ -72,7 +72,7 @@ target.
 - Reuse existing components and shared styles for tabs, buttons, inputs, dialogs,
   windows, and other common controls. Start with `src/app/ui-base.css` and its
   theme classes (such as `ui-tabs`, `ui-tab`, `ui-button`, and `ui-input`), plus
-  existing component shells such as `src/app/UiDialog.svelte`. Keep feature CSS
+  existing component shells such as `src/app/ui/UiDialog.svelte`. Keep feature CSS
   focused on feature-specific layout rather than duplicating common chrome,
   control states, typography, colors, or spacing conventions.
 - Reuse behavior as well as appearance: modal focus, keyboard ownership,
@@ -87,14 +87,14 @@ target.
   focus/blur or return-to-game workarounds for ordinary controls.
 - Modal prompts cancel on backdrop clicks by default. Use `UiDialog` for ordinary
   prompts; custom native dialogs and panel-scoped overlays share
-  `src/app/dialog-backdrop-dismiss.ts`. Cancellation must use the feature's
+  `src/app/ui/dialog-backdrop-dismiss.ts`. Cancellation must use the feature's
   existing callback. Opt out explicitly when an answer is already being submitted,
   rather than deriving backdrop policy from whether a prompt is destructive or typed.
-- Client panel tab strips use `src/app/UiTabs.svelte`, which owns tab semantics,
+- Client panel tab strips use `src/app/ui/UiTabs.svelte`, which owns tab semantics,
   keyboard navigation, equal-width controls, and the gap before content. Use
   `ui-body` once on the panel's outer content wrapper for the standard inset;
   do not add a second padding layer to a nested scroll area or tab body.
-  Feature owners retain selection. Use `src/app/UiTabPanel.svelte` for content:
+  Feature owners retain selection. Use `src/app/ui/UiTabPanel.svelte` for content:
   inactive tabs stay mounted and hidden/inert, retaining drafts and scrolling.
   Its default scroll area fits within `ui-tabbed-panel`; canvas or nested scroll
   layouts set `scroll={false}` and own their internal layout.
@@ -155,7 +155,7 @@ loopback port by default; pass `--vite-port 1432` when a deterministic isolated
 port is required for a recorded run or when another worktree is active. The
 Electron app launchers follow the same policy; use
 `npm run dev:client -- --vite-port 1432` for an explicit client port. In client
-mode, `--port` continues to mean the ACE server port.
+mode, `--port` continues to mean the game server port.
 
 ### Keep Verification Scoped
 
@@ -422,8 +422,9 @@ and measure how much content is affected before changing anything.
 
 ## Frontend Tuning Tests
 
-**Hard rule: changing only a value in `frontend-tuning.ts`, `client-tuning.ts`, or
-`explorer-tuning.ts` must never require editing a test.** These files contain knobs intended for
+**Hard rule: changing only a value in `src/lib/frontend-tuning.ts`,
+`src/client/settings/tuning.ts`, or `src/explorer/explorer-tuning.ts` must never
+require editing a test.** These files contain knobs intended for
 routine adjustment, not constants whose current values are behavioral invariants.
 
 - Never copy a tuning value into a test as a literal or assert that a knob still equals its current

@@ -1,145 +1,142 @@
 <script lang="ts">
-	import { observeEntitySelectionColors } from "../app/entity-selection-theme";
+	import { observeEntitySelectionColors } from "../app/theme/entity-selection-theme";
 	import {
 		retainRendererFailure,
 		retainStartupFailure,
-	} from "../app/app-failure-report";
-	import { ClientSummonPresentation } from "./client-summon-presentation";
-	import { clientNativePerformance } from "../app/native-performance";
-	import { PerformanceSession } from "../app/performance-session";
+	} from "../app/desktop/app-failure-report";
+	import { ClientSummonPresentation } from "./combat/summon-presentation";
+	import { clientNativePerformance } from "../app/performance/native-performance";
+	import { PerformanceSession } from "../app/performance/performance-session";
 	import {
 		statArtworkServices,
 		type StatArtworkServices,
-	} from "./client-stat-artwork";
+	} from "./character/stat-artwork";
 	import { type InputPlatform } from "../lib/input/input-platform";
 
-	import { applyUiScale } from "../app/ui-scale";
-	import UiTooltipHost from "../app/UiTooltipHost.svelte";
+	import { applyUiScale } from "../app/theme/ui-scale";
+	import UiTooltipHost from "../app/ui/UiTooltipHost.svelte";
 	import {
 		ClientRestPostureController,
 		REST_POSTURE_LABELS,
 		handleRestPostureKeydown,
-	} from "./client-rest-posture-controller";
+	} from "./combat/rest-posture-controller";
 	import { formatError } from "../lib/format-error";
-	import { clientMinimapLandmark } from "./client-minimap-policy";
+	import { clientMinimapLandmark } from "./hud/minimap-policy";
 	import { launcherTransport } from "../launcher/launcher-transport";
 	import type {
 		ClientGameplayOption,
 		ClientGameplayPreferences,
-	} from "./client-gameplay-options-contract";
+	} from "./session/host-contract";
 	import type {
 		UiThemeSelection,
 		UiThemeSettings,
-	} from "../app/ui-theme-selection";
-	import { bindClientAudioForeground } from "./client-audio-foreground";
-	import ClientMusicControls from "./ClientMusicControls.svelte";
-	import { ClientTitleMusic, titleMusicUrl } from "./client-title-music";
-	import ClientDisplayConfirmation from "./ClientDisplayConfirmation.svelte";
-	import ClientPregameSettings from "./ClientPregameSettings.svelte";
-	import { choosePregameLocation } from "./client-pregame-tuning";
+	} from "../app/theme/ui-theme-selection";
+	import { bindClientAudioForeground } from "./settings/audio-foreground";
+	import ClientMusicControls from "./settings/ClientMusicControls.svelte";
+	import { ClientTitleMusic, titleMusicUrl } from "./pregame/title-music";
+	import ClientDisplayConfirmation from "./settings/ClientDisplayConfirmation.svelte";
+	import ClientPregameSettings from "./pregame/ClientPregameSettings.svelte";
+	import { choosePregameLocation } from "./pregame/pregame-tuning";
 	import PowerIcon from "../assets/icons/hud-power.svg?component";
-	import { provideItemCooldowns } from "../app/item-cooldowns.svelte";
+	import { provideItemCooldowns } from "./widgets/item-cooldowns.svelte";
 	import "./client-canvas.css";
-	import { persistPlayerVisualCapture } from "./client-visual-capture";
-	import type { ClientVisualCacheTransport } from "./client-visual-cache-transport";
-	import { ClientFacingInputDispatch } from "./client-facing-input-dispatch";
-	import type { ClientMouseMovementInput } from "./client-viewport-mouse-controller";
-	import { loadSoulEmotes } from "./client-soul-emotes";
-	import { ClientEmoteController } from "./client-emote-controller";
+	import { persistPlayerVisualCapture } from "./character/visual-capture";
+	import type { ClientVisualCacheTransport } from "./character/visual-cache-transport";
+	import { ClientFacingInputDispatch } from "./session/facing-input-dispatch";
+	import type { ClientMouseMovementInput } from "./session/viewport-mouse-controller";
+	import { loadSoulEmotes } from "./social/soul-emotes";
+	import { ClientEmoteController } from "./social/emote-controller";
 	import type { SceneInterestMembership } from "../lib/game/runtime/render-scene-interest-controller";
-	import { startPresentationFrameLoop } from "../app/presentation-frame-loop";
+	import { startPresentationFrameLoop } from "../app/performance/presentation-frame-loop";
 	import type { MapWaypointTarget } from "../lib/game/map/map-waypoint";
-	import { ClientNavigationWaypointOwner } from "./client-navigation-waypoint";
-	import { runClientAssetsCommand } from "./client-assets-command";
-	import { runClientVersionCommand } from "./client-version-command";
-	import { isLogopolisCommand } from "./client-logopolis";
-	import { runClientLocationCommand } from "./client-location-command";
-	import { runClientScanCommand } from "./client-scan-command";
-	import { runClientCopyEntityCommand } from "./client-copy-entity-command";
-	import { ClientDeathCommands } from "./client-death-commands";
-	import { runRecallCommand } from "./client-recall-command";
-	import { runClientHelpCommand } from "./client-command-help";
+	import { ClientNavigationWaypointOwner } from "./world/navigation-waypoint";
+	import { runClientAssetsCommand } from "./session/assets-command";
+	import { runClientVersionCommand } from "./session/version-command";
+	import { isLogopolisCommand } from "./hud/logopolis";
+	import { runClientLocationCommand } from "./session/location-command";
+	import { runClientScanCommand } from "./session/scan-command";
+	import { runClientCopyEntityCommand } from "./session/copy-entity-command";
+	import { ClientDeathCommands } from "./combat/death-commands";
+	import { runRecallCommand } from "./session/recall-command";
+	import { runClientHelpCommand } from "./session/command-help";
 	import { compactInputHint } from "../lib/input/input-presentation";
-	import { presentPartyHud } from "./client-party-hud";
-	import { observeCombatEffectsAppearance } from "./client-combat-effects-appearance";
+	import { presentPartyHud } from "./social/party-hud";
+	import { observeCombatEffectsAppearance } from "./combat/combat-effects-appearance";
 	import {
 		observeSummonLeashColors,
 		type ClientSummonLeashColors,
-	} from "./client-summon-leash-appearance";
+	} from "./combat/summon-leash-appearance";
 	import type { CombatEffectsAppearance } from "../lib/game/systems/combat-effects-system";
-	import { ClientPartyState } from "./client-party-state";
-	import { ClientHousingManagementState } from "./client-housing-management-state";
+	import { ClientPartyState } from "./social/party-state";
+	import { ClientHousingManagementState } from "./housing/housing-management-state";
 	import {
 		emptyHousing,
 		type HousingSnapshot,
-	} from "./client-housing-contract";
-	import { ClientVendorState } from "./client-vendor-state";
-	import { sampleEntityDistanceMeters } from "./client-entity-distance";
-	import { ClientHouseCrystalState } from "./client-house-crystal-state";
-	import { ClientWorldContainerPanelState } from "./client-world-container-panel-state";
+	} from "./housing/housing-contract";
+	import { ClientVendorState } from "./inventory/vendor-state";
+	import { sampleEntityDistanceMeters } from "./world/entity-distance";
+	import { ClientHouseCrystalState } from "./housing/house-crystal-state";
+	import { ClientWorldContainerPanelState } from "./inventory/world-container-panel-state";
 	import {
 		cycleSpellTab,
 		initialSpellBarBindings,
 		swapSpellTabs,
 		type ClientSpellBarState,
-	} from "./client-spell-bar-state";
+	} from "./magic/spell-bar-state";
 	import type {
 		CombatBreakpointIndex,
 		CombatHeightIndex,
 		ClientInputConfiguration,
 		InputDigitIndex,
 	} from "../lib/input/input-contract";
-	import { handleCombatBarKeydown } from "./client-combat-bar-input";
-	import { handleSpellBarKeydown } from "./client-spell-bar-input";
+	import { handleCombatBarKeydown } from "./combat/combat-bar-input";
+	import { handleSpellBarKeydown } from "./magic/spell-bar-input";
 	import {
 		COMBAT_BREAKPOINTS,
 		COMBAT_HEIGHTS,
-	} from "./client-combat-bar-state";
-	import { SpellReferences } from "../app/spell-references";
-	import { ClientSpellState, type ClientSpellServices } from "./client-spells";
-	import { ClientBarberState } from "./client-barber-state";
-	import { ClientTradeState } from "./client-trade-state";
-	import { ClientItemInteractions } from "./client-item-interactions";
-	import { ClientLocksState } from "./client-locks-state";
-	import { ClientSalvageState } from "./client-salvage-state";
-	import { ClientInventoryState } from "./client-inventory-state";
+	} from "./combat/combat-bar-state";
+	import { SpellReferences } from "./magic/spell-references";
+	import { ClientSpellState, type ClientSpellServices } from "./magic/spells";
+	import { ClientBarberState } from "./character/barber-state";
+	import { ClientTradeState } from "./inventory/trade-state";
+	import { ClientItemInteractions } from "./inventory/item-interactions";
+	import { ClientLocksState } from "./inventory/locks-state";
+	import { ClientSalvageState } from "./inventory/salvage-state";
+	import { ClientInventoryState } from "./inventory/inventory-state";
 	import {
 		ClientBookReader,
 		type ClientBookReaderState,
-	} from "./client-book-reader";
-	import { findWieldedCasterSpell } from "./client-inventory-equipment";
-	import { browserUiIconRepository } from "../app/ui-icon-repository";
-	import { prepareUiIcons } from "../app/ui-icon-source";
+	} from "./inventory/book-reader";
+	import { findWieldedCasterSpell } from "./inventory/inventory-equipment";
+	import { browserUiIconRepository } from "./widgets/ui-icon-repository";
+	import { prepareUiIcons } from "./widgets/ui-icon-source";
 	import {
 		clientSelectedEntity,
 		type ClientSelectedEntity,
-	} from "./client-selected-entity";
+	} from "./world/selected-entity";
 	import { z } from "zod";
-	import ClientMessageDialog from "./ClientMessageDialog.svelte";
-	import ClientToastOverlay from "./ClientToastOverlay.svelte";
-	import { ClientContractNotifications } from "./client-contract-notifications";
-	import {
-		ClientDialogs,
-		type ClientDialogPresentation,
-	} from "./client-dialogs";
+	import ClientMessageDialog from "./hud/ClientMessageDialog.svelte";
+	import ClientToastOverlay from "./hud/ClientToastOverlay.svelte";
+	import { ClientContractNotifications } from "./world/contract-notifications";
+	import { ClientDialogs, type ClientDialogPresentation } from "./hud/dialogs";
 	import { useAppInputPolicy } from "../lib/input/app-input-policy-context";
 	import type { EscapeContextHandle } from "../lib/input/keyboard-input-policy";
 	import { AppInput } from "../lib/input/app-input";
-	import { provideClientInput } from "./client-input-context";
-	import { provideItemCantrips } from "../app/item-cantrips";
-	import { ClientEquipmentAppraisals } from "./client-equipment-appraisals";
-	import type { ClientEquipmentCacheTransport } from "./client-equipment-cache-transport";
+	import { provideClientInput } from "./session/input-context";
+	import { provideItemCantrips } from "./widgets/item-cantrips";
+	import { ClientEquipmentAppraisals } from "./inventory/equipment-appraisals";
+	import type { ClientEquipmentCacheTransport } from "./inventory/equipment-cache-transport";
 	import {
 		clientInputConfiguration,
 		clientInputSettingsSchema,
 		clientKeyboardSettingsEqual,
-	} from "./client-input-settings";
+	} from "./settings/input-settings";
 	import { onMount, untrack } from "svelte";
 	import {
 		createFrameRateSampler,
 		type FrameRates,
 		type FrameRateSampler,
-	} from "../app/frame-rate-sampler";
+	} from "../app/performance/frame-rate-sampler";
 
 	import {
 		CharacterInputController,
@@ -151,8 +148,8 @@
 		CLIENT_TUNING,
 		CLIENT_NEARBY_TUNING,
 		CLIENT_WAYPOINT_NEAR_RADIUS_METERS,
-	} from "./client-tuning";
-	import { recordSentChat } from "./client-chat-input-history";
+	} from "./settings/tuning";
+	import { recordSentChat } from "./social/chat-input-history";
 	import {
 		createElectronHostTransport,
 		startElectronClient,
@@ -165,42 +162,51 @@
 		hostClientLifecycleTransport,
 		type ClientLifecycleSessionEvent,
 		type ClientTimedEnchantments,
-	} from "./client-lifecycle-session";
+	} from "./session/lifecycle-session";
 	import {
 		ClientGameplayPresentation,
 		type ClientGameplayPresentationCameraController,
 		type ClientGameplayPresentationDiagnostics,
 		type ClientGameplayPresentationStatus,
-	} from "./client-gameplay-presentation";
-	import { StandardClientObjectPreviewService } from "./client-object-preview-service";
+	} from "./session/gameplay-presentation";
+	import { StandardClientObjectPreviewService } from "./character/object-preview-service";
 	import { HostPresentationAssets } from "../lib/game/runtime/host-presentation-assets";
-	import { ClientPresentationRoot } from "./client-presentation-root";
+	import { ClientPresentationRoot } from "./session/presentation-root";
 
 	import { GamePresentationOwner } from "../lib/game/runtime/game-presentation-owner";
 	import {
 		completePresentationOperations,
 		PresentationTeardownStack,
 	} from "../lib/game/runtime/presentation-teardown";
-	import { clientDebugEnabled } from "./client-debug";
-	import ClientCharacterSelect from "./ClientCharacterSelect.svelte";
-	import ClientLoadingPage from "./ClientLoadingPage.svelte";
+	import { clientDebugEnabled } from "./hud/debug";
+	import ClientCharacterSelect from "./pregame/ClientCharacterSelect.svelte";
+	import ClientLoadingPage from "./pregame/ClientLoadingPage.svelte";
 	import DisconnectIcon from "../assets/icons/pregame-disconnect.svg?component";
 	import RetryIcon from "../assets/icons/hud-reset.svg?component";
 	import {
 		loadCharacterCreationCatalog,
 		resolveCharacterCreationAppearance,
 		resolveCharacterCreationStats,
-	} from "./client-character-creation-contract";
-	import type { CharacterCreationServices } from "./client-character-creation";
+	} from "./pregame/character-creation";
+	import type { CharacterCreationServices } from "./pregame/character-creation";
 	import {
 		ClientSelectedEntityTracking,
 		type ClientSelectedEntityDisplay,
 		EMPTY_CLIENT_SELECTED_DISPLAY,
-	} from "./client-selected-entity-tracking";
-	import { pulseSpellBarCell } from "./client-spell-bar-feedback";
-	import ClientGameplayView from "./ClientGameplayView.svelte";
+	} from "./world/selected-entity-tracking";
+	import { pulseSpellBarCell } from "./magic/spell-bar-feedback";
+	import ClientGameplayView from "./session/ClientGameplayView.svelte";
+	import type {
+		ClientGameplayCharacterSurface,
+		ClientGameplayCombatMagicSurface,
+		ClientGameplayInventorySurface,
+		ClientGameplaySettingsSurface,
+		ClientGameplayShellSurface,
+		ClientGameplaySocialSurface,
+		ClientGameplayWorldSurface,
+	} from "./session/gameplay-surfaces";
 	import { hostWorldMapSource } from "../lib/assets/world-map-source";
-	import type { MinimapFrame } from "../app/minimap-frame";
+	import type { MinimapFrame } from "../app/minimap/frame";
 	import type {
 		RecallDestination,
 		CharacterManagementState,
@@ -215,23 +221,23 @@
 		ClientAppearanceOptions,
 		ClientDriveRequest,
 		ClientVital,
-	} from "./client-host-contract";
+	} from "./session/host-contract";
 	import {
 		clientChatShouldSuppress,
 		type ClientChatEntry,
 		type ClientChatLine,
-	} from "./client-chat-policy";
-	import { ClientChatComposer } from "./client-chat-composer.svelte";
+	} from "./social/chat-policy";
+	import { ClientChatComposer } from "./social/chat-composer.svelte";
 	import {
 		selectedChatRecipient,
 		serverCommandRequest,
 		type ChatComposeResolution,
-	} from "./client-chat-compose";
+	} from "./social/chat-compose";
 	import type { FrameSettings } from "../lib/game/renderer/renderer";
 	import {
 		resolveTextureFilteringPolicy,
 		type TextureFilteringCapabilities,
-	} from "../lib/game/renderer/texture-filtering-policy";
+	} from "../lib/game/renderer/webgl2/texture-filtering-policy";
 	import type {
 		ClientCharacterSettings,
 		ClientAudioSettings,
@@ -239,66 +245,63 @@
 		ClientNameplateSettings,
 		ClientUiSettings,
 		ClientUserSettings,
-	} from "./client-settings-contract";
+	} from "./settings/settings-contract";
 	import {
 		clientAudioSettingsSchema,
 		clientGraphicsSettingsSchema,
 		clientNameplateSettingsSchema,
 		clientUiSettingsSchema,
-	} from "./client-settings-contract";
-	import type { ClientUserSettingsPatch } from "./client-settings-sections";
+	} from "./settings/settings-contract";
+	import type { ClientUserSettingsPatch } from "./settings/settings-sections";
 	import {
 		clientClockFormatSchema,
 		clientEnvironmentOverridesSchema,
 		type ClientEnvironmentOverrides,
-	} from "./client-environment-settings";
-	import type { ClientWeatherPreset } from "./client-environment";
-	import type {
-		ClientHudLayout,
-		ClientHudPlacement,
-	} from "./client-hud-layout";
+	} from "./settings/environment-settings";
+	import type { ClientWeatherPreset } from "./settings/environment";
+	import type { ClientHudLayout, ClientHudPlacement } from "./hud/hud-layout";
 	import {
 		CLIENT_FONT_FAMILY_CSS,
 		type ClientFontFamily,
-	} from "./client-settings-values";
+	} from "./settings/settings-values";
 	import {
 		clientSceneInterestRadii,
 		frameSettingsWithGraphics,
-	} from "./client-settings-policy";
+	} from "./settings/settings-policy";
 	import {
 		ClientCharacterSettingsOwner,
 		type ClientCharacterSettingsState,
-	} from "./client-character-settings-owner";
-	import type { ClientSettingsTransport } from "./client-settings-transport";
-	import { ClientSettingsPersistence } from "./client-settings-persistence";
+	} from "./settings/character-settings-owner";
+	import type { ClientSettingsTransport } from "./settings/settings-transport";
+	import { ClientSettingsPersistence } from "./settings/settings-persistence";
 	import {
 		ClientAppLifecycle,
 		initialClientAppLifecycleState,
 		clientAppPage,
 	} from "./client-app-lifecycle";
-	import { ClientInputArbiter } from "./client-input-arbiter";
-	import { ClientPreciseJumpSession } from "./client-precise-jump-session";
-	import { ClientNearby } from "./client-nearby";
-	import { ClientEntitySelection } from "./client-entity-selection";
-	import { ClientPointerSelectionController } from "./client-pointer-selection-controller";
-	import { resolveClientSpellCastAim } from "./client-spell-casting";
-	import { ClientCycleSelectionController } from "./client-cycle-selection-controller";
+	import { ClientInputArbiter } from "./session/input-arbiter";
+	import { ClientPreciseJumpSession } from "./combat/precise-jump-session";
+	import { ClientNearby } from "./world/nearby";
+	import { ClientEntitySelection } from "./world/entity-selection";
+	import { ClientPointerSelectionController } from "./world/pointer-selection-controller";
+	import { resolveClientSpellCastAim } from "./magic/spell-casting";
+	import { ClientCycleSelectionController } from "./world/cycle-selection-controller";
 	import {
 		sampleCycleCandidates,
 		type CycleCandidate,
 		type CycleSelectionPresentationFrame,
-	} from "./client-target-acquisition";
-	import { ClientSelectionInput } from "./client-selection-input";
+	} from "./combat/target-acquisition";
+	import { ClientSelectionInput } from "./session/selection-input";
 	import {
 		CLIENT_TOAST_DURATION_MS,
 		ClientToastCenter,
 		type ClientToast,
-	} from "./client-toast-center";
-	import type { ClientTargetIndicatorFrame } from "./client-target-indicator";
+	} from "./hud/toast-center";
+	import type { ClientTargetIndicatorFrame } from "./combat/target-indicator";
 	import {
 		ClientInspection,
 		type ClientInspectionState,
-	} from "./client-inspection";
+	} from "./inventory/inspection";
 
 	interface Props {
 		/** Startup platform shared by input defaults and displayed key labels. */
@@ -1317,9 +1320,6 @@
 			case "housing-updated":
 				housing = event.housing;
 				return;
-			case "housing-crystal-received":
-				housing = { ...housing, crystal: event.crystal };
-				return;
 			case "entity-collision-disabled":
 				entityCollisionDisabled = event.disabled;
 				return;
@@ -1338,11 +1338,9 @@
 			case "spell-cast-target":
 				spellCastTarget = event.target;
 				return;
-			case "gameplay-preferences":
-				gameplayPreferences = event.preferences;
-				return;
-			case "appearance-options":
-				appearanceOptions = event.options;
+			case "character-preferences":
+				appearanceOptions = event.preferences.appearance;
+				gameplayPreferences = event.preferences.gameplay;
 				return;
 			case "current-state":
 				characterManagement = event.state.characterManagement;
@@ -1362,8 +1360,10 @@
 				combatMode = event.state.combatMode;
 				acceptCombatStatus(event.state.combat);
 				spellCastTarget = event.state.spellCastTarget;
-				appearanceOptions = event.state.appearanceOptions;
-				gameplayPreferences = event.state.gameplayPreferences;
+				appearanceOptions =
+					event.state.characterPreferences?.appearance ?? null;
+				gameplayPreferences =
+					event.state.characterPreferences?.gameplay ?? null;
 				entityCollisionDisabled = event.state.entityCollisionDisabled;
 				if (event.state.lifecycle.kind !== "in-world") {
 					retireCombatEscapeContext();
@@ -1411,8 +1411,10 @@
 					recallDestinations = [];
 				}
 				enchantments = session?.state().enchantments ?? null;
-				appearanceOptions = session?.state().appearanceOptions ?? null;
-				gameplayPreferences = session?.state().gameplayPreferences ?? null;
+				appearanceOptions =
+					session?.state().characterPreferences?.appearance ?? null;
+				gameplayPreferences =
+					session?.state().characterPreferences?.gameplay ?? null;
 				if (event.lifecycle.kind !== "in-world") {
 					retireCombatEscapeContext();
 					inputGate.cancel("reset");
@@ -1437,8 +1439,6 @@
 				return;
 			case "transient-string":
 				toastCenter.publish({ message: event.message, tone: "status" });
-				return;
-			case "contract-membership-change":
 				return;
 			case "action-feedback":
 				toastCenter.publish(event.feedback);
@@ -2754,6 +2754,553 @@
 			void retireComposition().catch((error: unknown) => console.error(error));
 		};
 	});
+
+	const gameplayShell: ClientGameplayShellSurface = {
+		platform: startupPlatform,
+		get canvasElement() {
+			if (canvasElement === null) {
+				throw new Error("Gameplay shell requires a mounted canvas element.");
+			}
+			return canvasElement;
+		},
+		get interactionRoot() {
+			if (interactionRoot === null) {
+				throw new Error("Gameplay shell requires a mounted interaction root.");
+			}
+			return interactionRoot;
+		},
+		get hudMode() {
+			return hudMode;
+		},
+		get uiShowcase() {
+			return uiShowcase;
+		},
+		onHudModeChange(mode) {
+			hudMode = mode;
+		},
+		debugEnabled,
+		get canReturnToMenu() {
+			return appState.admission.canReturn;
+		},
+		get canDisconnect() {
+			return appState.admission.canDisconnect;
+		},
+		onReturnToMainMenu() {
+			void returnToMainMenu();
+		},
+		onDisconnect() {
+			void disconnect();
+		},
+		readPerformanceSession,
+		readDiagnostics,
+		readFrameRates,
+		get entityCollisionDisabled() {
+			return entityCollisionDisabled;
+		},
+		onEntityCollisionDisabledChange: setEntityCollisionDisabled,
+		get unrestrictedUse() {
+			return unrestrictedUse;
+		},
+		onUnrestrictedUseChange(enabled) {
+			unrestrictedUse = enabled;
+		},
+		get showRetailHiddenGeometry() {
+			return frameSettings.showRetailHiddenGeometry;
+		},
+		onShowRetailHiddenGeometryChange: setShowRetailHiddenGeometry,
+		get logopolisLaunchRevision() {
+			return logopolisLaunchRevision;
+		},
+		get toast() {
+			return toast;
+		},
+	};
+
+	const gameplaySettings: ClientGameplaySettingsSurface = {
+		get hudLayout() {
+			return userSettings.hudLayout;
+		},
+		onHudPlacementChange: changeHudPlacement,
+		onHudReset: resetHudLayout,
+		get spellBarShape() {
+			return userSettings.spellBarShape;
+		},
+		onSpellBarShapeChange(value) {
+			changeUserSection("spellBarShape", value);
+		},
+		get minimapViewDiameters() {
+			return userSettings.minimapViewDiameters;
+		},
+		onMinimapViewDiametersChange(value) {
+			changeUserSection("minimapViewDiameters", value);
+		},
+		get audio() {
+			return userSettings.audio;
+		},
+		onAudioChange: changeAudio,
+		get graphics() {
+			return userSettings.graphics;
+		},
+		onGraphicsChange: changeGraphics,
+		get textureFilteringCapabilities() {
+			return textureFilteringCapabilities;
+		},
+		theme,
+		get ui() {
+			return userSettings.ui;
+		},
+		onUiChange: changeUi,
+		get nameplates() {
+			return userSettings.nameplates;
+		},
+		onNameplatesChange: changeNameplates,
+		get input() {
+			return userSettings.input;
+		},
+		onInputChange: changeInput,
+		get lockInteractions() {
+			return userSettings.lockInteractions;
+		},
+		onLockInteractionsChange(settings) {
+			changeUserSection("lockInteractions", settings);
+		},
+		get chatSuppression() {
+			return userSettings.chatSuppression;
+		},
+		onChatSuppressionChange(settings) {
+			changeUserSection("chatSuppression", settings);
+		},
+		get chatChannelFilters() {
+			return userSettings.chatChannelFilters;
+		},
+		onChatChannelFiltersChange(value) {
+			changeUserSection("chatChannelFilters", value);
+		},
+		get chatFilters() {
+			return userSettings.chatFilters;
+		},
+		onChatFiltersChange(value) {
+			changeUserSection("chatFilters", value);
+		},
+		get chatTimestamps() {
+			return userSettings.chatTimestamps;
+		},
+		onChatTimestampsChange(value) {
+			changeUserSection("chatTimestamps", value);
+		},
+		get clockFormat() {
+			return userSettings.clockFormat;
+		},
+		onClockFormatChange(format) {
+			changeUserSection("clockFormat", clientClockFormatSchema.parse(format));
+		},
+		get environmentOverrides() {
+			return userSettings.environmentOverrides;
+		},
+		onEnvironmentOverridesChange: changeEnvironmentOverrides,
+		get weatherPresets() {
+			return weatherPresets;
+		},
+		get environmentIssue() {
+			return environmentIssue;
+		},
+		readServerEnvironment() {
+			return gameplayPresentation?.readServerEnvironment() ?? null;
+		},
+		get inspectionPreviewHeight() {
+			return userSettings.inspection.previewHeight;
+		},
+		onInspectionPreviewHeightChange(previewHeight) {
+			changeUserSection("inspection", { previewHeight });
+		},
+	};
+
+	const gameplayCharacter: ClientGameplayCharacterSurface = {
+		get characterGuid() {
+			return characterSettings.kind === "absent"
+				? null
+				: characterSettings.characterGuid;
+		},
+		get playerName() {
+			return playerName;
+		},
+		get worldName() {
+			return worldName;
+		},
+		get accountName() {
+			return accountName;
+		},
+		readConnection() {
+			return session?.connectionSample() ?? null;
+		},
+		get vitals() {
+			return vitals;
+		},
+		get vitalWarningsEnabled() {
+			return lifecycle.kind === "in-world";
+		},
+		get characterSheet() {
+			return session?.characterSheet ?? null;
+		},
+		statArtwork,
+		get enchantments() {
+			return enchantments;
+		},
+		get appearanceOptions() {
+			return appearanceOptions;
+		},
+		onAppearanceOptionChange: setAppearanceOption,
+		get gameplayPreferences() {
+			return gameplayPreferences;
+		},
+		get gameplayEnabled() {
+			return lifecycle.kind === "in-world";
+		},
+		onGameplayOptionChange: setGameplayOption,
+		get jumpChargeActive() {
+			return activeJumpBeginSequence !== null;
+		},
+		readJumpExtent() {
+			return preciseJumpActive
+				? (preciseJumpSession?.power() ??
+						CLIENT_TUNING.preciseJump.initialPower)
+				: (inputController?.chargeExtent() ?? 0);
+		},
+		get jumpPowerKeys() {
+			return jumpPowerKeys;
+		},
+		get preciseJumpActive() {
+			return preciseJumpActive;
+		},
+		onPreciseJumpAim: aimPreciseJump,
+		onPreciseJumpPowerAdjust(steps) {
+			preciseJumpSession?.adjustPower(steps);
+		},
+		onPreciseJumpPowerSet(power) {
+			preciseJumpSession?.setPower(power);
+		},
+		onPreciseJumpActivate: activatePreciseJump,
+	};
+
+	const gameplayInventory: ClientGameplayInventorySurface = {
+		get inventory() {
+			return inventory;
+		},
+		get itemSession() {
+			return session;
+		},
+		get itemInteractions() {
+			return itemInteractions;
+		},
+		get actionBars() {
+			return characterSettings.kind === "ready"
+				? characterSettings.settings.actionBars
+				: null;
+		},
+		onActionBarsChange(bars) {
+			if (characterSettings.kind === "ready")
+				changeCharacterSettings("actionBars", bars);
+		},
+		get worldContainer() {
+			return worldContainer;
+		},
+		get vendor() {
+			return vendor;
+		},
+		get houseCrystal() {
+			return houseCrystal;
+		},
+		get salvage() {
+			return salvage;
+		},
+		get locks() {
+			return locks;
+		},
+		get barber() {
+			return barber;
+		},
+		get trade() {
+			return trade;
+		},
+		onSelectContentsItem(guid, mode) {
+			entitySelection?.selectContentsItem(guid, mode);
+		},
+		onPickInventoryTarget(x, y, destination) {
+			if (pointerSelection === null)
+				destination.commit({
+					kind: "unavailable",
+					reason: "World picking is unavailable.",
+				});
+			else pointerSelection.acquireTarget(x, y, destination);
+		},
+		onInventoryNotice(message) {
+			toastCenter.publish({ message, tone: "status" });
+		},
+	};
+
+	const gameplayCombatMagic: ClientGameplayCombatMagicSurface = {
+		get combatMode() {
+			return combatMode;
+		},
+		get combatStatus() {
+			return combatStatus;
+		},
+		get combatControls() {
+			return combatControls;
+		},
+		get combatProfileSelectionRevision() {
+			return combatProfileSelectionRevision;
+		},
+		onCombatProfileSelect: selectCombatProfile,
+		onStopCombat: stopCombat,
+		get combatEnabled() {
+			return lifecycle.kind === "in-world";
+		},
+		onToggleCombat() {
+			void toggleCombatMode();
+		},
+		get spells() {
+			return spells;
+		},
+		get spellBar() {
+			return spellBar;
+		},
+		onSpellBarChange: changeSpellBar,
+		onSwapSpellTabs: swapSpellBarTabs,
+		get spellBarEnabled() {
+			return spellBarEnabled;
+		},
+		onSelectSpellTab: selectSpellTab,
+		onActivateSpellCell: activateSpellCell,
+		onActivateCasterSpell: activateCasterSpell,
+		onCastSpell(spellId) {
+			void castSpell(spellId);
+		},
+		get spellCastTarget() {
+			return spellCastTarget;
+		},
+		readCombatTargetFrame,
+		readLockFeedbackFrames,
+		hasActiveLockFeedback,
+		get lockFeedbackWakeRevision() {
+			return lockFeedbackWakeRevision;
+		},
+	};
+
+	const gameplayWorld: ClientGameplayWorldSurface = {
+		get cameraController() {
+			return lifecycle.kind === "in-world" ? cameraController : null;
+		},
+		mouseMovement,
+		readMinimapFrame,
+		onCoordinatesCopied() {
+			toastCenter.publish({
+				message: "Coordinates copied to clipboard.",
+				tone: "status",
+			});
+		},
+		onSetWaypoint(target) {
+			navigationWaypoint.set(target, notifyWaypoint);
+		},
+		onClearWaypoint() {
+			navigationWaypoint.clear();
+		},
+		get nearby() {
+			return nearby;
+		},
+		get selectedEntityGuid() {
+			return selectedEntityGuid;
+		},
+		get hoveredEntityGuid() {
+			return hoveredEntityGuid;
+		},
+		readSelectedEntity,
+		readSelectedEntityDisplay,
+		readTargetIndicatorFrame,
+		onViewportSelect(clientX, clientY, interact) {
+			if (!interact) viewportTargetSequenceConsumed = false;
+			else if (viewportTargetSequenceConsumed) return;
+			const state = itemInteractions?.snapshot();
+			if (state?.kind === "acquiring") {
+				viewportTargetSequenceConsumed = true;
+				const current = itemInteractions;
+				pointerSelection?.acquireTarget(clientX, clientY, {
+					isCurrent: () => {
+						const latest = current?.snapshot();
+						return (
+							latest?.kind === "acquiring" &&
+							latest.generation === state.generation
+						);
+					},
+					commit: (result) => {
+						if (result.kind === "unavailable")
+							toastCenter.publish({ message: result.reason, tone: "status" });
+						else
+							current?.target(
+								result.kind === "entity" ? result.guid : null,
+								state.generation,
+							);
+					},
+				});
+			} else if (interact) {
+				pointerSelection?.acquireViewportPoint(clientX, clientY, (guid) =>
+					itemInteractions?.interactIfPossible(guid, unrestrictedUse),
+				);
+			} else pointerSelection?.acquireViewportPoint(clientX, clientY);
+		},
+		onViewportExamine(clientX, clientY) {
+			const pointer = pointerSelection;
+			if (pointer === null) return;
+			pointer.acquireTarget(clientX, clientY, {
+				isCurrent: () => pointerSelection === pointer,
+				commit: (result) => {
+					if (result.kind === "entity")
+						void inspectionOwner?.examine(result.guid);
+					else if (result.kind === "unavailable")
+						toastCenter.publish({ message: result.reason, tone: "warning" });
+				},
+			});
+		},
+		onViewportHover(clientX, clientY) {
+			pointerSelection?.acquireViewportHover(clientX, clientY);
+		},
+		onViewportHoverClear() {
+			pointerSelection?.clearViewportHover();
+		},
+		onMaintainEntitySelection() {
+			entitySelection?.maintainSelection();
+		},
+		onSelectEntity(guid) {
+			entitySelection?.select(guid);
+		},
+		onSelectKnownEntity(guid) {
+			return entitySelection?.selectKnownEntity(guid) === true;
+		},
+		onInteractEntity() {
+			itemInteractions?.interactSelected(unrestrictedUse);
+		},
+		get inspection() {
+			return inspection;
+		},
+		get inspectionItemSelection() {
+			return entitySelection;
+		},
+		objectPreviewService,
+		onExamineEntity: examineSelectedEntity,
+		onExamineItem: examineItem,
+		onExamineSpell(spellId) {
+			inspectionOwner?.examineSpell(spellId);
+		},
+		onCloseInspection() {
+			inspectionOwner?.close();
+		},
+		get bookReader() {
+			return bookReader;
+		},
+		onCloseBook() {
+			bookReaderOwner?.close();
+		},
+		onRetryBook() {
+			bookReaderOwner?.retry();
+		},
+		get worldMapSource() {
+			return worldMapSource;
+		},
+		get housing() {
+			return housing;
+		},
+		get housingManagement() {
+			return housingManagement;
+		},
+		async onRefreshHousing() {
+			if (session === null) return;
+			try {
+				await session.refreshHousing();
+			} catch (error) {
+				toastCenter.publish({ message: formatError(error), tone: "warning" });
+			}
+		},
+		async onSearchHousing(houseType) {
+			if (session === null) return;
+			try {
+				await session.searchHousing(houseType);
+			} catch (error) {
+				toastCenter.publish({ message: formatError(error), tone: "warning" });
+			}
+		},
+		get canTeleportFromMap() {
+			return canTeleportFromMap;
+		},
+		get recallDestinations() {
+			return recallDestinations;
+		},
+		onRecall: recall,
+		onTeleportToMapPosition: teleportToMapPosition,
+	};
+
+	const gameplaySocial: ClientGameplaySocialSurface = {
+		get chatMessages() {
+			return chatMessages;
+		},
+		chatComposer,
+		get sentChatHistory() {
+			return sentChatHistory;
+		},
+		onSendChat: sendChat,
+		onSendChatError: appendChatError,
+		onChatNotice(message) {
+			toastCenter.publish({ message, tone: "warning" });
+		},
+		get emotesEnabled() {
+			return gameplayInputEnabled;
+		},
+		get party() {
+			return party;
+		},
+		get partyHudPresent() {
+			return partyHudPresent;
+		},
+		readPartyHudDisplay() {
+			return session === null
+				? null
+				: presentPartyHud(session.partySnapshot(), session.state().playerGuid);
+		},
+		onPartyHudDemand(enabled) {
+			session?.setPartyUpdateDemand("hud", enabled);
+		},
+		onSelectPartyMember(guid) {
+			entitySelection?.selectKnownEntity(guid);
+		},
+		get friends() {
+			return session?.friends ?? null;
+		},
+		get contracts() {
+			return session?.contracts ?? null;
+		},
+		get squelch() {
+			return session?.squelch ?? null;
+		},
+		get allegiance() {
+			return session?.allegiance ?? null;
+		},
+		readCanSetCorpsePermission() {
+			return session?.state().lifecycle?.kind === "in-world";
+		},
+		onCorpsePermission(name, granted) {
+			const current = session;
+			if (current === null || current.state().lifecycle?.kind !== "in-world")
+				return;
+			void current.setCorpsePermission(name, granted).catch((error: unknown) =>
+				toastCenter.publish({
+					message: formatError(error),
+					tone: "warning",
+				}),
+			);
+		},
+		onSocialNotice(message) {
+			toastCenter.publish({ message, tone: "warning" });
+		},
+	};
 </script>
 
 <div
@@ -2800,301 +3347,14 @@
 
 	{#if page.kind === "gameplay" && canvasElement !== null && interactionRoot !== null}
 		<ClientGameplayView
-			{statArtwork}
-			platform={startupPlatform}
-			{theme}
-			onReturnToMainMenu={() => void returnToMainMenu()}
-			onDisconnect={() => void disconnect()}
-			canReturnToMenu={appState.admission.canReturn}
-			canDisconnect={appState.admission.canDisconnect}
 			bind:this={gameplayView}
-			{mouseMovement}
-			itemSession={session}
-			{partyHudPresent}
-			readPartyHudDisplay={() =>
-				session === null
-					? null
-					: presentPartyHud(
-							session.partySnapshot(),
-							session.state().playerGuid,
-						)}
-			onPartyHudDemand={(enabled) =>
-				session?.setPartyUpdateDemand("hud", enabled)}
-			characterSheet={session?.characterSheet ?? null}
-			hudLayout={userSettings.hudLayout}
-			onHudPlacementChange={changeHudPlacement}
-			onHudReset={resetHudLayout}
-			spellBarShape={userSettings.spellBarShape}
-			onSpellBarShapeChange={(spellBarShape) =>
-				changeUserSection("spellBarShape", spellBarShape)}
-			minimapViewDiameters={userSettings.minimapViewDiameters}
-			onMinimapViewDiametersChange={(minimapViewDiameters) =>
-				changeUserSection("minimapViewDiameters", minimapViewDiameters)}
-			chatChannelFilters={userSettings.chatChannelFilters}
-			onChatChannelFiltersChange={(value) =>
-				changeUserSection("chatChannelFilters", value)}
-			chatFilters={userSettings.chatFilters}
-			chatTimestamps={userSettings.chatTimestamps}
-			onChatTimestampsChange={(value) =>
-				changeUserSection("chatTimestamps", value)}
-			onChatFiltersChange={(chatFilters) =>
-				changeUserSection("chatFilters", chatFilters)}
-			inspectionPreviewHeight={userSettings.inspection.previewHeight}
-			audio={userSettings.audio}
-			onAudioChange={changeAudio}
-			graphics={userSettings.graphics}
-			ui={userSettings.ui}
-			clockFormat={userSettings.clockFormat}
-			environmentOverrides={userSettings.environmentOverrides}
-			{weatherPresets}
-			{environmentIssue}
-			readServerEnvironment={() =>
-				gameplayPresentation?.readServerEnvironment() ?? null}
-			onClockFormatChange={(format) =>
-				changeUserSection("clockFormat", clientClockFormatSchema.parse(format))}
-			onEnvironmentOverridesChange={changeEnvironmentOverrides}
-			input={userSettings.input}
-			{textureFilteringCapabilities}
-			onGraphicsChange={changeGraphics}
-			nameplates={userSettings.nameplates}
-			onNameplatesChange={changeNameplates}
-			onUiChange={changeUi}
-			onInputChange={changeInput}
-			onInspectionPreviewHeightChange={(previewHeight) =>
-				changeUserSection("inspection", { previewHeight })}
-			{hudMode}
-			{uiShowcase}
-			onHudModeChange={(mode) => (hudMode = mode)}
-			{spellBar}
-			onSpellBarChange={changeSpellBar}
-			onSwapSpellTabs={swapSpellBarTabs}
-			actionBars={characterSettings.kind === "ready"
-				? characterSettings.settings.actionBars
-				: null}
-			onActionBarsChange={(actionBars) => {
-				if (characterSettings.kind === "ready")
-					changeCharacterSettings("actionBars", actionBars);
-			}}
-			{spellBarEnabled}
-			onSelectSpellTab={selectSpellTab}
-			onActivateSpellCell={activateSpellCell}
-			onActivateCasterSpell={activateCasterSpell}
-			{combatMode}
-			{combatStatus}
-			{combatControls}
-			{combatProfileSelectionRevision}
-			onCombatProfileSelect={selectCombatProfile}
-			onStopCombat={stopCombat}
-			combatEnabled={lifecycle.kind === "in-world"}
-			emotesEnabled={gameplayInputEnabled}
-			onToggleCombat={() => void toggleCombatMode()}
-			onCastSpell={(spellId) => void castSpell(spellId)}
-			cameraController={lifecycle.kind === "in-world" ? cameraController : null}
-			{debugEnabled}
-			{nearby}
-			onSelectKnownEntity={(guid) =>
-				entitySelection?.selectKnownEntity(guid) === true}
-			inspectionItemSelection={entitySelection}
-			{readMinimapFrame}
-			onClearWaypoint={() => navigationWaypoint.clear()}
-			onSetWaypoint={(target) => navigationWaypoint.set(target, notifyWaypoint)}
-			characterGuid={characterSettings.kind === "absent"
-				? null
-				: characterSettings.characterGuid}
-			{worldMapSource}
-			{housing}
-			{housingManagement}
-			{party}
-			friends={session?.friends ?? null}
-			contracts={session?.contracts ?? null}
-			squelch={session?.squelch ?? null}
-			allegiance={session?.allegiance ?? null}
-			onSearchHousing={async (houseType) => {
-				if (session === null) return;
-				try {
-					await session.searchHousing(houseType);
-				} catch (error) {
-					toastCenter.publish({ message: formatError(error), tone: "warning" });
-				}
-			}}
-			onRefreshHousing={async () => {
-				if (session === null) return;
-				try {
-					await session.refreshHousing();
-				} catch (error) {
-					toastCenter.publish({ message: formatError(error), tone: "warning" });
-				}
-			}}
-			{canTeleportFromMap}
-			{recallDestinations}
-			onRecall={recall}
-			onTeleportToMapPosition={teleportToMapPosition}
-			{readPerformanceSession}
-			{readDiagnostics}
-			{readSelectedEntity}
-			{readFrameRates}
-			{readTargetIndicatorFrame}
-			{readCombatTargetFrame}
-			{readLockFeedbackFrames}
-			{hasActiveLockFeedback}
-			{spellCastTarget}
-			{lockFeedbackWakeRevision}
-			{readSelectedEntityDisplay}
-			{spells}
-			{enchantments}
-			{locks}
-			{salvage}
-			{inventory}
-			{worldContainer}
-			{vendor}
-			{houseCrystal}
-			{barber}
-			{trade}
-			{itemInteractions}
-			{inspection}
-			{bookReader}
-			onCloseBook={() => bookReaderOwner?.close()}
-			onRetryBook={() => bookReaderOwner?.retry()}
-			{objectPreviewService}
-			onSelectContentsItem={(guid, mode) =>
-				entitySelection?.selectContentsItem(guid, mode)}
-			onInteractEntity={() =>
-				itemInteractions?.interactSelected(unrestrictedUse)}
-			onExamineEntity={examineSelectedEntity}
-			onExamineItem={examineItem}
-			onExamineSpell={(spellId) => inspectionOwner?.examineSpell(spellId)}
-			onCloseInspection={() => inspectionOwner?.close()}
-			{selectedEntityGuid}
-			{hoveredEntityGuid}
-			showRetailHiddenGeometry={frameSettings.showRetailHiddenGeometry}
-			onShowRetailHiddenGeometryChange={setShowRetailHiddenGeometry}
-			{entityCollisionDisabled}
-			onEntityCollisionDisabledChange={setEntityCollisionDisabled}
-			{unrestrictedUse}
-			onUnrestrictedUseChange={(enabled) => (unrestrictedUse = enabled)}
-			{playerName}
-			{worldName}
-			{accountName}
-			{vitals}
-			vitalWarningsEnabled={lifecycle.kind === "in-world"}
-			readConnection={() => session?.connectionSample() ?? null}
-			{appearanceOptions}
-			{gameplayPreferences}
-			lockInteractions={userSettings.lockInteractions}
-			onLockInteractionsChange={(settings) =>
-				changeUserSection("lockInteractions", settings)}
-			chatSuppression={userSettings.chatSuppression}
-			onChatSuppressionChange={(settings) =>
-				changeUserSection("chatSuppression", settings)}
-			gameplayEnabled={lifecycle.kind === "in-world"}
-			onGameplayOptionChange={setGameplayOption}
-			onAppearanceOptionChange={setAppearanceOption}
-			jumpChargeActive={activeJumpBeginSequence !== null}
-			{jumpPowerKeys}
-			readJumpExtent={() =>
-				preciseJumpActive
-					? (preciseJumpSession?.power() ??
-						CLIENT_TUNING.preciseJump.initialPower)
-					: (inputController?.chargeExtent() ?? 0)}
-			{toast}
-			{preciseJumpActive}
-			onPreciseJumpAim={aimPreciseJump}
-			onPreciseJumpPowerSet={(power) => preciseJumpSession?.setPower(power)}
-			onPreciseJumpPowerAdjust={(steps) =>
-				preciseJumpSession?.adjustPower(steps)}
-			onPreciseJumpActivate={activatePreciseJump}
-			readCanSetCorpsePermission={() =>
-				session?.state().lifecycle?.kind === "in-world"}
-			onCorpsePermission={(name, granted) => {
-				const current = session;
-				if (current === null || current.state().lifecycle?.kind !== "in-world")
-					return;
-				void current
-					.setCorpsePermission(name, granted)
-					.catch((error: unknown) =>
-						toastCenter.publish({
-							message: formatError(error),
-							tone: "warning",
-						}),
-					);
-			}}
-			onSocialNotice={(message) =>
-				toastCenter.publish({ message, tone: "warning" })}
-			onInventoryNotice={(message) =>
-				toastCenter.publish({ message, tone: "status" })}
-			onCoordinatesCopied={() =>
-				toastCenter.publish({
-					message: "Coordinates copied to clipboard.",
-					tone: "status",
-				})}
-			onPickInventoryTarget={(x, y, destination) => {
-				if (pointerSelection === null)
-					destination.commit({
-						kind: "unavailable",
-						reason: "World picking is unavailable.",
-					});
-				else pointerSelection.acquireTarget(x, y, destination);
-			}}
-			onViewportSelect={(clientX, clientY, interact) => {
-				if (!interact) viewportTargetSequenceConsumed = false;
-				else if (viewportTargetSequenceConsumed) return;
-				const state = itemInteractions?.snapshot();
-				if (state?.kind === "acquiring") {
-					viewportTargetSequenceConsumed = true;
-					const current = itemInteractions;
-					pointerSelection?.acquireTarget(clientX, clientY, {
-						isCurrent: () => {
-							const latest = current?.snapshot();
-							return (
-								latest?.kind === "acquiring" &&
-								latest.generation === state.generation
-							);
-						},
-						commit: (result) => {
-							if (result.kind === "unavailable")
-								toastCenter.publish({ message: result.reason, tone: "status" });
-							else
-								current?.target(
-									result.kind === "entity" ? result.guid : null,
-									state.generation,
-								);
-						},
-					});
-				} else if (interact) {
-					pointerSelection?.acquireViewportPoint(clientX, clientY, (guid) =>
-						itemInteractions?.interactIfPossible(guid, unrestrictedUse),
-					);
-				} else pointerSelection?.acquireViewportPoint(clientX, clientY);
-			}}
-			onViewportExamine={(clientX, clientY) => {
-				const pointer = pointerSelection;
-				if (pointer === null) return;
-				pointer.acquireTarget(clientX, clientY, {
-					isCurrent: () => pointerSelection === pointer,
-					commit: (result) => {
-						if (result.kind === "entity")
-							void inspectionOwner?.examine(result.guid);
-						else if (result.kind === "unavailable")
-							toastCenter.publish({ message: result.reason, tone: "warning" });
-					},
-				});
-			}}
-			onViewportHover={(clientX, clientY) =>
-				pointerSelection?.acquireViewportHover(clientX, clientY)}
-			onViewportHoverClear={() => pointerSelection?.clearViewportHover()}
-			onMaintainEntitySelection={() => entitySelection?.maintainSelection()}
-			onSelectPartyMember={(guid) => entitySelection?.selectKnownEntity(guid)}
-			onSelectEntity={(guid) => entitySelection?.select(guid)}
-			{chatMessages}
-			{chatComposer}
-			{sentChatHistory}
-			{logopolisLaunchRevision}
-			onSendChat={sendChat}
-			onChatNotice={(message) =>
-				toastCenter.publish({ message, tone: "warning" })}
-			onSendChatError={appendChatError}
-			{canvasElement}
-			{interactionRoot}
+			shell={gameplayShell}
+			settings={gameplaySettings}
+			character={gameplayCharacter}
+			inventory={gameplayInventory}
+			combatMagic={gameplayCombatMagic}
+			world={gameplayWorld}
+			social={gameplaySocial}
 		/>
 	{:else}
 		<div class="client-pregame-ui" use:applyUiScale={userSettings.ui.uiScale}>

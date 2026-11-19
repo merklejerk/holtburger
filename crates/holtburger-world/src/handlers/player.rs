@@ -78,139 +78,27 @@ pub(crate) fn handle_message(
             true
         }
         GameMessage::PrivateUpdateAttribute(data) => {
-            let UpdateAttribute {
-                attribute,
-                ranks,
-                start,
-                xp,
-                ..
-            } = &**data;
-            state
-                .player
-                .update_attribute(*attribute, *ranks, *start, *xp, &state.xp_table, events);
-            state.emit_player_derived_stats(events);
+            apply_attribute_update(state, data, events);
             true
         }
         GameMessage::PublicUpdateAttribute(data) => {
-            let UpdateAttribute {
-                attribute,
-                ranks,
-                start,
-                xp,
-                ..
-            } = &**data;
-            state
-                .player
-                .update_attribute(*attribute, *ranks, *start, *xp, &state.xp_table, events);
-            state.emit_player_derived_stats(events);
+            apply_attribute_update(state, data, events);
             true
         }
         GameMessage::PrivateUpdateSkill(data) => {
-            let UpdateSkill {
-                skill,
-                ranks,
-                status,
-                init,
-                xp,
-                ..
-            } = &**data;
-            let augmentations = state.player_skill_augmentations();
-            let vitae = state.player_vitae();
-            state.player.update_skill(
-                SkillUpdateParams {
-                    skill_id: *skill,
-                    ranks: *ranks,
-                    status: *status,
-                    init: *init,
-                    xp: *xp,
-                    xp_table: &state.xp_table,
-                    calculation: crate::player::stats_calc::SkillCalculationContext {
-                        table: &state.skill_table,
-                        augmentations,
-                        vitae,
-                    },
-                },
-                events,
-            );
-            state.emit_player_derived_stats(events);
+            apply_skill_update(state, data, events);
             true
         }
         GameMessage::PublicUpdateSkill(data) => {
-            let UpdateSkill {
-                skill,
-                ranks,
-                status,
-                init,
-                xp,
-                ..
-            } = &**data;
-            let augmentations = state.player_skill_augmentations();
-            let vitae = state.player_vitae();
-            state.player.update_skill(
-                SkillUpdateParams {
-                    skill_id: *skill,
-                    ranks: *ranks,
-                    status: *status,
-                    init: *init,
-                    xp: *xp,
-                    xp_table: &state.xp_table,
-                    calculation: crate::player::stats_calc::SkillCalculationContext {
-                        table: &state.skill_table,
-                        augmentations,
-                        vitae,
-                    },
-                },
-                events,
-            );
-            state.emit_player_derived_stats(events);
+            apply_skill_update(state, data, events);
             true
         }
         GameMessage::PrivateUpdateVital(data) => {
-            let UpdateVital {
-                vital,
-                ranks,
-                start,
-                current,
-                xp,
-                ..
-            } = &**data;
-            state.player.update_vital(
-                VitalUpdateParams {
-                    vital_id: *vital,
-                    ranks: *ranks,
-                    start: *start,
-                    current: *current,
-                    xp: *xp,
-                    xp_table: &state.xp_table,
-                    secondary_attribute_table: &state.secondary_attribute_table,
-                },
-                events,
-            );
-            state.emit_player_derived_stats(events);
+            apply_vital_update(state, data, events);
             true
         }
         GameMessage::PublicUpdateVital(data) => {
-            let UpdateVital {
-                vital,
-                ranks,
-                start,
-                current,
-                xp,
-                ..
-            } = &**data;
-            state.player.update_vital(
-                VitalUpdateParams {
-                    vital_id: *vital,
-                    ranks: *ranks,
-                    start: *start,
-                    current: *current,
-                    xp: *xp,
-                    xp_table: &state.xp_table,
-                    secondary_attribute_table: &state.secondary_attribute_table,
-                },
-                events,
-            );
-            state.emit_player_derived_stats(events);
+            apply_vital_update(state, data, events);
             true
         }
         GameMessage::PrivateUpdateVitalCurrent(data) => {
@@ -271,81 +159,17 @@ pub(crate) fn handle_event(
             state.apply_player_description_world_state(data);
             state.emit_player_derived_stats(events);
             state.emit_player_info(events);
-            state.emit_level_info(events);
             true
         }
-        GameEvent::MagicUpdateEnchantment(data) => {
-            let handled = state
-                .player
-                .upsert_enchantment(data.target, data.enchantment, events);
-            if handled {
-                state.emit_player_derived_stats(events);
-            }
-            handled
-        }
-        GameEvent::MagicUpdateMultipleEnchantments(data) => {
-            let handled =
-                state
-                    .player
-                    .upsert_multiple_enchantments(data.target, &data.enchantments, events);
-            if handled {
-                state.emit_player_derived_stats(events);
-            }
-            handled
-        }
-        GameEvent::MagicRemoveEnchantment(data) => {
-            let handled =
-                state
-                    .player
-                    .remove_enchantment(data.target, data.spell_id, data.layer, events);
-            if handled {
-                state.emit_player_derived_stats(events);
-            }
-            handled
-        }
-        GameEvent::MagicDispelEnchantment(data) => {
-            let handled =
-                state
-                    .player
-                    .remove_enchantment(data.target, data.spell_id, data.layer, events);
-            if handled {
-                state.emit_player_derived_stats(events);
-            }
-            handled
-        }
-        GameEvent::MagicRemoveMultipleEnchantments(data) => {
-            let handled =
-                state
-                    .player
-                    .remove_multiple_enchantments(data.target, &data.spells, events);
-            if handled {
-                state.emit_player_derived_stats(events);
-            }
-            handled
-        }
-        GameEvent::MagicDispelMultipleEnchantments(data) => {
-            let handled =
-                state
-                    .player
-                    .remove_multiple_enchantments(data.target, &data.spells, events);
-            if handled {
-                state.emit_player_derived_stats(events);
-            }
-            handled
-        }
-        GameEvent::MagicPurgeEnchantments(data) => {
-            let handled = state.player.purge_enchantments(data.target, false, events);
-            if handled {
-                state.emit_player_derived_stats(events);
-            }
-            handled
-        }
-        GameEvent::MagicPurgeBadEnchantments(data) => {
-            let handled = state.player.purge_enchantments(data.target, true, events);
-            if handled {
-                state.emit_player_derived_stats(events);
-            }
-            handled
+        GameEvent::MagicUpdateEnchantment(_)
+        | GameEvent::MagicUpdateMultipleEnchantments(_)
+        | GameEvent::MagicRemoveEnchantment(_)
+        | GameEvent::MagicDispelEnchantment(_)
+        | GameEvent::MagicRemoveMultipleEnchantments(_)
+        | GameEvent::MagicDispelMultipleEnchantments(_)
+        | GameEvent::MagicPurgeEnchantments(_)
+        | GameEvent::MagicPurgeBadEnchantments(_) => {
+            handle_enchantment_event(state, &event.event, events)
         }
         GameEvent::MagicUpdateSpell(data) => {
             state.player.add_spell(data.spell_id as u32, events);
@@ -360,4 +184,103 @@ pub(crate) fn handle_event(
         }
         _ => false,
     }
+}
+
+fn handle_enchantment_event(
+    state: &mut WorldState,
+    event: &GameEvent,
+    events: &mut Vec<WorldEvent>,
+) -> bool {
+    let handled = match event {
+        GameEvent::MagicUpdateEnchantment(data) => {
+            state
+                .player
+                .upsert_enchantment(data.target, data.enchantment, events)
+        }
+        GameEvent::MagicUpdateMultipleEnchantments(data) => state
+            .player
+            .upsert_multiple_enchantments(data.target, &data.enchantments, events),
+        GameEvent::MagicRemoveEnchantment(data) => {
+            state
+                .player
+                .remove_enchantment(data.target, data.spell_id, data.layer, events)
+        }
+        GameEvent::MagicDispelEnchantment(data) => {
+            state
+                .player
+                .remove_enchantment(data.target, data.spell_id, data.layer, events)
+        }
+        GameEvent::MagicRemoveMultipleEnchantments(data) => state
+            .player
+            .remove_multiple_enchantments(data.target, &data.spells, events),
+        GameEvent::MagicDispelMultipleEnchantments(data) => state
+            .player
+            .remove_multiple_enchantments(data.target, &data.spells, events),
+        GameEvent::MagicPurgeEnchantments(data) => {
+            state.player.purge_enchantments(data.target, false, events)
+        }
+        GameEvent::MagicPurgeBadEnchantments(data) => {
+            state.player.purge_enchantments(data.target, true, events)
+        }
+        _ => return false,
+    };
+    if handled {
+        state.emit_player_derived_stats(events);
+    }
+    handled
+}
+
+fn apply_attribute_update<const PUBLIC: bool>(
+    state: &mut WorldState,
+    data: &UpdateAttribute<PUBLIC>,
+    events: &mut Vec<WorldEvent>,
+) {
+    state.player.update_attribute(
+        data.attribute,
+        data.ranks,
+        data.start,
+        data.xp,
+        &state.xp_table,
+    );
+    state.emit_player_derived_stats(events);
+}
+
+fn apply_skill_update<const PUBLIC: bool>(
+    state: &mut WorldState,
+    data: &UpdateSkill<PUBLIC>,
+    events: &mut Vec<WorldEvent>,
+) {
+    let augmentations = state.player_skill_augmentations();
+    let vitae = state.player_vitae();
+    state.player.update_skill(SkillUpdateParams {
+        skill_id: data.skill,
+        ranks: data.ranks,
+        status: data.status,
+        init: data.init,
+        xp: data.xp,
+        xp_table: &state.xp_table,
+        calculation: crate::player::stats_calc::SkillCalculationContext {
+            table: &state.skill_table,
+            augmentations,
+            vitae,
+        },
+    });
+    state.emit_player_derived_stats(events);
+}
+
+fn apply_vital_update<const PUBLIC: bool>(
+    state: &mut WorldState,
+    data: &UpdateVital<PUBLIC>,
+    events: &mut Vec<WorldEvent>,
+) {
+    state.player.update_vital(VitalUpdateParams {
+        vital_id: data.vital,
+        ranks: data.ranks,
+        start: data.start,
+        current: data.current,
+        xp: data.xp,
+        xp_table: &state.xp_table,
+        secondary_attribute_table: &state.secondary_attribute_table,
+    });
+    state.emit_player_derived_stats(events);
 }

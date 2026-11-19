@@ -1,8 +1,8 @@
-import type { EntitySelectionOutlineSettings } from "./game/renderer/entity-selection-outline-policy";
+import type { EntitySelectionOutlineSettings } from "./game/renderer/overlays/entity-selection-outline-policy";
 import type { HexRgbColor, HexRgbaColor } from "./frontend-color";
 import type { MapBlipCategory } from "./game/map/map-blip-category";
-import type { AmbientOcclusionParameters } from "./game/renderer/ambient-occlusion-policy";
-import type { ColorGradeParameters } from "./game/renderer/color-grade-policy";
+import type { AmbientOcclusionParameters } from "./game/renderer/passes/ambient-occlusion-policy";
+import type { ColorGradeParameters } from "./game/renderer/passes/color-grade-policy";
 import type {
 	IndoorGroundingSettings,
 	EntityShadowMode,
@@ -10,17 +10,17 @@ import type {
 	OutdoorPssmSettings,
 	OutdoorShadowProjectionSettings,
 	OutdoorDirectionalShadowSettings,
-} from "./game/renderer/entity-shadow-policy";
+} from "./game/renderer/shadows/entity-shadow-policy";
 import type {
 	NameplateAppearance,
 	NameplateSettings,
-} from "./game/renderer/nameplate-policy";
-import type { PortalWarpDriveTuning } from "./game/renderer/portal-warp-drive-tuning";
+} from "./game/renderer/overlays/nameplate-policy";
+import type { PortalWarpDriveTuning } from "./game/renderer/portal/portal-warp-drive-tuning";
 import type { FrameSettings } from "./game/renderer/renderer";
 import type {
 	EntityOverlaySettings,
 	HealthBarSettings,
-} from "./game/renderer/entity-overlay-policy";
+} from "./game/renderer/overlays/entity-overlay-policy";
 
 /** Runtime audio policy selected by each frontend composition root. */
 export interface FrontendAudioTuning {

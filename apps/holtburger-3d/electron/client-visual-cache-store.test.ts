@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ClientVisualCacheStore } from "./client-visual-cache-store";
 import * as replacement from "./replace-local-file";
-import { playerVisualCaptureSchema } from "../src/client/client-object-preview-contract";
+import { playerVisualCaptureSchema } from "../src/client/character/object-preview-contract";
 import fixture from "../src/client/fixtures/object-preview-wire.json";
 
 const endpoint = { host: "LOCALHOST", port: 9000 };

@@ -18,7 +18,7 @@ import { REPOSITORY, github, type GitHub } from "../github.ts";
 import {
   RELEASE_HISTORY_LIMIT,
   releaseHistoryFeedSchema,
-} from "../../apps/holtburger-3d/src/app/release-history-contract.ts";
+} from "../../apps/holtburger-3d/src/app/desktop/release-history-contract.ts";
 
 /** Public asset facts used for complete inventory and byte-identity admission. */
 const assetSchema = z.object({

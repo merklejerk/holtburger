@@ -14,7 +14,7 @@ Internal architecture and styling docs:
 
 ---
 
-## Quickstart & Development Launchers
+## Development
 
 Install Node.js/npm dependencies and a current stable Rust toolchain, then run launch commands from
 the repository root:

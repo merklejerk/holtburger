@@ -5,7 +5,7 @@ import type { PresentationAssetService } from "../runtime/presentation-asset-ser
 import {
 	WebGL2PreviewRenderer,
 	type ObjectPreviewRendererDiagnostics,
-} from "../renderer/webgl2-preview-renderer";
+} from "../renderer/webgl2/webgl2-preview-renderer";
 import {
 	acquireObjectPreviewAssets,
 	type ObjectPreviewAssetLease,

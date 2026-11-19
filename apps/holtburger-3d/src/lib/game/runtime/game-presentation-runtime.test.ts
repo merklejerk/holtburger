@@ -6,7 +6,7 @@ import { HostCommandError } from "../../host/host-command-result";
 import { onTestFinished, describe, expect, it, vi } from "vitest";
 import { PresentationAssetService } from "./presentation-asset-service";
 import { DynamicEntitySystem } from "../systems/dynamic-entity-system";
-import type { EntityOverlayPresentation } from "../renderer/entity-overlay-policy";
+import type { EntityOverlayPresentation } from "../renderer/overlays/entity-overlay-policy";
 import { EffectSystem } from "../systems/effect-system";
 import { nameplateIconId } from "../systems/dynamic-presentation-source";
 import { WorkerTexturePreparer } from "../textures/texture-preparer";

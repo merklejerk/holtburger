@@ -1,4 +1,4 @@
-import type { ObjectBlendPolicy } from "./object-rendering-policy";
+import type { ObjectBlendPolicy } from "./webgl2/object-rendering-policy";
 
 /** Shader modes that preserve authored additive RGB while deriving valid canvas coverage. */
 export const TRANSPARENT_CANVAS_EMISSION_MODE = {

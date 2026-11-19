@@ -10,7 +10,7 @@
 		ClientAudioSettings,
 		ClientUiSettings,
 	} from "../settings/settings-contract";
-	import type { TextureFilteringCapabilities } from "../../lib/game/renderer/texture-filtering-policy";
+	import type { TextureFilteringCapabilities } from "../../lib/game/renderer/webgl2/texture-filtering-policy";
 
 	interface Props {
 		/** The same gameplay preferences and mutation owners used by the HUD settings. */

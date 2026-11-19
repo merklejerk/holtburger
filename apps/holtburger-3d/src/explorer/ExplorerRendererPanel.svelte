@@ -4,13 +4,13 @@
 		createAmbientOcclusionParameters,
 		type AmbientOcclusionParameters,
 		type AmbientOcclusionSettings,
-	} from "../lib/game/renderer/ambient-occlusion-policy";
-	import type { EntityShadowSettings } from "../lib/game/renderer/entity-shadow-policy";
+	} from "../lib/game/renderer/passes/ambient-occlusion-policy";
+	import type { EntityShadowSettings } from "../lib/game/renderer/shadows/entity-shadow-policy";
 	import {
 		NAMEPLATE_CATEGORIES,
 		type NameplateCategory,
 		type NameplateSettings,
-	} from "../lib/game/renderer/nameplate-policy";
+	} from "../lib/game/renderer/overlays/nameplate-policy";
 	import type {
 		EnvCellRenderMode,
 		RenderLayerVisibility,
@@ -18,7 +18,7 @@
 	import {
 		textureFilteringPolicyLabel,
 		type TextureFilteringPolicy,
-	} from "../lib/game/renderer/texture-filtering-policy";
+	} from "../lib/game/renderer/webgl2/texture-filtering-policy";
 	import { LandblockLayerKind } from "../lib/game/runtime/scene-interest";
 	import ExplorerControlGroup from "./ExplorerControlGroup.svelte";
 	import ExplorerShadowControls from "./ExplorerShadowControls.svelte";

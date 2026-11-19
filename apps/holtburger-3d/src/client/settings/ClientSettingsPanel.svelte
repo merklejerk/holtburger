@@ -44,7 +44,7 @@
 		createClientInputDefaults,
 		createClientKeyboardDefaults,
 	} from "./input-settings";
-	import { type TextureFilteringCapabilities } from "../../lib/game/renderer/texture-filtering-policy";
+	import { type TextureFilteringCapabilities } from "../../lib/game/renderer/webgl2/texture-filtering-policy";
 	import type {
 		ClientAudioSettings,
 		ClientGraphicsSettings,

@@ -10,14 +10,14 @@ import type { SkySourcePresentations } from "../../assets/decode-sky-record";
 import type { CommitPipeline } from "../commit/types";
 import type { StaticObjectLayerArtifact } from "../commit/artifacts";
 import { GeometryManager } from "../geometry/geometry-manager";
-import type { BakedDrawMergeCensus } from "../renderer/baked-draw-merge-census";
+import type { BakedDrawMergeCensus } from "../renderer/webgl2/baked-draw-merge-census";
 import {
 	type FrameSettings,
 	type Renderer,
 	type RendererFrameDiagnosticsSnapshot,
 	type WorldIndicatorInput,
 } from "../renderer/renderer";
-import type { EntityOverlayFrame } from "../renderer/entity-overlay-policy";
+import type { EntityOverlayFrame } from "../renderer/overlays/entity-overlay-policy";
 import type { RenderExtent } from "../renderer/render-extent";
 import type { RenderWorld } from "../renderer/render-world";
 import type { RendererResourceManager } from "../renderer/resource-manager";

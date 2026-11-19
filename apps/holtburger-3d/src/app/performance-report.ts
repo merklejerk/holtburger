@@ -5,7 +5,7 @@ import type {
 	RendererFrameProfile,
 } from "../lib/game/renderer/renderer";
 import type { PresentationProfile } from "../lib/game/runtime/presentation-profiler";
-import type { WebGL2DeviceDiagnosticIdentity } from "../lib/game/renderer/webgl2-diagnostic-identity";
+import type { WebGL2DeviceDiagnosticIdentity } from "../lib/game/renderer/webgl2/webgl2-diagnostic-identity";
 import type { ClosedWorkerPoolDiagnostics } from "../lib/game/workers/closed-worker";
 
 /** Report shared by both frontends and their automated probes. No game/account payloads. */

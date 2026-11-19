@@ -6,13 +6,13 @@ import { createLandblockWorldOrigin } from "../../../lib/game/landblocks";
 import {
 	WebGL2CombatEffects,
 	type CombatEffectsView,
-} from "../../../lib/game/renderer/webgl2-combat-effects";
+} from "../../../lib/game/renderer/overlays/webgl2-combat-effects";
 import {
 	PORTAL_PROPAGATION_METADATA_CAPACITY_BYTES,
 	PORTAL_PROPAGATION_SCOPE_METADATA_OFFSET_BYTES,
-} from "../../../lib/game/renderer/portal-propagation-metadata";
-import { PORTAL_SCOPE_ATLAS_METADATA_BINDING_POINT } from "../../../lib/game/renderer/portal-scope-atlas-metadata-glsl";
-import { PORTAL_SCOPE_ATLAS_TEXTURE_UNITS } from "../../../lib/game/renderer/portal-scope-atlas-command-model";
+} from "../../../lib/game/renderer/portal/portal-propagation-metadata";
+import { PORTAL_SCOPE_ATLAS_METADATA_BINDING_POINT } from "../../../lib/game/renderer/portal/portal-scope-atlas-metadata-glsl";
+import { PORTAL_SCOPE_ATLAS_TEXTURE_UNITS } from "../../../lib/game/renderer/portal/portal-scope-atlas-command-model";
 
 /** Numeric browser/GPU evidence, independent of user visual acceptance. */
 export interface CombatEffectsFixtureResult {

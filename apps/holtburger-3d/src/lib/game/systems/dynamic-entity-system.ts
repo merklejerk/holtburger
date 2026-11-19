@@ -10,7 +10,7 @@ import type { SoundTableRepository } from "../behavior/sound-table-repository";
 import type { RuntimeLight } from "../environment/runtime-lights";
 import type { DatAssetId } from "../game-types";
 import type { AABB3, Mat4 } from "../math/types";
-import type { NameplateSourceVisual } from "../renderer/nameplate-policy";
+import type { NameplateSourceVisual } from "../renderer/overlays/nameplate-policy";
 import type {
 	ParentLocation,
 	SetupSidewaysSpan,

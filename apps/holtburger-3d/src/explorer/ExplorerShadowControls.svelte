@@ -9,7 +9,7 @@
 		type OutdoorShadowCasterBudget,
 		type OutdoorPssmSettings,
 		type OutdoorShadowProjectionSettings,
-	} from "../lib/game/renderer/entity-shadow-policy";
+	} from "../lib/game/renderer/shadows/entity-shadow-policy";
 	import ExplorerControlGroup from "./ExplorerControlGroup.svelte";
 
 	interface Props {

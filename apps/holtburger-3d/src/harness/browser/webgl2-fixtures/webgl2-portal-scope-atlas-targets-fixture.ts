@@ -1,16 +1,16 @@
-import type { PortalWarpDriveTuning } from "../../../lib/game/renderer/portal-warp-drive-tuning";
+import type { PortalWarpDriveTuning } from "../../../lib/game/renderer/portal/portal-warp-drive-tuning";
 import type { RenderWorld } from "../../../lib/game/renderer/render-world";
 import {
 	WebGL2Device,
 	type WebGL2DeviceStatus,
-} from "../../../lib/game/renderer/webgl2-device";
+} from "../../../lib/game/renderer/webgl2/webgl2-device";
 import {
 	WebGL2PortalScopeAtlasTargets,
 	type WebGL2PortalScopeAtlasTargetDiagnostics,
 	type WebGL2PortalScopeAtlasTargetSet,
-} from "../../../lib/game/renderer/webgl2-portal-scope-atlas-targets";
-import type { WebGL2Renderer } from "../../../lib/game/renderer/webgl2-renderer";
-import { PORTAL_ARRIVAL_STATE_MAXIMUM_COUNT } from "../../../lib/game/renderer/portal-arrival-metadata";
+} from "../../../lib/game/renderer/portal/webgl2-portal-scope-atlas-targets";
+import type { WebGL2Renderer } from "../../../lib/game/renderer/webgl2/webgl2-renderer";
+import { PORTAL_ARRIVAL_STATE_MAXIMUM_COUNT } from "../../../lib/game/renderer/portal/portal-arrival-metadata";
 
 const INITIAL_EXTENTS = {
 	atlas: { height: 8, width: 8 },

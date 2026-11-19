@@ -8,7 +8,7 @@
 		type ColorGradeCurve,
 		type ColorGradeParameters,
 		type ColorGradeSettings,
-	} from "../lib/game/renderer/color-grade-policy";
+	} from "../lib/game/renderer/passes/color-grade-policy";
 	import {
 		COLOR_GRADE_CURVE_CHANNELS,
 		addControlPoint,

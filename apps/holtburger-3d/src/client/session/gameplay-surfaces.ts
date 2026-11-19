@@ -3,7 +3,7 @@ import type { MinimapFrame, MinimapState } from "../../app/minimap-frame";
 import type { PerformanceSession } from "../../app/performance-session";
 import type { UiThemeSettings } from "../../app/ui-theme-selection";
 import type { MapWaypointTarget } from "../../lib/game/map/map-waypoint";
-import type { TextureFilteringCapabilities } from "../../lib/game/renderer/texture-filtering-policy";
+import type { TextureFilteringCapabilities } from "../../lib/game/renderer/webgl2/texture-filtering-policy";
 import type { WorldMapSource } from "../../lib/game/world-map/types";
 import type {
 	ClientInputConfiguration,

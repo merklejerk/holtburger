@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 import {
 	PARTICLE_RECORDS_PER_ROW,
 	type ParticleInstanceRecord,
-} from "../renderer/particle-record-layout";
+} from "../renderer/passes/particle-record-layout";
 import {
 	ParticleRecordSlots,
 	PARTICLE_RECORD_STRIDE_FLOATS,

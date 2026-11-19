@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { PARTICLE_INSTANCE_FLOAT_COUNT } from "../renderer/particle-record-layout";
-import type { ParticleDrawRange } from "../renderer/particle-render-routing";
+import { PARTICLE_INSTANCE_FLOAT_COUNT } from "../renderer/passes/particle-record-layout";
+import type { ParticleDrawRange } from "../renderer/passes/particle-render-routing";
 import { datAssetId } from "../runtime/dynamic-entity-presentation";
 import { ObjectPreviewParticleFrame } from "./object-preview-particle-frame";
 

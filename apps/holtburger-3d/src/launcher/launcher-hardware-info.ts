@@ -1,6 +1,6 @@
 import { APP_BUILD_LABEL } from "../app/app-build";
 import type { HardwareInfoRequest } from "../app/hardware-info-contract";
-import { readWebGL2DiagnosticIdentity } from "../lib/game/renderer/webgl2-diagnostic-identity";
+import { readWebGL2DiagnosticIdentity } from "../lib/game/renderer/webgl2/webgl2-diagnostic-identity";
 
 /** Probe on button activation, without starting the game or retaining GPU resources. */
 export function probeLauncherHardware(): HardwareInfoRequest {

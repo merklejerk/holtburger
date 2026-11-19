@@ -10,13 +10,13 @@ import type {
 } from "../../lib/game/preview/object-preview-controller";
 import type { ObjectPreviewSource } from "../../lib/game/runtime/object-preview-source";
 import { acquireObjectPreviewAssets } from "../../lib/game/preview/object-preview-composition";
-import { WebGL2PreviewRenderer } from "../../lib/game/renderer/webgl2-preview-renderer";
+import { WebGL2PreviewRenderer } from "../../lib/game/renderer/webgl2/webgl2-preview-renderer";
 import { StandardClientObjectPreviewService } from "./object-preview-service";
 
 vi.mock("../../lib/game/preview/object-preview-composition", () => ({
 	acquireObjectPreviewAssets: vi.fn(),
 }));
-vi.mock("../../lib/game/renderer/webgl2-preview-renderer", () => ({
+vi.mock("../../lib/game/renderer/webgl2/webgl2-preview-renderer", () => ({
 	WebGL2PreviewRenderer: { build: vi.fn() },
 }));
 vi.mock("../../lib/game/preview/object-preview-presentation", () => ({

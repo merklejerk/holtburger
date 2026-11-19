@@ -2292,10 +2292,8 @@ mod tests {
             })
             .collect();
         rows.push(ContractRow::Unresolved { id: 99 });
-        let fixture: Value = serde_json::from_str(include_str!(
-            "../../src/client/fixtures/contracts.json"
-        ))
-        .unwrap();
+        let fixture: Value =
+            serde_json::from_str(include_str!("../../src/client/fixtures/contracts.json")).unwrap();
         for (contracts, expected) in [
             (Some(ContractsSnapshot { rows }), fixture),
             (None, serde_json::json!({ "contracts": null })),

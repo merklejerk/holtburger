@@ -2,7 +2,7 @@
 	import { onMount } from "svelte";
 	import { dismissDialogOnBackdrop } from "../app/dialog-backdrop-dismiss";
 	import { useAppInputPolicy } from "../lib/input/app-input-policy-context";
-	import type { Texture2DReadback } from "../lib/game/renderer/webgl2-device";
+	import type { Texture2DReadback } from "../lib/game/renderer/webgl2/webgl2-device";
 	import type {
 		TextureAtlasPageDiagnostics,
 		TextureAtlasPageEntryDiagnostics,

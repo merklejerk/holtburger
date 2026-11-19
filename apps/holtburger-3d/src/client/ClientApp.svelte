@@ -237,7 +237,7 @@
 	import {
 		resolveTextureFilteringPolicy,
 		type TextureFilteringCapabilities,
-	} from "../lib/game/renderer/texture-filtering-policy";
+	} from "../lib/game/renderer/webgl2/texture-filtering-policy";
 	import type {
 		ClientCharacterSettings,
 		ClientAudioSettings,

@@ -4,12 +4,12 @@
 	import type { ClientGraphicsSettings } from "./settings-contract";
 	import { CLIENT_GRAPHICS_DEFAULTS } from "./settings-policy";
 	import { CLIENT_GRAPHICS_RANGES } from "./settings-values";
-	import { ENTITY_SHADOW_MODES } from "../../lib/game/renderer/entity-shadow-modes";
+	import { ENTITY_SHADOW_MODES } from "../../lib/game/renderer/shadows/entity-shadow-modes";
 	import {
 		resolveTextureFilteringPolicy,
 		supportedTextureFilteringPolicies,
 		type TextureFilteringCapabilities,
-	} from "../../lib/game/renderer/texture-filtering-policy";
+	} from "../../lib/game/renderer/webgl2/texture-filtering-policy";
 	import "./settings-controls.css";
 	interface Props {
 		/** Saved gameplay graphics choices, also inherited by pregame where applicable. */

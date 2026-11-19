@@ -4,11 +4,11 @@ import type {
 	EntityOverlayFrame,
 	EntityOverlayOcclusion,
 	EntityOverlayPriority,
-} from "../../lib/game/renderer/entity-overlay-policy";
+} from "../../lib/game/renderer/overlays/entity-overlay-policy";
 import {
 	resolveNameplateCategory,
 	type NameplateCategory,
-} from "../../lib/game/renderer/nameplate-policy";
+} from "../../lib/game/renderer/overlays/nameplate-policy";
 import type {
 	DynamicEntityView,
 	DynamicEntityWorldPlacement,

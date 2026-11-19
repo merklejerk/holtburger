@@ -20,7 +20,7 @@ import type {
 	DrawableParticleEmitter,
 	PreparedParticleEmitter,
 } from "../behavior/particle-emitter-repository";
-import type { ParticleInstanceRecord } from "../renderer/particle-record-layout";
+import type { ParticleInstanceRecord } from "../renderer/passes/particle-record-layout";
 import type { DatAssetId } from "../game-types";
 import type {
 	BehaviorTarget,
@@ -31,7 +31,7 @@ import {
 	ParticleRecordSlots,
 	type ParticleSlotRegion,
 } from "../behavior/particle-record-slots";
-import { PARTICLE_RECORD_BIRTH_TIME_FLOAT } from "../renderer/particle-record-layout";
+import { PARTICLE_RECORD_BIRTH_TIME_FLOAT } from "../renderer/passes/particle-record-layout";
 import { OUTDOOR_LANDBLOCK_WORLD_SIZE } from "../landblocks";
 import {
 	PARTICLE_TYPE,

@@ -1,4 +1,4 @@
-import { WebGL2SelectionDistancePass } from "../../../lib/game/renderer/webgl2-selection-distance-pass";
+import { WebGL2SelectionDistancePass } from "../../../lib/game/renderer/overlays/webgl2-selection-distance-pass";
 import { SHARED_FRONTEND_TUNING } from "../../../lib/frontend-tuning";
 import { SHARED_FRAME_SETTINGS } from "../../../lib/frontend-frame-settings";
 import type { ObjectGeometryKey } from "../../../lib/game/geometry/types";
@@ -7,25 +7,25 @@ import type { SceneNodeId } from "../../../lib/game/scene";
 import type { DynamicLayout } from "../../../lib/game/geometry/dynamic-layout";
 import type { DynamicAppearance } from "../../../lib/game/systems/dynamic-appearance";
 import { TextureWrapMode } from "../../../lib/game/textures/types";
-import { WebGL2DynamicAppearances } from "../../../lib/game/renderer/webgl2-dynamic-appearances";
-import { WebGL2DynamicPosePages } from "../../../lib/game/renderer/webgl2-dynamic-pose-pages";
-import { DynamicDepthPreparations } from "../../../lib/game/renderer/dynamic-depth-preparation";
+import { WebGL2DynamicAppearances } from "../../../lib/game/renderer/webgl2/webgl2-dynamic-appearances";
+import { WebGL2DynamicPosePages } from "../../../lib/game/renderer/webgl2/webgl2-dynamic-pose-pages";
+import { DynamicDepthPreparations } from "../../../lib/game/renderer/webgl2/dynamic-depth-preparation";
 import {
 	DEFAULT_COLOR_GRADE_PARAMETERS,
 	type ColorGradeSettings,
-} from "../../../lib/game/renderer/color-grade-policy";
+} from "../../../lib/game/renderer/passes/color-grade-policy";
 import {
 	type WebGL2EntitySelectionMask,
 	WebGL2EntitySelectionPass,
-} from "../../../lib/game/renderer/webgl2-entity-selection-pass";
-import { WebGL2FlatScenePresentation } from "../../../lib/game/renderer/webgl2-flat-scene-presentation";
-import { WebGL2FlatSceneTarget } from "../../../lib/game/renderer/webgl2-flat-scene-target";
-import type { PortalWarpDriveTuning } from "../../../lib/game/renderer/portal-warp-drive-tuning";
+} from "../../../lib/game/renderer/overlays/webgl2-entity-selection-pass";
+import { WebGL2FlatScenePresentation } from "../../../lib/game/renderer/webgl2/webgl2-flat-scene-presentation";
+import { WebGL2FlatSceneTarget } from "../../../lib/game/renderer/webgl2/webgl2-flat-scene-target";
+import type { PortalWarpDriveTuning } from "../../../lib/game/renderer/portal/portal-warp-drive-tuning";
 import type {
 	EntitySelectionOutlineSettings,
 	EntitySelectionOutlineColors,
-} from "../../../lib/game/renderer/entity-selection-outline-policy";
-import type { WebGL2GeometryBinding } from "../../../lib/game/renderer/webgl2-resource-manager";
+} from "../../../lib/game/renderer/overlays/entity-selection-outline-policy";
+import type { WebGL2GeometryBinding } from "../../../lib/game/renderer/webgl2/webgl2-resource-manager";
 import type { EntitySelectionTarget } from "../../../lib/game/renderer/renderer";
 
 const GEOMETRY_KEY = "object-geometry:selection-fixture" as ObjectGeometryKey;

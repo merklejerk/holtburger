@@ -1,6 +1,6 @@
 import { sceneVec3 } from "../../lib/assets/ac-frame";
 import { Mat4, Vec3 } from "../../lib/game/math/types";
-import { WebGL2SummonChainPass } from "../../lib/game/renderer/webgl2-summon-chain-pass";
+import { WebGL2SummonChainPass } from "../../lib/game/renderer/overlays/webgl2-summon-chain-pass";
 
 /** Actual GPU evidence for procedural links, composed world depth and doorway occlusion. */
 export interface SummonGpuProof {

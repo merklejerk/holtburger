@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { NameplateCategory } from "../../lib/game/renderer/nameplate-policy";
+import type { NameplateCategory } from "../../lib/game/renderer/overlays/nameplate-policy";
 import {
 	cellId,
 	type DynamicEntityView,

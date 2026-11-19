@@ -4,7 +4,7 @@ import {
 	type ColorGradeCurve,
 	type ColorGradeCurves,
 	type ColorGradeParameters,
-} from "../lib/game/renderer/color-grade-policy";
+} from "../lib/game/renderer/passes/color-grade-policy";
 
 /**
  * Which curve the editor is currently showing.

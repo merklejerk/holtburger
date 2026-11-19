@@ -33,7 +33,7 @@ import type { GeometryManager } from "../geometry/geometry-manager";
 import { createLandblockWorldOrigin } from "../landblocks";
 import { transformAffineAABB3 } from "../math/matrices";
 import { AABB3, Quat, Vec3 } from "../math/types";
-import type { BakedDrawMergeCensus } from "../renderer/baked-draw-merge-census";
+import type { BakedDrawMergeCensus } from "../renderer/webgl2/baked-draw-merge-census";
 import {
 	resolveAmbientEntityOverlay,
 	validateEntityOverlaySettings,
@@ -41,12 +41,12 @@ import {
 	type EntityOverlayFrame,
 	type EntityOverlayLookup,
 	type EntityOverlayPresentation,
-} from "../renderer/entity-overlay-policy";
-import { validateEntitySelectionOutlineSettings } from "../renderer/entity-selection-outline-policy";
+} from "../renderer/overlays/entity-overlay-policy";
+import { validateEntitySelectionOutlineSettings } from "../renderer/overlays/entity-selection-outline-policy";
 import {
 	resolveNameplateCategory,
 	validateNameplateSettings,
-} from "../renderer/nameplate-policy";
+} from "../renderer/overlays/nameplate-policy";
 import {
 	resolveRenderExtent,
 	validateRenderExtent,

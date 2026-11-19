@@ -4,7 +4,7 @@ import type { RuntimeLight } from "../environment/runtime-lights";
 import { expandBounds } from "../math/geometry-utils";
 import { multiplyMat4, transformAffineAABB3 } from "../math/matrices";
 import { AABB3, Mat4 } from "../math/types";
-import type { NameplateSourceVisual } from "../renderer/nameplate-policy";
+import type { NameplateSourceVisual } from "../renderer/overlays/nameplate-policy";
 import type { SceneGraph, SceneNodeId } from "../scene";
 import { sceneNodeIdOf } from "../scene/utils";
 import type { SelectionGeometryMorphology } from "../selection/entity-interaction-shape";

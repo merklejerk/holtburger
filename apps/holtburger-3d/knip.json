@@ -23,7 +23,7 @@
 		"src/lib/game/commit/types.ts": ["types"],
 		"src/lib/game/geometry/types.ts": ["types"],
 		"src/lib/game/renderer/geometry.ts": ["types"],
-		"src/lib/game/renderer/terrain-program-input.ts": ["types"],
+		"src/lib/game/renderer/webgl2/terrain-program-input.ts": ["types"],
 		"src/lib/game/resolution/landblock-layer.ts": ["types"],
 		"src/lib/game/resolution/presentation.ts": ["types"],
 		"src/lib/game/runtime/types.ts": ["types"],

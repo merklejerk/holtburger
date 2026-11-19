@@ -18,7 +18,7 @@
 		resolveTextureFilteringPolicy,
 		supportedTextureFilteringPolicies,
 		type TextureFilteringCapabilities,
-	} from "../lib/game/renderer/texture-filtering-policy";
+	} from "../lib/game/renderer/webgl2/texture-filtering-policy";
 	import type { DynamicEntityView } from "../lib/game/runtime/dynamic-entity-feed";
 	import { GamePresentationOwner } from "../lib/game/runtime/game-presentation-owner";
 	import type { GamePresentationRuntime } from "../lib/game/runtime/game-presentation-runtime";

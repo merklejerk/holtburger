@@ -13,7 +13,7 @@ import type {
 	FrameSettings,
 	RendererFrameProfile,
 } from "../lib/game/renderer/renderer";
-import type { WebGL2DeviceDiagnosticIdentity } from "../lib/game/renderer/webgl2-diagnostic-identity";
+import type { WebGL2DeviceDiagnosticIdentity } from "../lib/game/renderer/webgl2/webgl2-diagnostic-identity";
 import type { ClosedWorkerPoolDiagnostics } from "../lib/game/workers/closed-worker";
 
 /** Subset of renderer frame diagnostics consumed by session reports. */

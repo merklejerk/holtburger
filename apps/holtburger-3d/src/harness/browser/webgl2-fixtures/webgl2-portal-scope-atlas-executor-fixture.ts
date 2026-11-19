@@ -11,7 +11,7 @@ import {
 	portalModelSubmissionId,
 	type PortalModelScene,
 	type PortalModelScopeId,
-} from "../../../lib/game/renderer/portal-model";
+} from "../../../lib/game/renderer/portal/portal-model";
 import { getLandblockCoordinates } from "../../../lib/game/landblocks";
 import {
 	createOrthographicMat4,
@@ -26,12 +26,12 @@ import type {
 } from "../../../lib/game/scene";
 import { scopeKey } from "../../../lib/game/scene/scope";
 import type { PlanarAperture } from "../../../lib/game/scene/planar-aperture";
-import { composePortalReferenceFrameThroughPathDepth } from "../../../lib/game/renderer/portal-reference-compositor";
+import { composePortalReferenceFrameThroughPathDepth } from "../../../lib/game/renderer/portal/portal-reference-compositor";
 import {
 	createPortalRenderCapacityPolicy,
 	PORTAL_RENDER_CAPACITY_POLICY,
-} from "../../../lib/game/renderer/portal-render-capacity-policy";
-import { PORTAL_ENVELOPE_GUTTER_RADIUS_TEXELS } from "../../../lib/game/renderer/portal-envelope-sampling-glsl";
+} from "../../../lib/game/renderer/portal/portal-render-capacity-policy";
+import { PORTAL_ENVELOPE_GUTTER_RADIUS_TEXELS } from "../../../lib/game/renderer/portal/portal-envelope-sampling-glsl";
 import {
 	PORTAL_ARRIVAL_METADATA_FLAGS_OFFSET_BYTES,
 	PORTAL_ARRIVAL_METADATA_HAS_ENTRY_PLANE,
@@ -39,7 +39,7 @@ import {
 	PORTAL_ARRIVAL_METADATA_RECORD_BYTES,
 	PORTAL_ARRIVAL_METADATA_RECIPROCAL_OFFSET_BYTES,
 	PORTAL_ARRIVAL_METADATA_SCOPE_OFFSET_BYTES,
-} from "../../../lib/game/renderer/portal-arrival-metadata";
+} from "../../../lib/game/renderer/portal/portal-arrival-metadata";
 import {
 	PORTAL_CROSSING_DEPTH_POLICY_ALLOW_EQUAL,
 	PORTAL_CROSSING_DEPTH_POLICY_REJECT_EQUAL,
@@ -51,37 +51,37 @@ import {
 	type PortalCrossingTriangleStreamView,
 	type PortalPropagationExecutionScheduleView,
 	type PortalPropagationMetadataStreamView,
-} from "../../../lib/game/renderer/portal-crossing-triangle-stream";
+} from "../../../lib/game/renderer/portal/portal-crossing-triangle-stream";
 import {
 	PORTAL_PROPAGATION_ARRIVAL_METADATA_OFFSET_BYTES,
 	PORTAL_PROPAGATION_METADATA_CAPACITY_BYTES,
 	PORTAL_PROPAGATION_SCOPE_METADATA_OFFSET_BYTES,
 	portalPropagationMetadataUsedByteLength,
-} from "../../../lib/game/renderer/portal-propagation-metadata";
-import { writePortalScopeTileMetadata } from "../../../lib/game/renderer/portal-scope-tile-metadata";
-import { createCameraNearClipVolume } from "../../../lib/game/renderer/portal-near-plane";
+} from "../../../lib/game/renderer/portal/portal-propagation-metadata";
+import { writePortalScopeTileMetadata } from "../../../lib/game/renderer/portal/portal-scope-tile-metadata";
+import { createCameraNearClipVolume } from "../../../lib/game/renderer/portal/portal-near-plane";
 import {
 	PORTAL_QUAD_MODE_MAX_REDUCE,
 	PORTAL_QUAD_MODE_ROOT_ROUND0_CLAMP,
 	PortalScopeAtlasPlanner,
 	type PortalScopeAtlasFrameView,
-} from "../../../lib/game/renderer/portal-scope-atlas-planner";
-import { WebGL2PortalScopeAtlasExecutor } from "../../../lib/game/renderer/webgl2-portal-scope-atlas-executor";
+} from "../../../lib/game/renderer/portal/portal-scope-atlas-planner";
+import { WebGL2PortalScopeAtlasExecutor } from "../../../lib/game/renderer/portal/webgl2-portal-scope-atlas-executor";
 import {
 	WebGL2PortalScopeAtlasTargets,
 	type WebGL2PortalScopeAtlasTargetSet,
-} from "../../../lib/game/renderer/webgl2-portal-scope-atlas-targets";
+} from "../../../lib/game/renderer/portal/webgl2-portal-scope-atlas-targets";
 import {
 	bindWebGL2PortalDeferredVisibilityProgram,
 	PORTAL_DEFERRED_VISIBILITY_GLSL,
 	type WebGL2PortalDeferredVisibilityUniforms,
-} from "../../../lib/game/renderer/portal-deferred-visibility-glsl";
-import { PORTAL_SCOPE_ATLAS_TEXTURE_UNITS } from "../../../lib/game/renderer/portal-scope-atlas-command-model";
+} from "../../../lib/game/renderer/portal/portal-deferred-visibility-glsl";
+import { PORTAL_SCOPE_ATLAS_TEXTURE_UNITS } from "../../../lib/game/renderer/portal/portal-scope-atlas-command-model";
 import {
 	compileWebGL2Shader,
 	requireWebGL2Uniform,
 } from "../../../lib/game/webgl/shader-program";
-import { PARTICLE_FRAGMENT_SHADER } from "../../../lib/game/renderer/webgl2-particle-program";
+import { PARTICLE_FRAGMENT_SHADER } from "../../../lib/game/renderer/passes/webgl2-particle-program";
 
 // Tile interiors must exceed the resolve shader's 2-texel envelope gutter or confinement becomes
 // untestable: on the original 4x4 tiles the gutter's 5x5 search spanned every texel, so every

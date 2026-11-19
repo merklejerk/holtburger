@@ -1,20 +1,20 @@
 import type { PerformanceSession } from "../app/performance-session";
 import type { SceneEnvironmentSelection } from "../lib/game/environment/scene-environment";
 import type { ExplorerCameraMode } from "../lib/game/motion/host-physical-fly-path";
-import type { AmbientOcclusionSettings } from "../lib/game/renderer/ambient-occlusion-policy";
-import type { ColorGradeSettings } from "../lib/game/renderer/color-grade-policy";
-import type { EntityShadowSettings } from "../lib/game/renderer/entity-shadow-policy";
+import type { AmbientOcclusionSettings } from "../lib/game/renderer/passes/ambient-occlusion-policy";
+import type { ColorGradeSettings } from "../lib/game/renderer/passes/color-grade-policy";
+import type { EntityShadowSettings } from "../lib/game/renderer/shadows/entity-shadow-policy";
 import type {
 	NameplateCategory,
 	NameplateSettings,
-} from "../lib/game/renderer/nameplate-policy";
+} from "../lib/game/renderer/overlays/nameplate-policy";
 import type {
 	EnvCellRenderMode,
 	RenderLayerVisibility,
 	RendererFrameDiagnosticsSnapshot,
 } from "../lib/game/renderer/renderer";
-import type { TextureFilteringPolicy } from "../lib/game/renderer/texture-filtering-policy";
-import type { Texture2DReadback } from "../lib/game/renderer/webgl2-device";
+import type { TextureFilteringPolicy } from "../lib/game/renderer/webgl2/texture-filtering-policy";
+import type { Texture2DReadback } from "../lib/game/renderer/webgl2/webgl2-device";
 import type { DynamicEntityView } from "../lib/game/runtime/dynamic-entity-feed";
 import type {
 	GamePresentationRuntime,

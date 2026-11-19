@@ -11,8 +11,8 @@ import {
 } from "../magic/spell-bar-state.js";
 import { MAX_ACTION_BARS } from "../hud/action-bar-contract.js";
 import { CLIENT_INSPECTION_PREVIEW_HEIGHT } from "../inventory/inspection-layout.js";
-import { ENTITY_SHADOW_MODES } from "../../lib/game/renderer/entity-shadow-modes.js";
-import { TEXTURE_FILTERING_POLICIES } from "../../lib/game/renderer/texture-filtering-policy.js";
+import { ENTITY_SHADOW_MODES } from "../../lib/game/renderer/shadows/entity-shadow-modes.js";
+import { TEXTURE_FILTERING_POLICIES } from "../../lib/game/renderer/webgl2/texture-filtering-policy.js";
 import {
 	CLIENT_DEFAULT_THEME_ID,
 	CLIENT_MUSIC_VOLUME_DEFAULT,

@@ -1,6 +1,6 @@
 import { observeUiTheme } from "./ui-theme";
 import { createUiThemeColorReader } from "./ui-theme-color";
-import type { EntitySelectionOutlineColors } from "../lib/game/renderer/entity-selection-outline-policy";
+import type { EntitySelectionOutlineColors } from "../lib/game/renderer/overlays/entity-selection-outline-policy";
 
 /** Read the theme palette at the frontend boundary, never from renderer code. */
 export function readEntitySelectionColors(

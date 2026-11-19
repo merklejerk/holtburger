@@ -4,7 +4,7 @@ import {
 	PARTICLE_RECORDS_PER_ROW,
 	writeParticleRecord,
 	type ParticleInstanceRecord,
-} from "../renderer/particle-record-layout";
+} from "../renderer/passes/particle-record-layout";
 
 /** RGBA32F carries four floats per texel. */
 const FLOATS_PER_TEXEL = 4;

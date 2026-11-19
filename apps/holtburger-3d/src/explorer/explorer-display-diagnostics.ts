@@ -17,21 +17,21 @@ import {
 	mapHeadingFromSceneTransform,
 	type MapAnchor,
 } from "../lib/game/map/map-view";
-import type { AmbientOcclusionSettings } from "../lib/game/renderer/ambient-occlusion-policy";
-import type { ColorGradeSettings } from "../lib/game/renderer/color-grade-policy";
+import type { AmbientOcclusionSettings } from "../lib/game/renderer/passes/ambient-occlusion-policy";
+import type { ColorGradeSettings } from "../lib/game/renderer/passes/color-grade-policy";
 import {
 	createEntityShadowSettings,
 	type EntityShadowSettings,
-} from "../lib/game/renderer/entity-shadow-policy";
-import type { NameplateCategory } from "../lib/game/renderer/nameplate-policy";
+} from "../lib/game/renderer/shadows/entity-shadow-policy";
+import type { NameplateCategory } from "../lib/game/renderer/overlays/nameplate-policy";
 import { isRenderScale } from "../lib/game/renderer/render-scale";
 import type {
 	EnvCellRenderMode,
 	FrameSettings,
 	RendererFrameDiagnosticsSnapshot,
 } from "../lib/game/renderer/renderer";
-import type { TextureFilteringPolicy } from "../lib/game/renderer/texture-filtering-policy";
-import type { Texture2DReadback } from "../lib/game/renderer/webgl2-device";
+import type { TextureFilteringPolicy } from "../lib/game/renderer/webgl2/texture-filtering-policy";
+import type { Texture2DReadback } from "../lib/game/renderer/webgl2/webgl2-device";
 import type { GamePresentationOwner } from "../lib/game/runtime/game-presentation-owner";
 import type {
 	GamePresentationRuntime,

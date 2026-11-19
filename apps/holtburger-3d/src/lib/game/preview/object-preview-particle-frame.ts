@@ -1,9 +1,9 @@
 import {
 	PARTICLE_INSTANCE_FLOAT_COUNT,
 	PARTICLE_RECORDS_PER_ROW,
-} from "../renderer/particle-record-layout";
-import type { ParticleDrawRange } from "../renderer/particle-render-routing";
-import type { ParticleRecordFrame } from "../renderer/webgl2-particle-pass";
+} from "../renderer/passes/particle-record-layout";
+import type { ParticleDrawRange } from "../renderer/passes/particle-render-routing";
+import type { ParticleRecordFrame } from "../renderer/passes/webgl2-particle-pass";
 
 type MutableRange = {
 	-readonly [Key in keyof ParticleDrawRange]: ParticleDrawRange[Key];

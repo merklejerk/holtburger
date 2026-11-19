@@ -4,7 +4,7 @@ import {
 	barberPreviewSchema,
 } from "../character/barber-state";
 import type { DynamicPresentationOverride } from "../../lib/game/runtime/dynamic-presentation-override";
-import type { EntityOverlayFrame } from "../../lib/game/renderer/entity-overlay-policy";
+import type { EntityOverlayFrame } from "../../lib/game/renderer/overlays/entity-overlay-policy";
 import { rotateRenderVector } from "../../lib/game/math/camera-orientation";
 import { RenderSceneInterestController } from "../../lib/game/runtime/render-scene-interest-controller";
 import {

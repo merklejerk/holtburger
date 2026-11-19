@@ -1,6 +1,6 @@
 import type { SummonLeashInput } from "../runtime/summon-presentation";
 import type { RendererCombatEffectsCapability } from "../systems/combat-effects-system";
-import type { BakedDrawMergeCensus } from "./baked-draw-merge-census";
+import type { BakedDrawMergeCensus } from "./webgl2/baked-draw-merge-census";
 import type { LandblockOwnerId } from "../game-types";
 import type { RenderExtent } from "./render-extent";
 import type { ResolvedScenePlacement, SceneNodeId } from "../scene";
@@ -22,23 +22,23 @@ export interface OutdoorLightLookup {
 	readonly isEmpty: boolean;
 	resolve(landblockId: LandblockOwnerId): LandblockLights;
 }
-import type { TextureFilteringPolicy } from "./texture-filtering-policy";
+import type { TextureFilteringPolicy } from "./webgl2/texture-filtering-policy";
 import type { SkySourcePresentations } from "../../assets/decode-sky-record";
 import type { ParticleMeshPresentations } from "../../assets/decode-particle-mesh-record";
 import type { ParticleSourceRange } from "../systems/particle-system";
-import type { ParticleRecordFrame } from "./webgl2-particle-pass";
+import type { ParticleRecordFrame } from "./passes/webgl2-particle-pass";
 import type { TexturePreparer } from "../textures/texture-preparer";
-import type { AmbientOcclusionSettings } from "./ambient-occlusion-policy";
-import type { ColorGradeSettings } from "./color-grade-policy";
-import type { EntityShadowSettings } from "./entity-shadow-policy";
-import type { EntitySelectionOutlineSettings } from "./entity-selection-outline-policy";
+import type { AmbientOcclusionSettings } from "./passes/ambient-occlusion-policy";
+import type { ColorGradeSettings } from "./passes/color-grade-policy";
+import type { EntityShadowSettings } from "./shadows/entity-shadow-policy";
+import type { EntitySelectionOutlineSettings } from "./overlays/entity-selection-outline-policy";
 import type { LocalSelectionSphere } from "../selection/entity-interaction-shape";
-import type { NameplateSettings } from "./nameplate-policy";
+import type { NameplateSettings } from "./overlays/nameplate-policy";
 import type {
 	EntityOverlayLookup,
 	EntityOverlaySettings,
 	HealthBarSettings,
-} from "./entity-overlay-policy";
+} from "./overlays/entity-overlay-policy";
 
 /** Environment-cell visibility scheduler selected without rebuilding resident content. */
 export type EnvCellRenderMode = "flat" | "portal";

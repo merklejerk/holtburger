@@ -26,7 +26,7 @@
 	import { resolveExplorerOutdoorFocusPose } from "../../explorer/explorer-camera-framing";
 	import { ExplorerCameraInputController } from "../../explorer/explorer-camera-input-controller";
 	import { EXPLORER_TUNING } from "../../explorer/explorer-tuning";
-	import type { BakedDrawMergeCensus } from "../../lib/game/renderer/baked-draw-merge-census";
+	import type { BakedDrawMergeCensus } from "../../lib/game/renderer/webgl2/baked-draw-merge-census";
 	import { MapRenderer } from "../../lib/game/map/map-renderer";
 	import { MAP_DEFAULT_VIEW_DIAMETERS } from "../../lib/game/map/map-appearance";
 	import {
@@ -38,7 +38,7 @@
 	import {
 		createColorGradeParameters,
 		type ColorGradeParameters,
-	} from "../../lib/game/renderer/color-grade-policy";
+	} from "../../lib/game/renderer/passes/color-grade-policy";
 	import { HttpLandblockContentSource } from "../../lib/assets/http-landblock-content-source";
 	import type {
 		HttpLandblockProfileDiagnostic,
@@ -53,7 +53,7 @@
 		SyntheticNameplateSetupVisualSource,
 		type SyntheticNameplateWorkload,
 	} from "./synthetic-nameplate-workload";
-	import { OPENED_CONTAINER_NAMEPLATE_ICON_ID } from "../../lib/game/renderer/nameplate-icon-source";
+	import { OPENED_CONTAINER_NAMEPLATE_ICON_ID } from "../../lib/game/renderer/overlays/nameplate-icon-source";
 	import {
 		DynamicOnlyLandblockSource,
 		WithoutAuthoredDynamicsLandblockSource,
@@ -84,7 +84,7 @@
 	} from "../../lib/game/camera/projection-clearance";
 	import { Vec3, type Mat4 } from "../../lib/game/math/types";
 	import { transformPoint3 } from "../../lib/game/math/matrices";
-	import { WebGL2Device } from "../../lib/game/renderer/webgl2-device";
+	import { WebGL2Device } from "../../lib/game/renderer/webgl2/webgl2-device";
 	import {
 		probeWebGL2ContextLossPolicy,
 		runWebGL2PortalScopeAtlasTargetsFixture,
@@ -137,24 +137,24 @@
 		type ObjectPreviewResources,
 		type ObjectPreviewHandle,
 	} from "../../lib/game/preview/object-preview-controller";
-	import type { ObjectPreviewRendererDiagnostics } from "../../lib/game/renderer/webgl2-preview-renderer";
+	import type { ObjectPreviewRendererDiagnostics } from "../../lib/game/renderer/webgl2/webgl2-preview-renderer";
 	import { PresentationAssetService } from "../../lib/game/runtime/presentation-asset-service";
 	import { validateRenderScale } from "../../lib/game/renderer/render-scale";
 	import {
 		createEntityShadowSettings,
 		type EntityShadowMode,
 		type EntityShadowSettings,
-	} from "../../lib/game/renderer/entity-shadow-policy";
+	} from "../../lib/game/renderer/shadows/entity-shadow-policy";
 	import type { RenderExtent } from "../../lib/game/renderer/render-extent";
 	import type {
 		PortalExecutionProbeResult,
 		WebGL2Renderer,
-	} from "../../lib/game/renderer/webgl2-renderer";
+	} from "../../lib/game/renderer/webgl2/webgl2-renderer";
 	import {
 		isTextureFilteringPolicy,
 		type TextureFilteringCapabilities,
 		type TextureFilteringPolicy,
-	} from "../../lib/game/renderer/texture-filtering-policy";
+	} from "../../lib/game/renderer/webgl2/texture-filtering-policy";
 	import { resolveSceneEnvironment } from "../../lib/game/environment/scene-environment";
 	import { resolvePhysicalFlyViewDirection } from "../../lib/game/motion/host-physical-fly-path";
 	import type { HostCameraPlacement } from "../../lib/game/motion/host-placed-path";

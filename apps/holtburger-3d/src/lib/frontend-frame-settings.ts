@@ -1,10 +1,10 @@
 import { SHARED_FRONTEND_TUNING } from "./frontend-tuning.js";
 import { normalizedRgbaColor } from "./frontend-color.js";
-import { DEFAULT_AMBIENT_OCCLUSION_PARAMETERS } from "./game/renderer/ambient-occlusion-policy.js";
-import { DEFAULT_COLOR_GRADE_PARAMETERS } from "./game/renderer/color-grade-policy.js";
-import { DEFAULT_ENTITY_SHADOW_SETTINGS } from "./game/renderer/entity-shadow-policy.js";
-import type { NameplateSettings } from "./game/renderer/nameplate-policy";
-import type { HealthBarSettings } from "./game/renderer/entity-overlay-policy";
+import { DEFAULT_AMBIENT_OCCLUSION_PARAMETERS } from "./game/renderer/passes/ambient-occlusion-policy.js";
+import { DEFAULT_COLOR_GRADE_PARAMETERS } from "./game/renderer/passes/color-grade-policy.js";
+import { DEFAULT_ENTITY_SHADOW_SETTINGS } from "./game/renderer/shadows/entity-shadow-policy.js";
+import type { NameplateSettings } from "./game/renderer/overlays/nameplate-policy";
+import type { HealthBarSettings } from "./game/renderer/overlays/entity-overlay-policy";
 import type { FrameSettings } from "./game/renderer/renderer";
 import { LandblockLayerKind } from "./game/runtime/scene-interest.js";
 

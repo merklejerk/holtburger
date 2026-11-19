@@ -10,7 +10,7 @@ import type {
 } from "./native-performance";
 import { terrainCaptureDelta } from "./performance-report";
 import { EXPLORER_TUNING } from "../explorer/explorer-tuning";
-import { WebGL2FrameProfiler } from "../lib/game/renderer/webgl2-gpu-frame-profiler";
+import { WebGL2FrameProfiler } from "../lib/game/renderer/webgl2/webgl2-gpu-frame-profiler";
 import type { ClosedWorkerPoolDiagnostics } from "../lib/game/workers/closed-worker";
 
 function pool(): ClosedWorkerPoolDiagnostics {

@@ -42,8 +42,8 @@ import { LandblockLayerKind } from "../runtime/scene-interest";
 import { scopeKey } from "../scene/scope";
 import type { DynamicEntityPresentationClass } from "../dynamic-entity-presentation-class";
 import type { NameplateContent } from "../systems/dynamic-presentation-source";
-import type { NameplateSourceVisual } from "./nameplate-policy";
-import { isEntityShadowCasterClass } from "./entity-shadow-policy";
+import type { NameplateSourceVisual } from "./overlays/nameplate-policy";
+import { isEntityShadowCasterClass } from "./shadows/entity-shadow-policy";
 
 const OUTDOOR_SCOPE = [{ kind: "outdoor" }] as const;
 const isDynamicCullingGroup: SceneCullingGroupFilter = (group) =>

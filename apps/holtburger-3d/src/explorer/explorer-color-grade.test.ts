@@ -4,7 +4,7 @@ import {
 	MINIMUM_CONTROL_POINT_SEPARATION,
 	createColorGradeParameters,
 	type ColorGradeCurve,
-} from "../lib/game/renderer/color-grade-policy";
+} from "../lib/game/renderer/passes/color-grade-policy";
 import {
 	COLOR_GRADE_CURVE_CHANNELS,
 	addControlPoint,

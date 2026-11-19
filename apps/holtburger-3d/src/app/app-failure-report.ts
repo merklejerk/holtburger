@@ -1,7 +1,7 @@
 import { formatError } from "../lib/format-error";
 import type { RuntimeLogSnapshot } from "./runtime-log-contract";
 import { APP_BUILD_LABEL } from "./app-build";
-import type { WebGL2FailureReport } from "../lib/game/renderer/webgl2-failure-diagnostics";
+import type { WebGL2FailureReport } from "../lib/game/renderer/webgl2/webgl2-failure-diagnostics";
 
 declare global {
 	interface Window {

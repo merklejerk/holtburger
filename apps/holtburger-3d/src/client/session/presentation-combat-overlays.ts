@@ -1,4 +1,4 @@
-import { EMPTY_ENTITY_OVERLAY_FRAME } from "../../lib/game/renderer/entity-overlay-policy";
+import { EMPTY_ENTITY_OVERLAY_FRAME } from "../../lib/game/renderer/overlays/entity-overlay-policy";
 import type { DynamicEntityView } from "../../lib/game/runtime/dynamic-entity-feed";
 import type { DynamicPresentationOverride } from "../../lib/game/runtime/dynamic-presentation-override";
 import type { SummonVisualLevel } from "../../lib/game/runtime/summon-presentation";

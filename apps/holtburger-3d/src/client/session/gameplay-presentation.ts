@@ -14,7 +14,7 @@ import type { ClientLockFeedbackFrame } from "../inventory/lock-feedback";
 import {
 	EMPTY_ENTITY_OVERLAY_FRAME,
 	type EntityOverlayFrame,
-} from "../../lib/game/renderer/entity-overlay-policy";
+} from "../../lib/game/renderer/overlays/entity-overlay-policy";
 import type { NameplateMode } from "../world/entity-overlays";
 import type { BarberPreview } from "../character/barber-state";
 import type { DynamicPresentationOverride } from "../../lib/game/runtime/dynamic-presentation-override";

@@ -2,7 +2,8 @@ Holtburger beta includes the 3D client and the terminal client (CLI).
 
 ## In this beta
 
-- **3D client, dungeons:** Fixed visible seams at dungeon portals and where outdoor buildings overlap.
+- **3D client, alerts:** Alerting entities now show a star crest on their nameplate and a glowing beacon in the world, so threats are easier to spot at a distance.
+- **3D client, animation:** Characters can now move and blend upper-body animation while switching stances and performing manual gestures.
 
 ## Known issues
 

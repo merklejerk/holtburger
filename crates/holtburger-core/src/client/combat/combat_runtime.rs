@@ -7,7 +7,7 @@ use crate::client::types::{
 };
 use crate::client::{ClientRuntime, ClientState};
 use anyhow::Result;
-use holtburger_common::properties::{PropertyString, WorldObjectPropertyAccessors};
+use holtburger_common::properties::{PropertyString, WorldObjectExt, WorldObjectPropertyAccessors};
 use holtburger_common::{CharacterOption, Guid};
 use holtburger_protocol::messages::combat::CombatMode;
 use holtburger_protocol::messages::movement::MotionStance;
@@ -19,12 +19,23 @@ use holtburger_world::{ContactState, SpatialBodyId};
 use std::time::{Duration, Instant};
 
 /// Resolved cast request shared by wire publication and pending-operation correlation.
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct PreparedSpellCast {
     /// Canonical spell identifier after stripping the frontend marker bit.
     spell_id: u32,
     /// Actual recipient after resolving self-target and untargeted spell routes.
     target: Option<Guid>,
+}
+
+/// Single-slot queued spell cast awaiting completion of the active busy operation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::client) struct QueuedSpellCast {
+    /// Validated spell and target resolved when the cast was requested.
+    action: PreparedSpellCast,
+    /// Character identity at submission; mismatched characters never replay.
+    character: Guid,
+    /// Portal/world generation at submission; mismatched generations never replay.
+    generation: u64,
 }
 
 impl PreparedSpellCast {
@@ -175,6 +186,7 @@ impl ClientRuntime {
         &mut self,
         now: Instant,
     ) -> Result<()> {
+        self.drain_queued_spell_cast().await?;
         let previous = self.combat_engagement.status();
         let ready = self.combat_request_ready();
         let effect = self.combat_engagement.next_effect(now, ready);
@@ -480,19 +492,94 @@ impl ClientRuntime {
         Ok(PreparedSpellCast { spell_id, target })
     }
 
-    async fn cast_spell(&mut self, spell_id: u32, aim: SpellCastAim) -> Result<()> {
-        let action = match self.prepare_spell_cast(spell_id, aim) {
-            Ok(action) => action,
-            Err(message) => {
-                self.reject_combat_request(message);
-                return Ok(());
-            }
+    pub(in crate::client) fn cancel_queued_spell_cast(&mut self) {
+        self.portal.queued_spell_cast = None;
+    }
+
+    /// Competing gameplay commands supersede a queued spell; movement preserves slide-casting.
+    pub(in crate::client) fn cancel_queued_spell_for_command(&mut self, cmd: &ClientCommand) {
+        let cancels_queue = match cmd {
+            ClientCommand::SetCombatMode(mode) => *mode != CombatMode::Magic,
+            ClientCommand::ToggleCombatMode
+            | ClientCommand::BeginCombatEngagement { .. }
+            | ClientCommand::SetRestPosture(_)
+            | ClientCommand::SoulEmote { .. }
+            | ClientCommand::ApplyEquipmentSet { .. }
+            | ClientCommand::SubmitInventory { .. }
+            | ClientCommand::AutoMergeContainer { .. }
+            | ClientCommand::Use { .. }
+            | ClientCommand::UseWithTarget { .. }
+            | ClientCommand::SubmitItemUse(_)
+            | ClientCommand::SalvageItemsWith { .. }
+            | ClientCommand::SubmitSalvage(_)
+            | ClientCommand::VendorTrade(_)
+            | ClientCommand::SubmitHousingPayment(_)
+            | ClientCommand::SubmitHousingManagement(_)
+            | ClientCommand::Trade(_)
+            | ClientCommand::Recall(_)
+            | ClientCommand::TeleportToMapPosition(_)
+            | ClientCommand::Suicide
+            | ClientCommand::Logout
+            | ClientCommand::Disconnect
+            | ClientCommand::Quit => true,
+            _ => false,
         };
+        if cancels_queue {
+            self.cancel_queued_spell_cast();
+        }
+    }
+
+    fn magic_stance_allows_queued_cast(&self) -> bool {
+        match self.portal.pending_combat_mode {
+            Some(CombatMode::Magic) => true,
+            Some(_) => false,
+            None => self.world.player_combat_mode() == CombatMode::Magic,
+        }
+    }
+
+    fn queued_spell_cast_is_dispatchable(&self, queued: &QueuedSpellCast) -> bool {
+        if !matches!(self.conn.state, ClientState::InWorld)
+            || self.portal.activation.is_some()
+            || queued.character != self.world.player.guid
+            || queued.generation != self.conn.world_generation
+            || self.world.player.guid == Guid::NULL
+            || self.world.player_is_dead()
+            || self.inventory_change_pending()
+            || !self.magic_stance_allows_queued_cast()
+        {
+            return false;
+        }
+        if self.character.described_character == Some(self.world.player.guid)
+            && !self
+                .world
+                .player
+                .spells
+                .contains_key(&queued.action.spell_id)
+        {
+            return false;
+        }
+        if let Some(target) = queued.action.target
+            && target != self.world.player.guid
+        {
+            let Some(entity) = self.world.entities.get(target) else {
+                return false;
+            };
+            if entity.is_creature()
+                && entity
+                    .motion_command()
+                    .is_some_and(InterpretedMotionCommand::is_dead)
+            {
+                return false;
+            }
+        }
+        true
+    }
+
+    async fn dispatch_prepared_spell_cast(&mut self, action: PreparedSpellCast) -> Result<()> {
         if !self.arm_busy_operation(crate::client::PendingOperation::SpellCast {
             target: action.target,
         }) {
-            self.reject_combat_request("Wait for the current action to finish.");
-            return Ok(());
+            unreachable!("spell cast dispatch requires idle busy ownership");
         }
         let result = self.send_game_action(action.to_action()).await;
         if let (Ok(()), Some(target)) = (&result, action.target) {
@@ -502,6 +589,50 @@ impl ClientRuntime {
             self.clear_busy_operation();
         }
         result
+    }
+
+    /// Dispatches the retained queued spell once busy ownership is idle and preconditions hold.
+    pub(in crate::client) async fn drain_queued_spell_cast(&mut self) -> Result<()> {
+        if self.character.active_busy_operation.is_some() {
+            return Ok(());
+        }
+        let Some(queued) = self.portal.queued_spell_cast.take() else {
+            return Ok(());
+        };
+        if !self.queued_spell_cast_is_dispatchable(&queued) {
+            return Ok(());
+        }
+        self.dispatch_prepared_spell_cast(queued.action).await
+    }
+
+    async fn cast_spell(&mut self, spell_id: u32, aim: SpellCastAim) -> Result<()> {
+        let action = match self.prepare_spell_cast(spell_id, aim) {
+            Ok(action) => action,
+            Err(message) => {
+                self.reject_combat_request(message);
+                return Ok(());
+            }
+        };
+        if self.character.active_busy_operation.is_some() {
+            // RETAIL DIVERGENCE: Retail behavior is to send every spell cast immediately without
+            // a local busy gate and let the server reject overlapping casts with YoureTooBusy
+            // (with optional server-side single-cast recoil queueing only after release). Instead,
+            // we retain a single replaceable client-side queued cast while any busy operation is
+            // active and dispatch it when busy ownership completes, suppressing local busy
+            // rejections. Restoring retail behavior would either emit repeated busy errors during
+            // spell chaining or weaken core's single-in-flight busy/target-tracking invariant.
+            // Census: all ClientCommand::CastSpell callers (h3d spell bar, h3d spells panel, TUI
+            // spells tab, and scripting); wire actions remain standard
+            // CastTargetedSpell/CastUntargetedSpell.
+            self.portal.queued_spell_cast = Some(QueuedSpellCast {
+                action,
+                character: self.world.player.guid,
+                generation: self.conn.world_generation,
+            });
+            return Ok(());
+        }
+        self.portal.queued_spell_cast = None;
+        self.dispatch_prepared_spell_cast(action).await
     }
 
     /// Both explicit casts and spell-bearing item uses supply the same cosmetic identity hints.
@@ -1673,7 +1804,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn cast_does_not_wait_for_stance_and_preserves_busy_overlap() {
+    async fn cast_does_not_wait_for_stance_and_queues_overlap_silently() {
         let mut client = client(0);
         client
             .handle_command(ClientCommand::SetCombatMode(CombatMode::Magic))
@@ -1705,16 +1836,16 @@ mod tests {
         let mut events = client.subscribe_client_view_events();
         client.handle_command(command()).await.unwrap();
         assert_eq!(client.session.game_action_sequence, 2);
-        assert!(matches!(
-            events.try_recv().unwrap(),
-            ClientViewEvent::ActionResult { .. }
-        ));
+        assert!(events.try_recv().is_err());
+        assert!(client.portal.queued_spell_cast.is_some());
         client.note_busy_error(WeenieError::YoureTooBusy, None);
         client
             .finish_busy_operation_from_use_done(WeenieError::None)
             .await
             .unwrap();
         assert!(client.character.active_busy_operation.is_none());
+        assert!(client.portal.queued_spell_cast.is_none());
+        assert_eq!(client.session.game_action_sequence, 2);
         let mut saw_error = false;
         while let Ok(event) = events.try_recv() {
             if let ClientViewEvent::BusyOperationFinished {
@@ -1731,13 +1862,496 @@ mod tests {
         }
         assert!(saw_error);
         client.handle_command(command()).await.unwrap();
+        client.handle_command(command()).await.unwrap();
+        assert!(client.portal.queued_spell_cast.is_some());
         client.poll_busy_timeout(
             Instant::now() + crate::client::BUSY_OPERATION_TIMEOUT + Duration::from_secs(1),
         );
         assert!(client.character.active_busy_operation.is_none());
+        assert!(client.portal.queued_spell_cast.is_none());
         client.handle_command(command()).await.unwrap();
+        client.handle_command(command()).await.unwrap();
+        assert!(client.portal.queued_spell_cast.is_some());
         client.set_exit_cause(ClientExitCause::ServerDisconnect);
         assert!(client.character.active_busy_operation.is_none());
+        assert!(client.portal.queued_spell_cast.is_none());
+    }
+
+    fn magic_queue_client() -> ClientRuntime {
+        let mut client = client(0);
+        client
+            .world
+            .seed_local_player_entity(Guid(1), "Mage", WorldPosition::default());
+        client
+            .world
+            .player_entity_mut()
+            .unwrap()
+            .set_int_prop(PropertyInt::CombatMode, CombatMode::Magic as i32);
+        let targeted_spell = client.world.spell_catalog.get(42).unwrap().clone();
+        let spells = &mut Arc::make_mut(&mut client.world.spell_catalog).spells;
+        spells.insert(43, targeted_spell.clone());
+        spells.insert(44, targeted_spell);
+        spells.insert(45, spell_info(MagicSchool::LifeMagic, 0x08, 0));
+        for (guid, name) in [(Guid(2), "Drudge A"), (Guid(3), "Drudge B")] {
+            let mut creature =
+                holtburger_world::entity::Entity::new(guid, name.into(), WorldPosition::default());
+            creature.set_int_prop(PropertyInt::ItemType, ItemType::CREATURE.bits() as i32);
+            client.world.entities.insert(creature);
+        }
+        client
+    }
+
+    #[tokio::test]
+    async fn queued_spell_replaces_earlier_slot_and_drains_in_causal_order_on_use_done() {
+        let mut client = magic_queue_client();
+        let capture = tempfile::NamedTempFile::new().unwrap();
+        client
+            .session
+            .set_capture(capture.path().to_str().unwrap())
+            .unwrap();
+        client
+            .handle_command(ClientCommand::CastSpell {
+                spell_id: 42,
+                aim: SpellCastAim::Normal {
+                    selection: Some(Guid(2)),
+                },
+            })
+            .await
+            .unwrap();
+        let mut events = client.subscribe_client_view_events();
+
+        // First overlapping cast queues silently.
+        client
+            .handle_command(ClientCommand::CastSpell {
+                spell_id: 43,
+                aim: SpellCastAim::Normal {
+                    selection: Some(Guid(2)),
+                },
+            })
+            .await
+            .unwrap();
+        assert!(events.try_recv().is_err());
+
+        // Invalid cast rejects immediately without wiping the already-queued spell.
+        client
+            .handle_command(ClientCommand::CastSpell {
+                spell_id: 99,
+                aim: SpellCastAim::Untargeted,
+            })
+            .await
+            .unwrap();
+        assert!(matches!(
+            events.try_recv().unwrap(),
+            ClientViewEvent::ActionResult { .. }
+        ));
+        assert_eq!(
+            client
+                .portal
+                .queued_spell_cast
+                .as_ref()
+                .map(|queued| queued.action.spell_id),
+            Some(43)
+        );
+
+        // Newer valid cast replaces the queued spell.
+        client
+            .handle_command(ClientCommand::CastSpell {
+                spell_id: 44,
+                aim: SpellCastAim::Normal {
+                    selection: Some(Guid(3)),
+                },
+            })
+            .await
+            .unwrap();
+        assert!(events.try_recv().is_err());
+        assert_eq!(captured_actions(&capture).len(), 1);
+
+        client
+            .finish_busy_operation_from_use_done(WeenieError::None)
+            .await
+            .unwrap();
+        assert!(client.portal.queued_spell_cast.is_none());
+        assert_eq!(
+            client
+                .character
+                .active_busy_operation
+                .as_ref()
+                .unwrap()
+                .operation,
+            crate::client::PendingOperation::SpellCast {
+                target: Some(Guid(3))
+            }
+        );
+
+        let drained: Vec<_> = std::iter::from_fn(|| events.try_recv().ok()).collect();
+        let finished_index = drained
+            .iter()
+            .position(|event| matches!(event, ClientViewEvent::BusyOperationFinished { .. }))
+            .expect("first cast completion must be published");
+        let next_busy_index = drained
+            .iter()
+            .position(|event| {
+                matches!(
+                    event,
+                    ClientViewEvent::BusyStateUpdated {
+                        busy: Some(BusyOperationKind::SpellCast)
+                    }
+                )
+            })
+            .expect("queued cast must arm busy state");
+        assert!(finished_index < next_busy_index);
+
+        let actions = captured_actions(&capture);
+        assert_eq!(actions.len(), 2);
+        assert!(matches!(
+            &actions[0],
+            GameAction::CastTargetedSpell(data) if data.spell_id == 42 && data.target == Guid(2)
+        ));
+        assert!(matches!(
+            &actions[1],
+            GameAction::CastTargetedSpell(data) if data.spell_id == 44 && data.target == Guid(3)
+        ));
+    }
+
+    #[tokio::test]
+    async fn queued_spell_drains_after_non_spell_busy_op_fizzle_and_tick_completion() {
+        // Queue behind a non-spell busy op (e.g., healing kit / item use).
+        let mut client = magic_queue_client();
+        client.arm_busy_operation(crate::client::PendingOperation::UseWithTarget {
+            spell_target: None,
+        });
+        client
+            .handle_command(ClientCommand::CastSpell {
+                spell_id: 42,
+                aim: SpellCastAim::Normal {
+                    selection: Some(Guid(2)),
+                },
+            })
+            .await
+            .unwrap();
+        assert_eq!(client.session.game_action_sequence, 0);
+        client
+            .finish_busy_operation_from_use_done(WeenieError::None)
+            .await
+            .unwrap();
+        assert_eq!(client.session.game_action_sequence, 1);
+        assert_eq!(
+            client.active_busy_operation(),
+            Some(BusyOperationKind::SpellCast)
+        );
+
+        // Fizzle on the active spell still drains the queued spell after emitting the error.
+        let mut events = client.subscribe_client_view_events();
+        client
+            .handle_command(ClientCommand::CastSpell {
+                spell_id: 43,
+                aim: SpellCastAim::Normal {
+                    selection: Some(Guid(3)),
+                },
+            })
+            .await
+            .unwrap();
+        client
+            .finish_busy_operation_from_use_done(WeenieError::YourSpellFizzled)
+            .await
+            .unwrap();
+        assert_eq!(client.session.game_action_sequence, 2);
+        assert_eq!(
+            client.application_snapshot().spell_cast_target,
+            Some(Guid(3))
+        );
+        let drained: Vec<_> = std::iter::from_fn(|| events.try_recv().ok()).collect();
+        let fizzle_index = drained
+            .iter()
+            .position(|event| {
+                matches!(
+                    event,
+                    ClientViewEvent::ActionResult {
+                        reason: ActionResultReason::Weenie(WeenieError::YourSpellFizzled, None),
+                        ..
+                    }
+                )
+            })
+            .expect("fizzle error must precede queued cast");
+        let next_busy_index = drained
+            .iter()
+            .position(|event| {
+                matches!(
+                    event,
+                    ClientViewEvent::BusyStateUpdated {
+                        busy: Some(BusyOperationKind::SpellCast)
+                    }
+                )
+            })
+            .expect("queued cast must arm busy state");
+        assert!(fizzle_index < next_busy_index);
+
+        // Non-UseDone busy completion drains on the next combat-engagement tick.
+        client
+            .handle_command(ClientCommand::CastSpell {
+                spell_id: 44,
+                aim: SpellCastAim::Normal {
+                    selection: Some(Guid(2)),
+                },
+            })
+            .await
+            .unwrap();
+        client.character.active_busy_operation = None;
+        client
+            .advance_combat_engagement(Instant::now())
+            .await
+            .unwrap();
+        assert_eq!(client.session.game_action_sequence, 3);
+        assert_eq!(
+            client.application_snapshot().spell_cast_target,
+            Some(Guid(2))
+        );
+    }
+
+    #[tokio::test]
+    async fn movement_preserves_queued_spell_while_competing_actions_and_stance_loss_cancel_it() {
+        // Movement and repeated SetCombatMode(Magic) preserve the queued cast.
+        let mut client = magic_queue_client();
+        client.arm_busy_operation(crate::client::PendingOperation::SpellCast {
+            target: Some(Guid(2)),
+        });
+        client
+            .handle_command(ClientCommand::CastSpell {
+                spell_id: 42,
+                aim: SpellCastAim::Normal {
+                    selection: Some(Guid(2)),
+                },
+            })
+            .await
+            .unwrap();
+        client
+            .handle_command(ClientCommand::DriveSelf(PlayerDriveIntent::ManualHeld(
+                CharacterDrive::builder().forward().strafe_left().build(),
+            )))
+            .await
+            .unwrap();
+        client
+            .handle_command(ClientCommand::SetCombatMode(CombatMode::Magic))
+            .await
+            .unwrap();
+        assert!(client.portal.queued_spell_cast.is_some());
+        let before_drain = client.session.game_action_sequence;
+        client
+            .finish_busy_operation_from_use_done(WeenieError::None)
+            .await
+            .unwrap();
+        assert_eq!(client.session.game_action_sequence, before_drain + 1);
+
+        // Competing commands cancel the queued cast immediately.
+        for command in [
+            ClientCommand::ToggleCombatMode,
+            ClientCommand::SetCombatMode(CombatMode::NonCombat),
+            ClientCommand::BeginCombatEngagement {
+                intent_sequence: 1,
+                target: Guid(2),
+                profile: ClientAttackProfile::Melee {
+                    height: AttackHeight::Medium,
+                    power: 0.5,
+                },
+            },
+            ClientCommand::SetRestPosture(holtburger_world::motion::RestPosture::Sitting),
+            ClientCommand::Use {
+                guid: Guid(10),
+                unrestricted: false,
+            },
+            ClientCommand::Recall(crate::client::recall::RecallDestination::Lifestone),
+        ] {
+            let mut client = magic_queue_client();
+            client.arm_busy_operation(crate::client::PendingOperation::SpellCast {
+                target: Some(Guid(2)),
+            });
+            client
+                .handle_command(ClientCommand::CastSpell {
+                    spell_id: 42,
+                    aim: SpellCastAim::Normal {
+                        selection: Some(Guid(2)),
+                    },
+                })
+                .await
+                .unwrap();
+            assert!(client.portal.queued_spell_cast.is_some());
+            client.handle_command(command).await.unwrap();
+            assert!(client.portal.queued_spell_cast.is_none());
+        }
+
+        // Server-driven departure from Magic stance cancels the queued cast immediately.
+        let mut client = magic_queue_client();
+        client.arm_busy_operation(crate::client::PendingOperation::SpellCast {
+            target: Some(Guid(2)),
+        });
+        client
+            .handle_command(ClientCommand::CastSpell {
+                spell_id: 42,
+                aim: SpellCastAim::Normal {
+                    selection: Some(Guid(2)),
+                },
+            })
+            .await
+            .unwrap();
+        client
+            .world
+            .player_entity_mut()
+            .unwrap()
+            .set_int_prop(PropertyInt::CombatMode, CombatMode::NonCombat as i32);
+        client.handle_world_event(&holtburger_world::WorldEvent::CombatModeUpdated(
+            CombatMode::NonCombat,
+        ));
+        assert!(client.portal.queued_spell_cast.is_none());
+        client
+            .finish_busy_operation_from_use_done(WeenieError::None)
+            .await
+            .unwrap();
+        assert_eq!(client.session.game_action_sequence, 0);
+    }
+
+    #[tokio::test]
+    async fn queued_spell_drain_validates_target_liveness_item_targets_and_lifecycle() {
+        use holtburger_world::entity::{EntityMotionSnapshot, EntityNetworkMotion};
+
+        // Despawned target drops silently on UseDone.
+        let mut client = magic_queue_client();
+        client.arm_busy_operation(crate::client::PendingOperation::SpellCast {
+            target: Some(Guid(2)),
+        });
+        client
+            .handle_command(ClientCommand::CastSpell {
+                spell_id: 42,
+                aim: SpellCastAim::Normal {
+                    selection: Some(Guid(2)),
+                },
+            })
+            .await
+            .unwrap();
+        client.world.entities.remove(Guid(2));
+        client
+            .finish_busy_operation_from_use_done(WeenieError::None)
+            .await
+            .unwrap();
+        assert_eq!(client.session.game_action_sequence, 0);
+        assert!(client.character.active_busy_operation.is_none());
+
+        // Dead creature target drops silently on UseDone.
+        let mut client = magic_queue_client();
+        client.arm_busy_operation(crate::client::PendingOperation::SpellCast {
+            target: Some(Guid(2)),
+        });
+        client
+            .handle_command(ClientCommand::CastSpell {
+                spell_id: 42,
+                aim: SpellCastAim::Normal {
+                    selection: Some(Guid(2)),
+                },
+            })
+            .await
+            .unwrap();
+        client
+            .world
+            .entities
+            .get_mut(Guid(2))
+            .unwrap()
+            .network_motion = EntityNetworkMotion::Initialized(EntityMotionSnapshot {
+            forward_command: Some(InterpretedMotionCommand::DEAD),
+            ..Default::default()
+        });
+        client
+            .finish_busy_operation_from_use_done(WeenieError::None)
+            .await
+            .unwrap();
+        assert_eq!(client.session.game_action_sequence, 0);
+        assert!(client.character.active_busy_operation.is_none());
+
+        // Non-creature inventory item target (e.g., weapon buff) still dispatches on UseDone.
+        let mut client = magic_queue_client();
+        let mut weapon = holtburger_world::entity::Entity::new(
+            Guid(10),
+            "Staff".into(),
+            WorldPosition::default(),
+        );
+        weapon.set_int_prop(PropertyInt::ItemType, ItemType::MELEE_WEAPON.bits() as i32);
+        client.world.entities.insert(weapon);
+        client.arm_busy_operation(crate::client::PendingOperation::SpellCast {
+            target: Some(Guid(2)),
+        });
+        client
+            .handle_command(ClientCommand::CastSpell {
+                spell_id: 42,
+                aim: SpellCastAim::Normal {
+                    selection: Some(Guid(10)),
+                },
+            })
+            .await
+            .unwrap();
+        client
+            .finish_busy_operation_from_use_done(WeenieError::None)
+            .await
+            .unwrap();
+        assert_eq!(client.session.game_action_sequence, 1);
+        assert_eq!(
+            client.application_snapshot().spell_cast_target,
+            Some(Guid(10))
+        );
+
+        // Self-target dispatches while alive, drops silently when player dies.
+        for player_dead in [false, true] {
+            let mut client = magic_queue_client();
+            client.arm_busy_operation(crate::client::PendingOperation::SpellCast {
+                target: Some(Guid(2)),
+            });
+            client
+                .handle_command(ClientCommand::CastSpell {
+                    spell_id: 45,
+                    aim: SpellCastAim::Normal { selection: None },
+                })
+                .await
+                .unwrap();
+            if player_dead {
+                client.world.player_entity_mut().unwrap().network_motion =
+                    EntityNetworkMotion::Initialized(EntityMotionSnapshot {
+                        forward_command: Some(InterpretedMotionCommand::DEAD),
+                        ..Default::default()
+                    });
+            }
+            client
+                .finish_busy_operation_from_use_done(WeenieError::None)
+                .await
+                .unwrap();
+            assert_eq!(
+                client.session.game_action_sequence,
+                if player_dead { 0 } else { 1 }
+            );
+        }
+
+        // World generation bump and portal retirement drop queued casts without replay.
+        for retire_portal in [false, true] {
+            let mut client = magic_queue_client();
+            client.arm_busy_operation(crate::client::PendingOperation::SpellCast {
+                target: Some(Guid(2)),
+            });
+            client
+                .handle_command(ClientCommand::CastSpell {
+                    spell_id: 42,
+                    aim: SpellCastAim::Normal {
+                        selection: Some(Guid(2)),
+                    },
+                })
+                .await
+                .unwrap();
+            if retire_portal {
+                client.retire_portal_epoch("portal");
+            } else {
+                client.bump_world_generation();
+            }
+            client
+                .finish_busy_operation_from_use_done(WeenieError::None)
+                .await
+                .unwrap();
+            assert_eq!(client.session.game_action_sequence, 0);
+        }
     }
     #[tokio::test]
     async fn failed_send_releases_busy_and_publishes_idle() {

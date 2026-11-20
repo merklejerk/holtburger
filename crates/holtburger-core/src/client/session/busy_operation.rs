@@ -11,6 +11,7 @@ use std::time::Instant;
 impl ClientRuntime {
     /// Retire local ownership without claiming that the server stopped processing it.
     pub(in crate::client) fn clear_busy_operation(&mut self) {
+        self.cancel_queued_spell_cast();
         self.character.lock_use = None;
         if let Some(pending) = self.character.active_busy_operation.take() {
             self.emit_pending_abort(&pending.operation, "Interaction ended".into());
@@ -92,14 +93,19 @@ impl ClientRuntime {
             return Ok(());
         }
         if self.finish_vendor_use_done(error).await? {
+            if self.character.active_busy_operation.is_none() {
+                self.finish_queued_spell_after_use_done(error).await?;
+            }
             return Ok(());
         }
+        let mut completed_error = None;
         if let Some(pending) = self.character.active_busy_operation.take() {
             let (resolved_error, parameter) = if error == WeenieError::None {
                 pending.pending_error.unwrap_or((error, None))
             } else {
                 (error, None)
             };
+            completed_error = Some(resolved_error);
             // Wrong-key errors carry no target; resolve it before retiring captured use intent.
             if resolved_error == WeenieError::KeyDoesntFitThisLock
                 && let PendingOperation::GuardedUse {
@@ -137,7 +143,23 @@ impl ClientRuntime {
                 ActionResultReason::Weenie(error, None),
             );
         }
+        if let Some(resolved_error) = completed_error {
+            self.finish_queued_spell_after_use_done(resolved_error)
+                .await?;
+        }
         Ok(())
+    }
+
+    async fn finish_queued_spell_after_use_done(
+        &mut self,
+        error: WeenieError,
+    ) -> anyhow::Result<()> {
+        if error == WeenieError::YoureTooBusy {
+            self.cancel_queued_spell_cast();
+            Ok(())
+        } else {
+            self.drain_queued_spell_cast().await
+        }
     }
 
     fn emit_item_use_finished(&self, operation: &PendingOperation, outcome: ItemUseCompletion) {
@@ -203,6 +225,7 @@ impl ClientRuntime {
             .active_busy_operation
             .take_if(|pending| now >= pending.deadline)
         {
+            self.cancel_queued_spell_cast();
             self.emit_pending_abort(&pending.operation, "Transaction timed out".into());
             self.emit_item_use_finished(&pending.operation, ItemUseCompletion::TimedOut);
             self.publish_busy_completion(pending.operation.kind(), BusyOperationResult::TimedOut);

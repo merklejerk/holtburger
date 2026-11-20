@@ -122,6 +122,7 @@ impl ClientRuntime {
             return self.reject_auto_merge_conflict(cmd).await;
         }
         self.cancel_rest_for_command(&cmd);
+        self.cancel_queued_spell_for_command(&cmd);
         if let ClientCommand::SubmitInventory { intent, .. } = &cmd {
             self.portal.equipment_set.supersede_item(intent.item);
             if let crate::client::inventory_plan::InventoryTarget::Stack { guid, .. }

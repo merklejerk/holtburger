@@ -309,6 +309,8 @@ pub(in crate::client) struct PortalResyncState {
     /// One successfully sent stance request; mode updates retire it, never equipment receipts.
     pub(in crate::client) pending_combat_mode:
         Option<holtburger_protocol::messages::combat::CombatMode>,
+    /// Single-slot queued spell cast waiting for the active busy operation to finish.
+    pub(in crate::client) queued_spell_cast: Option<combat::combat_runtime::QueuedSpellCast>,
     /// Single owner of dependent inventory requests and their local admission.
     pub(in crate::client) inventory_operation: Option<inventory_runtime::InventoryOperation>,
 }
@@ -1554,6 +1556,12 @@ impl ClientRuntime {
                     || *mode == holtburger_protocol::messages::combat::CombatMode::NonCombat
                 {
                     self.portal.pending_combat_mode = None;
+                }
+                if *mode != holtburger_protocol::messages::combat::CombatMode::Magic
+                    && self.portal.pending_combat_mode
+                        != Some(holtburger_protocol::messages::combat::CombatMode::Magic)
+                {
+                    self.cancel_queued_spell_cast();
                 }
                 let _ = self
                     .client_view_event_tx

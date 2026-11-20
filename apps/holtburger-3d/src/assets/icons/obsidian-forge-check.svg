@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <!-- Incandescent ember-ivory check over a recessed dark iron shadow, readable at checkbox size. -->
+  <path d="m3.5 8 3 3 6-7" fill="none" stroke="#120a07" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" transform="translate(0 0.75)"/>
+  <path d="m3.5 8 3 3 6-7" fill="none" stroke="#ffd4a0" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

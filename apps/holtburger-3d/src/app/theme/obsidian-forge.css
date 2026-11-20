@@ -1,0 +1,898 @@
+/* Obsidian Forge material treatment; content backings retain the base theme's opacity. */
+/* Pregame owns its appearance, including controls nested inside modal dialogs. */
+@scope (:root) to (.client-pregame-screen) {
+	@layer theme {
+		:scope {
+			--ui-color-surface: #181413;
+			--ui-color-well: #110d0c;
+			--ui-color-border: #786254;
+			--ui-color-control: #352b27;
+			--ui-color-accent: #e09662;
+			--ui-color-highlight: #f5dec8;
+			--ui-color-focus: #ff9447;
+			/* Metallic sheen follows both native progress values and the animated XP fill. */
+			--ui-progress-fill-image: linear-gradient(
+				180deg,
+				#ffffff38,
+				transparent 45%,
+				#08050459
+			);
+			--ui-button-background-color: #2c2523;
+			--ui-radius-control: 3px;
+			--ui-window-frame-outset: 5px;
+			--ui-item-cell-background: #0d090830;
+			--ui-item-cell-border: 1px solid #78625466;
+			--ui-item-empty-background: #0d090848;
+			--ui-item-empty-border: 1px solid #78625466;
+			--ui-item-selection-color: #f5dec8;
+			--ui-item-selection-outline: 2px solid #ff8c38;
+			--ui-item-selection-shadow: inset 0 0 8px #ff651f4d;
+			--ui-item-selection-background: #c94c1626;
+			/* Authored iron and ember materials serve windows, overlays, and control families. */
+			--ui-forge-frame: url("../../assets/icons/obsidian-forge-frame.svg");
+			--ui-forge-iron: url("../../assets/icons/obsidian-forge-iron.svg");
+			--ui-forge-compass: url("../../assets/icons/obsidian-forge-compass.svg");
+			--ui-forge-north: url("../../assets/icons/obsidian-forge-north.svg");
+			/* A crisp molten-ember seam separates headers from body content. */
+			--ui-forge-ember-seam: linear-gradient(
+					90deg,
+					#ff6a2426,
+					#ff6a24cc 18%,
+					#ff8533e6 50%,
+					#ff6a24cc 82%,
+					#ff6a2426
+				)
+				left 0 bottom 0 / 100% 1px no-repeat;
+			--ui-forge-pressed-shadow:
+				inset 0 2px 3px #0a0605cc, inset 1px 0 #140c0ab3,
+				inset 0 -1px #ff7b3373, 0 0 0 1px #0d0807cc;
+			--ui-forge-inset-shadow:
+				inset 0 2px 3px #070504d9, inset 1px 0 #07050499, 0 1px #a68c7c33;
+			--ui-filter-pill-radius: 3px;
+			/* Leave room for the shared forged rails around adjacent party cells. */
+			--ui-party-grid-gap: 8px;
+			--ui-spell-bar-color: #d96b27;
+			--ui-spell-tab-color: #d6c8bc;
+			--ui-spell-tab-active-color: #160d09;
+			--ui-spell-tab-border: 1px solid #6b584d99;
+			--ui-spell-tab-radius: 2px 2px 0 0;
+			--ui-spell-tab-active-background: #d96b27f2;
+			--ui-spell-tab-active-shadow:
+				inset 0 1px 0 #ffcf8f99, inset 0 -2px #7d2c0d;
+			--ui-spell-scrollbar-color: #c9723c;
+			--ui-spell-scrollbar-track-opacity: 28%;
+			--ui-spell-scrollbar-thumb-opacity: 75%;
+			--ui-combat-foreground-color: #f5e6d8;
+			--ui-combat-stop-color: #d93829;
+			--ui-combat-outline-color: #362924;
+			--ui-combat-track-color: #181312;
+			--ui-combat-height-color: #120e0d8c;
+			--ui-combat-height-selected-color: #9e421ab8;
+			--ui-combat-height-hover-color: #b85224cc;
+		}
+
+		.ui-theme :is(.ui-panel, .ui-dialog) {
+			/* Nine-sliced hammered iron with L-shaped smoldering ember corners paints
+			   around the 1px border without changing layout or covering the translucent center. */
+			border-image-source: var(--ui-forge-frame);
+			border-image-slice: 28;
+			border-image-width: 14px;
+			border-image-outset: var(--ui-window-frame-outset);
+			border-image-repeat: stretch;
+			box-shadow:
+				inset 0 0 0 2px #0c080799,
+				0 2px 0 3px #0a070673,
+				0 6px 14px #08050480;
+		}
+
+		/* Dark forged-iron console surface finished with the theme's glowing lower ember seam. */
+		.ui-theme .ui-runtime-console {
+			background:
+				var(--ui-forge-ember-seam),
+				linear-gradient(180deg, #120e0df0, #1c1513f5),
+				var(--ui-forge-iron) left top / 96px 32px repeat,
+				#1c1614;
+			border-bottom: 2px solid #4d3f38;
+			box-shadow:
+				inset 0 -4px #140f0e,
+				0 6px 16px #0a0605b3;
+			padding-bottom: 6px;
+			--ui-console-selection-background: #ff9447;
+			--ui-console-selection-text: #160d09;
+		}
+
+		.ui-theme .ui-frame {
+			/* Hammered dark iron header grounded by a single molten-ember hairline seam. */
+			background:
+				var(--ui-forge-ember-seam),
+				var(--ui-forge-iron) left top / 96px 32px repeat,
+				linear-gradient(180deg, #2b2422, #1b1615 48%, #130f0e);
+			box-shadow:
+				inset 0 1px #a69c9533,
+				inset 1px 0 #a69c951f,
+				inset 0 -2px 4px #0a0706cc,
+				0 1px 4px #ff651f26;
+			color: var(--ui-color-highlight);
+			font-family: var(--ui-font-heading);
+		}
+
+		.ui-theme .ui-frame .ui-button {
+			font-family: var(--ui-font-body);
+		}
+
+		.ui-theme .ui-button {
+			/* Raised hammered-iron face with cool metallic top bevel and subtle ember bottom rim. */
+			background-image:
+				var(--ui-forge-iron),
+				linear-gradient(
+					180deg,
+					#a8b0b83d,
+					#6e66601a 42%,
+					#140f0e40 58%,
+					#0a07068c
+				);
+			background-size:
+				96px 32px,
+				auto;
+			box-shadow:
+				inset 0 1px #b8b2ad73,
+				inset 1px 0 #8a827d4d,
+				inset -1px 0 #120c0ab3,
+				inset 0 -2px #ff6a244d,
+				0 0 0 1px #0d0908cc,
+				0 2px 3px #08050480;
+			text-shadow: 0 1px 1px #0a0605;
+		}
+
+		.ui-theme .ui-button:where(:hover:not(:disabled)) {
+			box-shadow:
+				inset 0 1px #d6cdc68c,
+				inset 1px 0 #a69c9559,
+				inset -1px 0 #120c0ab3,
+				inset 0 -2px #ff7b3380,
+				0 0 0 1px #0d0908cc,
+				0 2px 4px #08050499;
+		}
+
+		.ui-theme .hud-window-close {
+			/* Circular blackened-iron cap preserving the larger existing hit target on both axes. */
+			--close-diameter: max(28px, calc(1em + 10px), calc(1.35em + 6px));
+			width: var(--close-diameter);
+			height: var(--close-diameter);
+			border-radius: 50%;
+		}
+
+		.ui-theme
+			.ui-button:where(
+				:active:not(:disabled),
+				[aria-pressed="true"]:not(:disabled),
+				[aria-selected="true"]:not(:disabled)
+			) {
+			background-image: linear-gradient(180deg, #0d080780, #4a241433);
+			background-size: auto;
+			box-shadow: var(--ui-forge-pressed-shadow);
+		}
+
+		.ui-theme .ui-button:where(:disabled) {
+			background-image: linear-gradient(180deg, #99908a1a, #0c080759);
+			background-size: auto;
+			box-shadow:
+				inset 0 1px #99908a26,
+				inset 0 -1px #0c080773,
+				0 0 0 1px #0e0a098c;
+		}
+
+		/* Compact overlays and the spell rail use the forged-iron frame at a smaller scale
+		   while preserving translucent interiors and minimal screen footprint. */
+		.ui-theme .ui-overlay-surface:not(.ui-dialog),
+		.ui-theme .spell-rail::before {
+			border-image-source: var(--ui-forge-frame);
+			border-image-slice: 28;
+			border-image-width: 10px;
+			border-image-outset: 3px;
+			border-image-repeat: stretch;
+			box-shadow:
+				inset 0 0 0 1px #9c7e6c26,
+				0 4px 12px #0805048c;
+		}
+
+		.ui-theme :is(.ui-input, select):not(.ui-hud-input) {
+			background-image: linear-gradient(180deg, #07050473, transparent 65%);
+			box-shadow: var(--ui-forge-inset-shadow);
+		}
+
+		.ui-theme :is(.ui-input, select):not(.ui-hud-input):focus-visible {
+			box-shadow:
+				var(--ui-forge-inset-shadow),
+				0 0 0 1px #ff8c38,
+				0 0 6px #ff651f59;
+		}
+
+		.ui-theme :is(.ui-well, .ui-inset) {
+			box-shadow: var(--ui-forge-inset-shadow);
+		}
+
+		.ui-theme .ui-tab {
+			--ui-forge-tab-face: linear-gradient(180deg, #27211f, #171312);
+			background:
+				var(--ui-forge-iron) left top / 96px 32px repeat,
+				var(--ui-forge-tab-face);
+			border-radius: 3px 3px 0 0;
+			box-shadow:
+				inset 0 1px #948a844d,
+				inset 1px 0 #948a8426,
+				inset -1px 0 #0a0706b3,
+				inset 0 -1px #0a0706d9;
+		}
+
+		.ui-theme
+			.ui-tab:where(:hover:not(:disabled)):not([aria-selected="true"]):not(
+				[aria-pressed="true"]
+			) {
+			--ui-forge-tab-face: linear-gradient(180deg, #3a2d28, #211917);
+			color: var(--ui-color-highlight);
+		}
+
+		.ui-theme .ui-tab:where([aria-selected="true"], [aria-pressed="true"]) {
+			--ui-forge-tab-face: linear-gradient(180deg, #4f2c1e, #291813);
+			color: var(--ui-color-highlight);
+			box-shadow:
+				var(--ui-forge-pressed-shadow),
+				inset 0 -2px #ff7a29;
+		}
+
+		.ui-theme
+			.ui-tabs[aria-orientation="vertical"]
+			.ui-tab:where([aria-selected="true"], [aria-pressed="true"]) {
+			box-shadow:
+				var(--ui-forge-pressed-shadow),
+				inset -2px 0 #ff7a29;
+		}
+
+		.ui-theme .ui-tab:disabled {
+			color: var(--ui-color-muted);
+			filter: grayscale(0.8);
+		}
+
+		.ui-theme :is(.ui-pill, .ui-filter-pill) {
+			/* Preserve category-specific filter and cantrip colors beneath a shallow bevel. */
+			background-image: linear-gradient(180deg, #d9c8ba1f, #0a070638);
+			box-shadow:
+				inset 0 1px #d9c8ba33,
+				inset 0 -1px #0a070699;
+		}
+
+		.ui-theme .ui-filter-pill[aria-pressed="true"] {
+			box-shadow: var(--ui-forge-pressed-shadow);
+		}
+
+		.ui-theme .ui-menu-item:where(.highlighted, [aria-selected="true"]) {
+			background-image: linear-gradient(180deg, #ff7a2924, #0a070626);
+			box-shadow: inset 2px 0 #ff8533;
+		}
+
+		.ui-theme :is(.hud-window-content, .ui-overlay-surface) {
+			/* Do not override the chat buffer's deliberately fading scrollbars. */
+			scrollbar-color: #9e623d #0c080748;
+		}
+
+		.ui-theme
+			.ui-item-cell:not(
+				[aria-pressed="true"],
+				[data-selected="true"],
+				[data-cantrip-tier]:not([data-empty="true"])
+			) {
+			box-shadow:
+				inset 0 2px 3px #070504a6,
+				inset 0 -1px #9c827333;
+		}
+
+		.ui-theme .ui-shortcut-hint {
+			padding-inline: 2px;
+			border-radius: 2px;
+			background: #140f0dc4;
+			box-shadow: 0 1px #a6826b59;
+		}
+
+		/* Labelled HUD controls use dark forged-iron faces; only explicit icon actions are caps. */
+		.ui-theme
+			button.ui-hud-control:where(
+				:not(.ui-item-cell, .ui-readout, .party-member, .spell-tab)
+			) {
+			border-radius: var(--ui-radius-control);
+			background:
+				var(--ui-forge-iron) left top / 96px 32px repeat,
+				linear-gradient(180deg, #2d2523, #1a1514);
+			box-shadow:
+				inset 0 1px #9e948e59,
+				inset 0 -1px #ff6a2440;
+		}
+		.ui-theme
+			button.ui-hud-control:where(
+				:not(.ui-item-cell, .ui-readout, .party-member, .spell-tab)
+			)::before {
+			content: none;
+		}
+		.ui-theme
+			button.ui-hud-control:where(
+				:not(.ui-item-cell, .ui-readout, .party-member, .spell-tab)
+			):where(:active:not(:disabled), [aria-pressed="true"]:not(:disabled)) {
+			box-shadow: var(--ui-forge-pressed-shadow);
+		}
+
+		.ui-theme button.ui-hud-button {
+			--ui-forge-icon-face:
+				radial-gradient(
+					circle at 50% 94%,
+					#ff4d1a99,
+					#cc260e4d 34%,
+					transparent 64%
+				),
+				radial-gradient(
+					circle at 35% 25%,
+					#5c5450,
+					#342d2a 48%,
+					#1e1918 78%,
+					#110d0c
+				);
+			border-radius: 50%;
+			background-image: none;
+			box-shadow:
+				inset 0 0 0 1px #140e0d,
+				0 1px 0 1px #0a0605bf,
+				0 3px 5px #0805048c;
+		}
+
+		.ui-theme button.ui-hud-button::before {
+			/* Domed blackened-iron medallion with a smoldering red-ember hotspot at the base. */
+			content: "";
+			inset: 1px;
+			border-radius: inherit;
+			mask-image: none;
+			backdrop-filter: none;
+			background: var(--ui-forge-icon-face);
+			box-shadow:
+				inset 0 1px 1px #c2bab48c,
+				inset 1px 0 1px #9c928c4d,
+				inset 0 -2px 3px #ff4d1aa6,
+				inset 0 0 0 1px #7d4e34;
+		}
+
+		.ui-theme
+			button:is(.ui-hud-button, .ui-hud-control):where(
+				:not(.ui-item-cell, .ui-readout, .party-member, .spell-tab)
+			)
+			svg {
+			/* Quiet color/edge feedback replaces the base icon enlargement. */
+			transform: none;
+		}
+
+		.ui-theme button.ui-hud-button:where(:hover:not(:disabled)) {
+			--ui-forge-icon-face:
+				radial-gradient(
+					circle at 50% 92%,
+					#ff6a24c4,
+					#d9301266 38%,
+					transparent 68%
+				),
+				radial-gradient(
+					circle at 35% 25%,
+					#73665e,
+					#473832 48%,
+					#291e1a 78%,
+					#16100e
+				);
+		}
+
+		.ui-theme
+			button.ui-hud-button:where(
+				:active:not(:disabled),
+				[aria-pressed="true"]:not(:disabled)
+			) {
+			--ui-forge-icon-face: linear-gradient(180deg, #120d0c, #2e1b14);
+			box-shadow:
+				inset 0 1px 3px #0a0605cc,
+				0 0 0 1px #ff7b3399;
+		}
+
+		.ui-theme button.ui-hud-button:where(:disabled) {
+			--ui-forge-icon-face: linear-gradient(180deg, #241f1d, #181413);
+			box-shadow: inset 0 0 0 1px #292220;
+		}
+
+		.ui-theme button.ui-item-strip-arrow {
+			/* The strip keeps its full click footprint and paints a continuous forged pill. */
+			border-radius: 999px;
+			background: linear-gradient(180deg, #4f4642, #2e2624 55%, #1a1514);
+			box-shadow:
+				inset 0 1px #b8b0aa66,
+				inset 0 -1px #ff6a244d,
+				0 1px 2px #0805048c;
+		}
+		.ui-theme button.ui-item-strip-arrow:where(:active:not(:disabled)) {
+			box-shadow: var(--ui-forge-pressed-shadow);
+		}
+
+		.ui-theme :is(.ui-meter, .selected-entity__health) {
+			border-radius: 2px;
+			box-shadow:
+				inset 0 1px 3px #070504bf,
+				0 0 0 1px #6e5a4fa6;
+		}
+
+		.ui-theme :is(.ui-meter > span, .selected-entity__health-fill) {
+			/* Metallic sheen overlays, rather than replaces, semantic vital colors. */
+			background-image: linear-gradient(
+				180deg,
+				#ffffff47,
+				transparent 45%,
+				#08050459
+			);
+			box-shadow:
+				inset 0 1px #ffffff38,
+				inset 0 -1px #08050473;
+		}
+
+		/* Shared forged-iron frames with smoldering ember corners enclose HUDs and
+		   action bars without adding an opaque backing or changing layout dimensions. */
+		.ui-theme
+			:is(
+				.character-hud,
+				.selected-entity,
+				.party-member,
+				.chat-panel.interactive,
+				.action-bar
+			) {
+			border: 0 solid transparent;
+			border-image-source: var(--ui-forge-frame);
+			border-image-slice: 28;
+			border-image-width: 10px;
+			border-image-outset: 4px;
+			border-image-repeat: stretch;
+			box-shadow:
+				0 0 0 1px #0c0807b3,
+				0 3px 8px #0805048c;
+		}
+
+		.ui-theme
+			:is(
+				.character-hud,
+				.selected-entity,
+				.party-member,
+				.chat-panel.interactive
+			) {
+			border-radius: 3px;
+		}
+
+		.ui-theme .chat-panel.interactive {
+			/* The shared forged rails replace chat's active outline without changing its fade. */
+			outline: none;
+		}
+
+		.ui-theme
+			:is(
+				.character-hud .identity-block,
+				.selected-entity__heading,
+				.party-member__name
+			) {
+			background:
+				var(--ui-forge-ember-seam),
+				var(--ui-forge-iron) left top / 96px 32px repeat,
+				linear-gradient(180deg, #2b2422, #181312);
+			box-shadow:
+				inset 0 1px #9e948e4d,
+				inset 0 -1px #6e5a4f73;
+		}
+
+		.ui-theme
+			:is(
+				.character-hud .identity-block .ui-readout,
+				.selected-entity__heading,
+				.party-member__name
+			)::before {
+			/* Each heading now owns its contained material, replacing its feathered backing. */
+			content: none;
+		}
+
+		.ui-theme
+			:is(.character-hud .identity-block .ui-readout, .party-member__name) {
+			/* Solid header material needs only the text inset, not feathering clearance. */
+			padding-inline: 5px;
+		}
+
+		.ui-theme
+			:is(
+				.character-hud .identity,
+				.selected-entity__heading strong,
+				.party-member__name strong
+			) {
+			font-family: var(--ui-font-heading);
+			font-weight: 700;
+		}
+
+		.ui-theme .selected-entity {
+			/* Fit the rails to actual rows, with a thin health strip directly below the header. */
+			height: fit-content;
+			grid-template-rows: auto;
+			grid-auto-rows: 5px;
+			gap: 0;
+		}
+
+		.ui-theme .xp-progress {
+			box-shadow:
+				inset 0 1px 2px #070504bf,
+				0 0 0 1px #6e5a4f8c;
+		}
+
+		.ui-theme .spell-tab {
+			background-image:
+				var(--ui-forge-iron), linear-gradient(180deg, #3a302c40, #0d090873);
+			background-size:
+				96px 32px,
+				auto;
+			box-shadow: inset 0 1px #9c928c4d;
+		}
+
+		.ui-theme .spell-tab::before {
+			inset: 0;
+			mask-image: none;
+			border-radius: inherit;
+		}
+		.ui-theme .spell-tab[aria-pressed="true"] {
+			box-shadow: var(--ui-spell-tab-active-shadow);
+		}
+
+		/* Forged iron combat gauge: narrow dark-metal fittings, open center, translucent height faces. */
+		.ui-theme .combat-bar .gauge-background {
+			display: none;
+		}
+		.ui-theme .combat-bar :is(.gauge-decoration, .height-face) {
+			display: inline;
+		}
+		.ui-theme .combat-bar .gauge-metal-light {
+			stop-color: #7d746e;
+		}
+		.ui-theme .combat-bar .gauge-metal-mid {
+			stop-color: #423a36;
+		}
+		.ui-theme .combat-bar .gauge-metal-dark {
+			stop-color: #1c1716;
+		}
+		.ui-theme .combat-bar .gauge-bezel-outline {
+			stroke: #0c0908;
+		}
+		.ui-theme .combat-bar .gauge-bezel {
+			stroke: var(--combat-metal);
+		}
+		.ui-theme .combat-bar .gauge-track {
+			stroke-width: 11;
+		}
+		.ui-theme .combat-bar .gauge-fill {
+			stroke-width: 9;
+		}
+		.ui-theme .combat-bar .gauge-fill:not(.recklessness-charge) {
+			stroke: var(--combat-charge-gradient);
+		}
+		.ui-theme .combat-bar .gauge-fill.recklessness-charge {
+			stroke: var(--combat-recklessness-gradient);
+		}
+		.ui-theme .combat-bar .gauge-charge-start {
+			stop-color: #c9261c;
+		}
+		.ui-theme .combat-bar .gauge-charge-mid {
+			stop-color: #ef5621;
+		}
+		.ui-theme .combat-bar .gauge-charge-end {
+			stop-color: #ff9c38;
+		}
+		.ui-theme .combat-bar .gauge-recklessness-start {
+			stop-color: #c97312;
+		}
+		.ui-theme .combat-bar .gauge-recklessness-mid {
+			stop-color: #f7c23b;
+		}
+		.ui-theme .combat-bar .gauge-recklessness-end {
+			stop-color: #fff6bd;
+		}
+		.ui-theme .combat-bar .gauge-engraving {
+			stroke: #9e8a7d;
+			stroke-width: 0.9;
+		}
+		.ui-theme .combat-bar .gauge-fastener {
+			fill: var(--combat-metal);
+			stroke: #140f0e;
+			stroke-width: 1;
+		}
+		.ui-theme .combat-bar .gauge-fastener-slot {
+			stroke: #140f0e;
+			stroke-width: 1;
+		}
+		.ui-theme .combat-bar .height {
+			--combat-height-face: var(--ui-combat-height-color);
+			background: transparent;
+			box-shadow: none;
+		}
+		.ui-theme .combat-bar .height.selected {
+			--combat-height-face: var(--ui-combat-height-selected-color);
+		}
+		.ui-theme .combat-bar .height:is(:hover:not(:disabled), :focus-visible) {
+			--combat-height-face: var(--ui-combat-height-hover-color);
+		}
+		.ui-theme .combat-bar .height-face path {
+			fill: var(--combat-height-face);
+			stroke: var(--combat-metal);
+			stroke-width: 1;
+		}
+		.ui-theme .combat-bar .height::after {
+			position: relative;
+			text-shadow: 0 1px 1px #0a0605;
+		}
+		.ui-theme .combat-bar .height:focus-visible .height-face path {
+			stroke: #ff9447;
+			stroke-width: 2;
+		}
+		.ui-theme .combat-bar .power-handle {
+			fill: var(--combat-metal);
+			stroke: #ff9447;
+			stroke-width: 1.5;
+			filter: drop-shadow(0 1px 2px #0a060599);
+		}
+		.ui-theme .combat-bar .power-control:focus-visible .power-handle {
+			filter: var(--ui-combat-handle-focus-filter);
+		}
+
+		/* Both engagement actions share the gauge's forged-iron fitting. */
+		.ui-theme .combat-bar .engagement-face {
+			stroke: var(--combat-metal);
+			stroke-width: 2;
+			filter: drop-shadow(0 1px 1px #0a0605cc);
+		}
+		.ui-theme
+			.combat-bar
+			.engagement-toggle:active:not(:disabled)
+			.engagement-face {
+			fill: color-mix(in srgb, currentColor 72%, black);
+		}
+
+		/* Slim companion jump gauge in forged iron and ember markers. */
+		.ui-theme .jump-power-track {
+			border-color: #63534a;
+			border-radius: 2px;
+			background: linear-gradient(90deg, #120e0dc4, #1c161499);
+			box-shadow:
+				0 0 0 1px #0c0908,
+				inset 1px 0 #9e908740,
+				inset -1px 0 #261e1b80;
+		}
+		.ui-theme .jump-power-track::before {
+			/* Quarter marks sit over the live fill without intercepting precise-mode input. */
+			content: "";
+			position: absolute;
+			inset: 0;
+			z-index: 1;
+			background:
+				repeating-linear-gradient(to top, #c79a7cb3 0 1px, transparent 1px 25%)
+					left center / 3px 100% no-repeat,
+				repeating-linear-gradient(to top, #c79a7cb3 0 1px, transparent 1px 25%)
+					right center / 3px 100% no-repeat;
+			pointer-events: none;
+		}
+		.ui-theme .jump-power-fill {
+			background-image:
+				linear-gradient(90deg, #ffffff26, transparent 40%, #0a060538),
+				linear-gradient(to top, #c9261c, #ef5621 55%, #ff9c38);
+			box-shadow: inset 0 1px #ffd08a99;
+		}
+		.ui-theme .jump-power-level {
+			z-index: 2;
+			border-top-color: #d96b27;
+			box-shadow:
+				0 -1px 0 #ffaa5c,
+				0 1px 0 #59220e,
+				0 2px 1px #0a0605a6;
+		}
+		.ui-theme .jump-power-level::before {
+			content: "";
+			position: absolute;
+			top: -4.5px;
+			left: -6px;
+			border-block: 4px solid transparent;
+			border-inline-start: 6px solid #ff9447;
+			filter: drop-shadow(0 1px 1px #0a060599);
+			pointer-events: none;
+		}
+		.ui-theme .jump-power-readout {
+			color: #ffbd80;
+			font-family: var(--ui-font-heading);
+		}
+		.ui-theme :is(.jump-mode-label, .jump-power-caption) {
+			color: #dfd0c4;
+		}
+		.ui-theme :is(.jump-mode-label, .jump-power-readout, .jump-power-caption) {
+			/* Reuse the combat breakpoint labels' soft dark backing around the glyphs. */
+			text-shadow: var(--ui-combat-breakpoint-shadow);
+		}
+
+		.ui-theme .minimap-cardinal-north {
+			font-size: 26px;
+			font-weight: 700;
+			fill: var(--minimap-north-face);
+			stroke: #1c0804;
+			stroke-width: 2.8px;
+			/* Sharp ember heat at the top cooling into dark forged char at the base. */
+			filter: drop-shadow(0 -1px 0 #ffe699) drop-shadow(0 1px 0 #1c0804)
+				drop-shadow(0 0 4px #ff4d0a99);
+		}
+		.ui-theme .minimap-north-gold-light {
+			stop-color: #fff6c4;
+		}
+		.ui-theme .minimap-north-gold-mid {
+			stop-color: #ff6e1a;
+		}
+		.ui-theme .minimap-north-gold-dark {
+			stop-color: #2b0d09;
+		}
+		.ui-theme .minimap-north-ornament {
+			display: block;
+			background: var(--ui-forge-north) center / 100% 100% no-repeat;
+		}
+
+		.ui-theme .minimap-frame {
+			/* Authored ring matches the existing aperture; the SVG center stays transparent. */
+			background: var(--ui-forge-compass) center / 100% 100% no-repeat;
+			box-shadow:
+				0 0 0 1px #0c0807,
+				0 3px 8px #08050499;
+		}
+
+		.ui-theme
+			:is(
+				.contents-header,
+				.trade-side-heading,
+				.vendor-catalog h3,
+				.queue-heading,
+				.inventory-bottom-bar,
+				.inventory-equipment-toolbar
+			) {
+			background-image: linear-gradient(180deg, #9e8a7d1a, #0a070640);
+			box-shadow:
+				inset 0 1px #9e8a7d2e,
+				inset 0 -1px #0a0706a6;
+		}
+
+		.ui-theme
+			:is(
+				.contents-packs,
+				.inventory-equipment-strip,
+				.vendor-queue,
+				.trade-side,
+				.salvage-queue,
+				.salvage-output-content
+			) {
+			box-shadow:
+				inset 0 0 0 1px #78625459,
+				inset 0 2px 3px #07050473;
+		}
+
+		.ui-theme .vendor-offer-row {
+			box-shadow: inset 0 -1px #78625438;
+		}
+
+		.ui-theme .vendor-offer-row:where(:hover:not(:disabled)) {
+			background-image: linear-gradient(180deg, #ff7a291c, #0a070626);
+		}
+
+		.ui-theme .vendor-offer-row[aria-pressed="true"] {
+			box-shadow:
+				var(--ui-forge-pressed-shadow),
+				inset 0 0 0 1px #ff8c38a6;
+		}
+
+		.ui-theme .ui-section-heading {
+			color: var(--ui-color-accent);
+			text-shadow: 0 1px #0a0605;
+			box-shadow: inset 0 -1px #78625480;
+		}
+
+		.ui-theme .book-page + .book-page {
+			border-top: 1px solid #78625466;
+			padding-top: 1rem;
+		}
+
+		.ui-theme .book-scroll blockquote {
+			border-left: 2px solid var(--ui-color-border);
+			padding-left: 1rem;
+		}
+		.ui-theme .book-author {
+			color: var(--ui-color-accent);
+			font-family: var(--ui-font-heading);
+		}
+
+		/* Retain native appearance in forced-colors mode. */
+		@media (forced-colors: none) {
+			.ui-theme input[type="checkbox"] {
+				appearance: none;
+				width: 15px;
+				height: 15px;
+				padding: 0;
+				border: 1px solid var(--ui-color-border);
+				border-radius: 2px;
+				background: linear-gradient(180deg, #0d0908, #241d1b);
+				box-shadow: var(--ui-forge-inset-shadow);
+				vertical-align: middle;
+				cursor: pointer;
+			}
+
+			.ui-theme input[type="checkbox"]:checked {
+				background:
+					url("../../assets/icons/obsidian-forge-check.svg") center / contain
+						no-repeat,
+					linear-gradient(180deg, #4f2514, #a8481c);
+				border-color: #d97436;
+			}
+
+			.ui-theme input[type="checkbox"]:hover:not(:disabled) {
+				border-color: #ff9447;
+			}
+
+			.ui-theme input:is([type="checkbox"], [type="range"]):disabled {
+				filter: grayscale(0.8);
+				opacity: 0.65;
+				cursor: not-allowed;
+			}
+
+			.ui-theme input.ui-range {
+				appearance: none;
+				block-size: 20px;
+				margin-inline: 0;
+				background: transparent;
+				cursor: pointer;
+			}
+
+			/* UiRange supplies the live filled fraction; native gestures and keys remain intact. */
+			.ui-theme input.ui-range::-webkit-slider-runnable-track {
+				box-sizing: border-box;
+				block-size: 6px;
+				border: 1px solid var(--ui-color-border);
+				border-radius: 4px;
+				background:
+					linear-gradient(180deg, #ffb47040, transparent 50%, #1c0f0a73),
+					linear-gradient(
+						var(--ui-range-fill-direction, 90deg),
+						#c95c24 var(--ui-range-progress),
+						#140f0e var(--ui-range-progress)
+					);
+				box-shadow:
+					inset 0 1px 2px #070504d9,
+					0 1px #9c827340;
+			}
+
+			.ui-theme input.ui-range::-webkit-slider-thumb {
+				appearance: none;
+				box-sizing: border-box;
+				inline-size: 16px;
+				block-size: 16px;
+				margin-block-start: -6px;
+				border: 1px solid #7a3818;
+				border-radius: 50%;
+				background:
+					radial-gradient(circle at 30% 20%, #ffd6a3a6, transparent 55%),
+					linear-gradient(135deg, #e07b39, #a6461b 52%, #4a1e0e);
+				box-shadow:
+					inset 1px 1px #ffbf808c,
+					inset -1px -1px #291108b3,
+					0 1px 3px #070504bf;
+			}
+
+			.ui-theme input.ui-range:hover:not(:disabled)::-webkit-slider-thumb {
+				border-color: #ff9447;
+			}
+
+			.ui-theme input.ui-range:active:not(:disabled)::-webkit-slider-thumb {
+				box-shadow:
+					inset 0 1px 3px #291108d9,
+					0 0 0 1px #ff944780;
+			}
+		}
+	}
+}

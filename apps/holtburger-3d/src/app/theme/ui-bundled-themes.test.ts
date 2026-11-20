@@ -2,6 +2,7 @@ import { expect, it, vi } from "vitest";
 import { withBundledUiThemes } from "./ui-bundled-themes";
 import { UiThemeSelection } from "./ui-theme-selection";
 import {
+	OBSIDIAN_FORGE_THEME_ID,
 	TRAVELERS_KIT_THEME_ID,
 	UI_THEME_LOAD_TIMEOUT_MS,
 	type UiThemeTransport,
@@ -11,6 +12,11 @@ import {
 vi.mock("./travelers-kit.css?url&no-inline", () => ({
 	default: "/assets/travelers-kit.css",
 }));
+vi.mock("./obsidian-forge.css?url&no-inline", () => ({
+	default: "/assets/obsidian-forge.css",
+}));
+
+const BUNDLED_IDS = [TRAVELERS_KIT_THEME_ID, OBSIDIAN_FORGE_THEME_ID];
 
 function fixture() {
 	const source: UiThemeTransport = {
@@ -33,11 +39,18 @@ it("offers bundled choices on a clean profile and delegates user themes and fold
 	const { source, transport, loader, owner } = fixture();
 	vi.mocked(source.list).mockResolvedValueOnce([]);
 	expect(await owner.refresh()).toBe(true);
-	expect(owner.read().catalog.ids).toEqual([TRAVELERS_KIT_THEME_ID]);
+	expect(owner.read().catalog.ids).toEqual(BUNDLED_IDS);
 	expect(await owner.select(TRAVELERS_KIT_THEME_ID)).toBe(true);
 	expect(source.resolve).not.toHaveBeenCalled();
 	expect(loader.replace).toHaveBeenCalledWith(
 		expect.stringContaining("travelers-kit"),
+		null,
+		expect.any(AbortSignal),
+	);
+	expect(await owner.select(OBSIDIAN_FORGE_THEME_ID)).toBe(true);
+	expect(source.resolve).not.toHaveBeenCalled();
+	expect(loader.replace).toHaveBeenCalledWith(
+		expect.stringContaining("obsidian-forge"),
 		null,
 		expect.any(AbortSignal),
 	);
@@ -56,28 +69,28 @@ it("retains bundled choices on first discovery failure and previous user choices
 	expect(await owner.refresh()).toBe(false);
 	expect(owner.read().catalog).toMatchObject({
 		kind: "failed",
-		ids: [TRAVELERS_KIT_THEME_ID],
+		ids: BUNDLED_IDS,
 		message: expect.stringContaining("Unreadable"),
 	});
 	expect(await owner.select(TRAVELERS_KIT_THEME_ID)).toBe(true);
 	expect(await owner.refresh()).toBe(true);
 	vi.mocked(source.list).mockRejectedValueOnce(new Error("Directory removed"));
 	expect(await owner.refresh()).toBe(false);
-	expect(owner.read().catalog.ids).toEqual([TRAVELERS_KIT_THEME_ID, "Night"]);
+	expect(owner.read().catalog.ids).toEqual([...BUNDLED_IDS, "Night"]);
 });
 
 it("reports reserved-name collisions with a rename remedy and recovers after refresh", async () => {
 	const { source, owner } = fixture();
-	vi.mocked(source.list).mockResolvedValueOnce([TRAVELERS_KIT_THEME_ID]);
+	vi.mocked(source.list).mockResolvedValueOnce([OBSIDIAN_FORGE_THEME_ID]);
 	expect(await owner.refresh()).toBe(false);
 	expect(owner.read().catalog).toMatchObject({
 		kind: "failed",
 		message: expect.stringContaining("Rename that folder"),
 	});
-	expect(await owner.select(TRAVELERS_KIT_THEME_ID)).toBe(true);
+	expect(await owner.select(OBSIDIAN_FORGE_THEME_ID)).toBe(true);
 	expect(source.resolve).not.toHaveBeenCalled();
 	expect(await owner.refresh()).toBe(true);
-	expect(owner.read().catalog.ids).toEqual([TRAVELERS_KIT_THEME_ID, "Night"]);
+	expect(owner.read().catalog.ids).toEqual([...BUNDLED_IDS, "Night"]);
 });
 
 it("keeps shipped choices usable after a stalled discovery reaches the owner's deadline", async () => {
@@ -88,7 +101,7 @@ it("keeps shipped choices usable after a stalled discovery reaches the owner's d
 		const pending = owner.refresh();
 		await vi.advanceTimersByTimeAsync(UI_THEME_LOAD_TIMEOUT_MS);
 		expect(await pending).toBe(false);
-		expect(owner.read().catalog.ids).toEqual([TRAVELERS_KIT_THEME_ID]);
+		expect(owner.read().catalog.ids).toEqual(BUNDLED_IDS);
 		expect(await owner.select(TRAVELERS_KIT_THEME_ID)).toBe(true);
 	} finally {
 		vi.useRealTimers();

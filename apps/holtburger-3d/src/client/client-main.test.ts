@@ -6,6 +6,9 @@ import { createDefaultClientUserSettings } from "./settings/settings-defaults";
 vi.mock("../app/theme/travelers-kit.css?url&no-inline", () => ({
 	default: "/assets/travelers-kit.css",
 }));
+vi.mock("../app/theme/obsidian-forge.css?url&no-inline", () => ({
+	default: "/assets/obsidian-forge.css",
+}));
 
 interface StartupProps {
 	mode: "client";

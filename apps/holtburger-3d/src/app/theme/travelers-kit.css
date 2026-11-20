@@ -29,6 +29,7 @@
 			--ui-travelers-frame: url("../../assets/icons/travelers-kit-frame.svg");
 			--ui-travelers-leather: url("../../assets/icons/travelers-kit-leather.svg");
 			--ui-travelers-compass: url("../../assets/icons/travelers-kit-compass.svg");
+			--ui-travelers-north: url("../../assets/icons/travelers-kit-north.svg");
 			/* Independent thread layers can be withdrawn on dialog headers. */
 			--ui-travelers-stitches:
 				repeating-linear-gradient(90deg, #d6ad7b80 0 4px, transparent 4px 8px)
@@ -672,18 +673,8 @@
 			stop-color: #a45a18;
 		}
 		.ui-theme .minimap-north-ornament {
-			display: inline;
-			stroke: #dcb363;
-			stroke-width: 1.2;
-			filter: drop-shadow(0 1px 1px #20140e);
-		}
-		.ui-theme .minimap-north-tip {
-			fill: var(--minimap-north-face);
-		}
-
-		.ui-theme .minimap-north-scroll {
-			fill: none;
-			stroke-linecap: round;
+			display: block;
+			background: var(--ui-travelers-north) center / 100% 100% no-repeat;
 		}
 
 		.ui-theme .minimap-frame {

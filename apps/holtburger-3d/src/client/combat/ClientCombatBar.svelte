@@ -529,6 +529,8 @@
 		class="combat-bar ui-hud-fade"
 		class:ui-hud-emphasized={profileEmphasized || appearing}
 		style:--combat-metal={`url(#${gaugeId}-metal)`}
+		style:--combat-charge-gradient={`url(#${gaugeId}-charge)`}
+		style:--combat-recklessness-gradient={`url(#${gaugeId}-recklessness-charge)`}
 		class:help-enabled={showHelpLabels}
 		data-combat-mode={profile.kind}
 	>
@@ -576,6 +578,31 @@
 					<stop class="gauge-metal-light" offset="0" />
 					<stop class="gauge-metal-mid" offset="0.45" />
 					<stop class="gauge-metal-dark" offset="1" />
+				</linearGradient>
+				<!-- Optional theme-owned charge arc gradient; defaults to solid charge color. -->
+				<linearGradient
+					id={`${gaugeId}-charge`}
+					x1="0"
+					y1="0"
+					x2="1"
+					y2="0"
+					gradientUnits="objectBoundingBox"
+				>
+					<stop class="gauge-charge-start" offset="0" />
+					<stop class="gauge-charge-mid" offset="0.55" />
+					<stop class="gauge-charge-end" offset="1" />
+				</linearGradient>
+				<linearGradient
+					id={`${gaugeId}-recklessness-charge`}
+					x1="0"
+					y1="0"
+					x2="1"
+					y2="0"
+					gradientUnits="objectBoundingBox"
+				>
+					<stop class="gauge-recklessness-start" offset="0" />
+					<stop class="gauge-recklessness-mid" offset="0.55" />
+					<stop class="gauge-recklessness-end" offset="1" />
 				</linearGradient>
 			</defs>
 			<text class="combat-help power-label" aria-hidden="true">
@@ -989,11 +1016,21 @@
 		.gauge-fill {
 			stroke: var(--ui-combat-charge-color);
 		}
+		.gauge-charge-start,
+		.gauge-charge-mid,
+		.gauge-charge-end {
+			stop-color: var(--ui-combat-charge-color);
+		}
 		.recklessness-track {
 			stroke: var(--ui-combat-recklessness-track-color);
 		}
 		.recklessness-charge {
 			stroke: var(--ui-combat-recklessness-charge-color);
+		}
+		.gauge-recklessness-start,
+		.gauge-recklessness-mid,
+		.gauge-recklessness-end {
+			stop-color: var(--ui-combat-recklessness-charge-color);
 		}
 		.power-control {
 			cursor: pointer;

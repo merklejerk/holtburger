@@ -186,7 +186,7 @@ export const CLIENT_UI_DEFAULTS = {
 	},
 	minimap: {
 		anchor: "top-right",
-		offset: { x: 48, y: 16 },
+		offset: { x: 48, y: 30 },
 		size: 220,
 		minSize: 140,
 		resizable: true,

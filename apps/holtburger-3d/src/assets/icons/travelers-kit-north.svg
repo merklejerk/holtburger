@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="260" height="260" viewBox="-130 -130 260 260">
+  <!-- Rotates with Minimap's compass around (0, 0). The minimap rim sits at r=100;
+       the 30-unit margin accommodates ornaments extending past the bezel. -->
+  <defs>
+    <linearGradient id="north-gold" x1="0" y1="-123" x2="0" y2="-93" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#fff1ae"/>
+      <stop offset="0.45" stop-color="#edbd4d"/>
+      <stop offset="1" stop-color="#a45a18"/>
+    </linearGradient>
+    <filter id="north-shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="1" stdDeviation="1" flood-color="#20140e" flood-opacity="1"/>
+    </filter>
+  </defs>
+  <g transform="translate(0 -100)" filter="url(#north-shadow)" stroke="#dcb363" stroke-width="1.2">
+    <path fill="url(#north-gold)" d="M 0 -23 L 3 -17 L 0 -11 L -3 -17 Z"/>
+    <path fill="none" stroke-linecap="round" d="M 11 5 Q 14 0 21 0 Q 25 0 23 -4 Q 22 -6 19 -4 M 12 7 H 19"/>
+    <path fill="none" stroke-linecap="round" transform="scale(-1 1)" d="M 11 5 Q 14 0 21 0 Q 25 0 23 -4 Q 22 -6 19 -4 M 12 7 H 19"/>
+  </g>
+</svg>

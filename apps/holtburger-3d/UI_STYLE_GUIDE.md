@@ -51,7 +51,7 @@ outrank ordinary layered rules, and `!important` reverses layer precedence.
 Neither is necessary for supported customization.
 
 For outward window frames, `--ui-window-frame-outset` is the shared CSS length
-for frame paint and floating-window resize targets (Base: `0px`, Traveler’s Kit:
+for frame paint and floating-window resize targets (Base: `0px`, bundled themes:
 `5px`). Use it as the window's `border-image-outset`; the window shell extends
 all eight resize targets to cover that paint, including the underlying 1px panel
 border, without changing content layout or saved window dimensions. Compact
@@ -129,18 +129,19 @@ is not passed directly to the stylesheet loader.
 
 ## Built-in themes
 
-**Traveler’s Kit** ships alongside Base and is available in pregame or in-game
-**Settings → UI → Theme**. Traveler’s Kit is the client default. It uses leather,
-stitching and copper fittings while retaining transparent content backgrounds.
-Selection, reload and saved preferences use the same owner as local themes.
-`src/app/theme/ui-bundled-themes.ts` composes trusted Vite-emitted assets with the
-validated desktop transport; native URL validation remains unchanged.
+**Traveler’s Kit** and **Obsidian Forge** ship alongside Base and are available in
+pregame or in-game **Settings → UI → Theme**. Traveler’s Kit is the client default
+(leather, stitching, and copper fittings); Obsidian Forge pairs hammered dark iron
+with subtle molten-ember seams and corners. Both retain transparent content
+backgrounds. Selection, reload and saved preferences use the same owner as local
+themes. `src/app/theme/ui-bundled-themes.ts` composes trusted Vite-emitted assets
+with the validated desktop transport; native URL validation remains unchanged.
 
-The name `Traveler’s Kit` is reserved. A local folder with that exact name makes
-catalog refresh report a collision; rename the folder and refresh. Previously
-available choices remain usable. Built-in choices remain available even if user
-folder discovery fails or times out. No built-in files are installed into the
-user-data directory.
+The names `Traveler’s Kit` and `Obsidian Forge` are reserved. A local folder with
+either exact name makes catalog refresh report a collision; rename the folder and
+refresh. Previously available choices remain usable. Built-in choices remain
+available even if user folder discovery fails or times out. No built-in files are
+installed into the user-data directory.
 
 ## Installing and using local themes
 
@@ -411,12 +412,16 @@ style. Its pills retain the shared filter color, radius, and spacing tokens.
 
 Combat material layers use `.gauge-decoration` (rim, engravings and fasteners)
 and `.height-face` (button outlines). Base hides these optional SVG paint layers;
-Traveler’s Kit reveals them and hides `.gauge-background`. The component derives
+bundled themes reveal them and hide `.gauge-background`. The component derives
 their paths from the same arc and row dimensions used by the hit targets, and
-marks the layers as noninteractive. Its per-instance `--combat-metal` URL points
-to a locally scoped gradient; it is an internal paint reference, not a theme-size
-setting. Themes style the gradient stops with `.gauge-metal-light`,
-`.gauge-metal-mid` and `.gauge-metal-dark`. Slider semantics, charge progression,
+marks the layers as noninteractive. Its per-instance `--combat-metal`,
+`--combat-charge-gradient`, and `--combat-recklessness-gradient` URLs point to
+locally scoped gradients; they are internal paint references, not theme-size
+settings. Themes style those gradient stops with `.gauge-metal-light`,
+`.gauge-metal-mid`, `.gauge-metal-dark`, `.gauge-charge-start`,
+`.gauge-charge-mid`, `.gauge-charge-end`, `.gauge-recklessness-start`,
+`.gauge-recklessness-mid`, and `.gauge-recklessness-end` (charge gradients default
+to their solid charge color tokens). Slider semantics, charge progression,
 idle/emphasis opacity and shortcut disclosure remain component-owned.
 
 Spell shortcuts use the same transparent cell face and feathered `ui-hud-control`
@@ -683,8 +688,9 @@ The sidebar’s **Minimap → Show waypoint guide** toggle sets a sample destina
 through the fixture’s navigation owner. It previews the production off-disc arrow
 and distance footer; clearing the destination in that footer also clears the
 checkbox. This works with every showcase theme and retains the same minimap.
-Traveler’s Kit styles the shared north letter and optional
-`.minimap-north-ornament` SVG; Base keeps the original cardinal lettering.
+Themes may style the shared `.minimap-cardinal-north` letter and reveal the
+rotating `.minimap-north-ornament` overlay (`inset: -15%`, painted via CSS
+`background`); Base keeps the original cardinal lettering.
 
 The older `?ui-theme=1` recipe specimen remains a separate diagnostic for controlled
 contrast and material tests; it is not the production-component showcase.

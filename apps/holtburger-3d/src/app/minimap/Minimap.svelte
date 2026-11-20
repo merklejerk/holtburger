@@ -301,6 +301,7 @@
 	let mapCanvas = $state<HTMLCanvasElement | null>(null);
 	let overlayCanvas = $state<HTMLCanvasElement | null>(null);
 	let northGroup = $state<SVGGElement | null>(null);
+	let northOrnamentElement = $state<HTMLDivElement | null>(null);
 	let freeAnchorElement = $state<SVGCircleElement | null>(null);
 	let coordinatesElement = $state<HTMLButtonElement | null>(null);
 	/** Clipboard failures are cold user-action feedback, independent of the map frame. */
@@ -870,9 +871,17 @@
 		const anchor = frame.subject?.anchor ?? null;
 		const subjectX = (projectedSubject?.point[0] ?? 0) * DISC_RADIUS;
 		const subjectY = -(projectedSubject?.point[1] ?? 0) * DISC_RADIUS;
-		if (northGroup) {
+		if (northGroup || northOrnamentElement) {
 			const rotation = anchor ? (-anchor.headingRadians * 180) / Math.PI : 0;
-			setAttributeIfChanged(northGroup, "transform", `rotate(${rotation})`);
+			if (northGroup) {
+				setAttributeIfChanged(northGroup, "transform", `rotate(${rotation})`);
+			}
+			if (northOrnamentElement) {
+				const transform = `rotate(${rotation}deg)`;
+				if (northOrnamentElement.style.transform !== transform) {
+					northOrnamentElement.style.transform = transform;
+				}
+			}
 		}
 		if (freeAnchorElement) {
 			freeAnchorElement.style.display =
@@ -1131,6 +1140,12 @@
 				onpointerleave={clearBlipTooltip}
 			></canvas>
 		</div>
+		<!-- Optional theme-owned north crest shares the compass rotation via CSS background. -->
+		<div
+			bind:this={northOrnamentElement}
+			class="minimap-north-ornament"
+			aria-hidden="true"
+		></div>
 		<svg class="minimap-compass" viewBox="-100 -100 200 200" aria-hidden="true">
 			<defs>
 				<!-- Optional metal face; per-instance IDs keep separate minimaps independent. -->
@@ -1150,23 +1165,6 @@
 				</clipPath>
 			</defs>
 			<g bind:this={northGroup}>
-				<!-- Optional north fittings share the compass rotation; themes own their paint. -->
-				<g
-					class="minimap-north-ornament"
-					transform={`translate(0 ${-CARDINAL_RADIUS})`}
-				>
-					<path
-						class="minimap-north-tip"
-						d="M 0 -23 L 3 -17 L 0 -11 L -3 -17 Z"
-					/>
-					{#each [-1, 1] as side}
-						<path
-							class="minimap-north-scroll"
-							transform={`scale(${side} 1)`}
-							d="M 11 5 Q 14 0 21 0 Q 25 0 23 -4 Q 22 -6 19 -4 M 12 7 H 19"
-						/>
-					{/each}
-				</g>
 				{#each [["N", 0], ["E", 90], ["S", 180], ["W", 270]] as const as [label, degrees]}
 					<text
 						class="minimap-cardinal"
@@ -1354,9 +1352,12 @@
 		}
 
 		.minimap-north-ornament {
-			/* Base retains its simple cardinal letters. */
+			/* Base retains its simple cardinal letters; themes reveal and paint their own asset. */
 			display: none;
+			position: absolute;
+			inset: -15%;
 			pointer-events: none;
+			transform-origin: center;
 		}
 
 		.minimap-cardinal-north {

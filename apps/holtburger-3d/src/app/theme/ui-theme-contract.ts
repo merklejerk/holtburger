@@ -1,7 +1,8 @@
 import { z } from "zod";
 
-/** Persisted bundled-theme ID and display label, shared without importing renderer assets. */
+/** Persisted bundled-theme IDs and display labels, shared without importing renderer assets. */
 export const TRAVELERS_KIT_THEME_ID = "Traveler’s Kit";
+export const OBSIDIAN_FORGE_THEME_ID = "Obsidian Forge";
 
 /** Theme folders are portable single path components; names double as display labels. */
 export const uiThemeIdSchema = z

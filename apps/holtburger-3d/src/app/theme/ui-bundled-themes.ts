@@ -1,15 +1,23 @@
 import {
+	OBSIDIAN_FORGE_THEME_ID,
 	TRAVELERS_KIT_THEME_ID,
 	type UiThemeTransport,
 } from "./ui-theme-contract";
 import travelersKitUrl from "./travelers-kit.css?url&no-inline";
+import obsidianForgeUrl from "./obsidian-forge.css?url&no-inline";
 
 /** Trusted build-owned assets never cross the native URL validation boundary. */
-const bundledThemes = new Map([[TRAVELERS_KIT_THEME_ID, travelersKitUrl]]);
+const bundledThemes = new Map([
+	[TRAVELERS_KIT_THEME_ID, travelersKitUrl],
+	[OBSIDIAN_FORGE_THEME_ID, obsidianForgeUrl],
+]);
 
 // Material edits use the existing explicit Reload theme action in the showcase.
 if (import.meta.hot) {
-	import.meta.hot.accept("./travelers-kit.css?url&no-inline", () => {});
+	import.meta.hot.accept(
+		["./travelers-kit.css?url&no-inline", "./obsidian-forge.css?url&no-inline"],
+		() => {},
+	);
 }
 
 /** Combine shipped choices with user discovery while preserving the existing selection lifetime. */

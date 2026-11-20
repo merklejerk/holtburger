@@ -1,0 +1,95 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="288" height="288" viewBox="-144 -144 288 288">
+  <!-- Rotates with Minimap's compass around (0, 0) via inset: -22%.
+       Uses the exact same illustrated anime cat ear and pinched satin ribbon bow geometry as
+       berry-pop-neko-ear.svg / berry-pop-neko-bow.svg. Ears are rotated inward to frame North
+       and clipped strictly outside r=101; the bow and North sparkles float cleanly on top. -->
+  <defs>
+    <linearGradient id="ear-fur" x1="0.1" y1="0" x2="0.6" y2="1">
+      <stop stop-color="#ffffff"/>
+      <stop offset="0.52" stop-color="#ffebf6"/>
+      <stop offset="0.85" stop-color="#ffc4e3"/>
+      <stop offset="1" stop-color="#f29cc9"/>
+    </linearGradient>
+    <linearGradient id="ear-inner-base" x1="0.3" y1="0" x2="0.5" y2="1">
+      <stop stop-color="#ffb8dc"/>
+      <stop offset="0.45" stop-color="#ff78ba"/>
+      <stop offset="1" stop-color="#e03688"/>
+    </linearGradient>
+    <linearGradient id="ear-inner-deep" x1="0.2" y1="0" x2="0.8" y2="1">
+      <stop stop-color="#d9297e" stop-opacity="0.72"/>
+      <stop offset="0.55" stop-color="#ff6eb4" stop-opacity="0.2"/>
+      <stop offset="1" stop-color="#ff6eb4" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="bow-front" x1="0" y1="-13" x2="0" y2="12" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ffb3dc"/>
+      <stop offset="0.32" stop-color="#ff5da8"/>
+      <stop offset="0.78" stop-color="#e02b82"/>
+      <stop offset="1" stop-color="#ad145e"/>
+    </linearGradient>
+    <linearGradient id="bow-tail" x1="0" y1="2" x2="0" y2="22" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ff6eb4"/>
+      <stop offset="0.6" stop-color="#e8358a"/>
+      <stop offset="1" stop-color="#b51864"/>
+    </linearGradient>
+    <linearGradient id="bow-knot" x1="-5" y1="-6" x2="5" y2="6" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ffc4e3"/>
+      <stop offset="0.45" stop-color="#ff5da8"/>
+      <stop offset="1" stop-color="#bf1969"/>
+    </linearGradient>
+    <!-- Even-odd clip strictly outside the r=101 minimap outer rim so ears stay behind it. -->
+    <clipPath id="outside-bezel">
+      <path fill-rule="evenodd" d="M -144 -144 H 144 V 144 H -144 Z M 101 0 A 101 101 0 1 0 -101 0 A 101 101 0 1 0 101 0 Z"/>
+    </clipPath>
+    <!-- Shared illustrated anime ear (identical to berry-pop-neko-ear.svg). -->
+    <g id="illustrated-ear">
+      <path d="M 8 54 C 4 33 6 14 14 4 C 24 5 44 19 60 40 C 49 49 28 55 8 54 Z" fill="url(#ear-fur)" stroke="#9e1d5c" stroke-width="2.4" stroke-linejoin="round"/>
+      <path d="M 9 52 C 7 37 8 21 13.5 9 C 10.5 23 12 40 20 49 C 34 50 48 45 57 39 C 47 48 28 54 9 52 Z" fill="#e68ab9" fill-opacity="0.45"/>
+      <path d="M 16.5 7.5 C 26 9.5 41 20 53.5 36" fill="none" stroke="#ffffff" stroke-width="2.2" stroke-linecap="round" stroke-opacity="0.9"/>
+      <path d="M 20 45 C 18 33 19 21 23 15 C 31 16 42 25 49 37 C 41 42 30 45 20 45 Z" fill="url(#ear-inner-base)"/>
+      <path d="M 20 45 C 18 33 19 21 23 15 C 31 16 42 25 49 37 C 41 42 30 45 20 45 Z" fill="url(#ear-inner-deep)"/>
+      <path d="M 20.5 43 C 19 32 19.8 21.5 23.2 15.6 C 29.5 16.8 39 24 46 34.5" fill="none" stroke="#b8256c" stroke-width="1.25" stroke-linecap="round" stroke-opacity="0.72"/>
+      <path d="M 24.5 20.5 C 29.5 22 36 27.5 41 34.5" fill="none" stroke="#ffdbf0" stroke-width="1.35" stroke-linecap="round" stroke-opacity="0.8"/>
+      <path d="M 18 46 Q 22 38 26 42 Q 29 36 33 41 Q 36 37 40 42 L 21 48 Z" fill="#fff5fa" stroke="#c94b88" stroke-width="1" stroke-linejoin="round"/>
+    </g>
+    <!-- Crisp 4-point anime sparkle primitive centered at (0, 0). -->
+    <path id="sparkle" d="M 0 -7 L 1.6 -1.6 L 7 0 L 1.6 1.6 L 0 7 L -1.6 1.6 L -7 0 L -1.6 -1.6 Z"/>
+  </defs>
+  <!-- Both illustrated ears rotated inward toward North and clipped strictly behind r=101 -->
+  <g clip-path="url(#outside-bezel)">
+    <g transform="rotate(-33) translate(-34 -136) rotate(26 34 47)">
+      <use href="#illustrated-ear"/>
+    </g>
+    <g transform="rotate(33) scale(-1 1) translate(-34 -136) rotate(26 34 47)">
+      <use href="#illustrated-ear"/>
+    </g>
+  </g>
+  <!-- Twinkling anime sparkles clustered gracefully around the North cardinal N -->
+  <g stroke-linejoin="round">
+    <use href="#sparkle" transform="translate(-19 -113) scale(1.05)" fill="#ffffff" stroke="#ff3d9a" stroke-width="0.9"/>
+    <use href="#sparkle" transform="translate(20 -114) scale(1.15)" fill="#fff4b8" stroke="#e03688" stroke-width="0.9"/>
+    <use href="#sparkle" transform="translate(0 -124) scale(0.85)" fill="#ffffff" stroke="#ff5da8" stroke-width="0.9"/>
+    <use href="#sparkle" transform="translate(-26 -97) scale(0.75)" fill="#fff4b8" stroke="#e03688" stroke-width="0.9"/>
+    <use href="#sparkle" transform="translate(26 -98) scale(0.7)" fill="#ffffff" stroke="#ff5da8" stroke-width="0.9"/>
+    <circle cx="-11" cy="-121" r="1.9" fill="#ffffff" stroke="#ff4fa3" stroke-width="0.7"/>
+    <circle cx="12" cy="-121" r="1.8" fill="#fff4b8" stroke="#e03688" stroke-width="0.7"/>
+    <circle cx="-15" cy="-91" r="1.5" fill="#ffffff" stroke="#ff4fa3" stroke-width="0.6"/>
+    <circle cx="15" cy="-91" r="1.5" fill="#fff4b8" stroke="#e03688" stroke-width="0.6"/>
+  </g>
+  <!-- Unclipped illustrated satin ribbon bow with pinched outer indents above the right ear -->
+  <g transform="rotate(34) translate(-4 -101) rotate(12)">
+    <path d="M -3 4 C -8 10 -12 17 -15 22 L -9 18.5 L -5.5 23 C -3.5 17 -2 11 -1 5 Z" fill="url(#bow-tail)" stroke="#8c124e" stroke-width="1.6" stroke-linejoin="round"/>
+    <path d="M 3 4 C 8 10 12 17 15 22 L 9 18.5 L 5.5 23 C 3.5 17 2 11 1 5 Z" fill="url(#bow-tail)" stroke="#8c124e" stroke-width="1.6" stroke-linejoin="round"/>
+    <path d="M -5 5 L -2 9 M 5 5 L 2 9" stroke="#7a0d42" stroke-width="1.4" stroke-opacity="0.55" stroke-linecap="round"/>
+    <path d="M -3 3 C -11 11.5 -21 13.5 -23 8.5 C -19 9.5 -11 7.5 -3 2 Z" fill="#9e1458"/>
+    <path d="M 3 3 C 11 11.5 21 13.5 23 8.5 C 19 9.5 11 7.5 3 2 Z" fill="#9e1458"/>
+    <path d="M -2 -1.5 C -9 -13.5 -21 -14 -24.5 -6.5 C -26 -3 -21.5 -1 -19 0.5 C -22 2.5 -25.5 5 -23.5 8.5 C -20 13.5 -9 11.5 -2 3.5 Z" fill="url(#bow-front)" stroke="#8c124e" stroke-width="1.8" stroke-linejoin="round"/>
+    <path d="M 2 -1.5 C 9 -13.5 21 -14 24.5 -6.5 C 26 -3 21.5 -1 19 0.5 C 22 2.5 25.5 5 23.5 8.5 C 20 13.5 9 11.5 2 3.5 Z" fill="url(#bow-front)" stroke="#8c124e" stroke-width="1.8" stroke-linejoin="round"/>
+    <path d="M -5 0 C -10 -1.8 -14.5 -1 -18.5 0.5 M -5 2.5 C -9.5 3.5 -14 4.5 -17.5 3.5" fill="none" stroke="#8c124e" stroke-width="1.15" stroke-linecap="round" stroke-opacity="0.8"/>
+    <path d="M 5 0 C 10 -1.8 14.5 -1 18.5 0.5 M 5 2.5 C 9.5 3.5 14 4.5 17.5 3.5" fill="none" stroke="#8c124e" stroke-width="1.15" stroke-linecap="round" stroke-opacity="0.8"/>
+    <path d="M -19.5 -7 C -15 -10 -9.5 -9 -6 -5 M 19.5 -7 C 15 -10 9.5 -9 6 -5" fill="none" stroke="#ffffff" stroke-width="1.7" stroke-linecap="round" stroke-opacity="0.9"/>
+    <path d="M -19 6.5 C -15.5 8.2 -12 8 -9.5 6.8 M 19 6.5 C 15.5 8.2 12 8 9.5 6.8" fill="none" stroke="#ffd9ec" stroke-width="1.15" stroke-linecap="round" stroke-opacity="0.72"/>
+    <rect x="-5.5" y="-5" width="11" height="11" rx="4.5" fill="url(#bow-knot)" stroke="#8c124e" stroke-width="1.8"/>
+    <path d="M -2.5 -2.2 Q 0 -3.4 2.5 -2.2" fill="none" stroke="#ffffff" stroke-width="1.5" stroke-linecap="round" stroke-opacity="0.9"/>
+    <path d="M -3 3 Q 0 4.2 3 3" fill="none" stroke="#8c124e" stroke-width="1" stroke-linecap="round" stroke-opacity="0.6"/>
+  </g>
+</svg>

@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96">
+  <!-- Nine-slice at 32 source pixels (rendered 1:1 at 32px with 10px outset on panels,
+       and 24px with 7.5px outset on compact HUDs). The straight candy rails align with
+       coordinate 10 so they hug the box edge flush while asymmetric charms (paw print
+       top-left, golden neko bell bottom-right, dainty sparkles on opposing corners) accent
+       the frame cleanly without crowding headers or slots. -->
+  <defs>
+    <linearGradient id="berry-rim" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#ff8cc6"/>
+      <stop offset="0.35" stop-color="#ff5da8"/>
+      <stop offset="0.72" stop-color="#e83f8f"/>
+      <stop offset="1" stop-color="#c92876"/>
+    </linearGradient>
+    <linearGradient id="bell-gold" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#fff6bd"/>
+      <stop offset="0.45" stop-color="#f7c948"/>
+      <stop offset="1" stop-color="#bf7b12"/>
+    </linearGradient>
+    <!-- Oversized high-contrast pink paw print medallion + sparkle for top-left corner. -->
+    <g id="paw">
+      <circle cx="14" cy="14" r="12" fill="#ffffff" stroke="#d92b7e" stroke-width="2"/>
+      <circle cx="14" cy="14" r="10.2" fill="#fff2f8"/>
+      <ellipse cx="14" cy="17.2" rx="5.8" ry="4.2" fill="#ff3d9a"/>
+      <circle cx="7.8" cy="11.2" r="2.55" fill="#ff3d9a"/>
+      <circle cx="11.7" cy="8.5" r="2.55" fill="#ff3d9a"/>
+      <circle cx="16.3" cy="8.5" r="2.55" fill="#ff3d9a"/>
+      <circle cx="20.2" cy="11.2" r="2.55" fill="#ff3d9a"/>
+      <circle cx="12.4" cy="15.8" r="1.4" fill="#ffe0f0"/>
+      <!-- Crisp 4-point anime sparkle beside the paw -->
+      <path d="M 28.5 3.5 L 29.4 6.2 L 32 7.1 L 29.4 8 L 28.5 10.7 L 27.6 8 L 25 7.1 L 27.6 6.2 Z" fill="#ffffff" stroke="#ff3d9a" stroke-width="0.65"/>
+    </g>
+    <!-- Bold golden neko bell with hot-pink ribbon bow + sparkle for bottom-right corner. -->
+    <g id="bell">
+      <g transform="rotate(45 82 16)">
+        <path d="M 82 7 L 74.2 3 Q 72.6 7.4 75.5 10.2 Z M 82 7 L 89.8 3 Q 91.4 7.4 88.5 10.2 Z" fill="#ff3d9a" stroke="#8c1452" stroke-width="1.25" stroke-linejoin="round"/>
+        <circle cx="82" cy="7" r="2.3" fill="#ff99cc" stroke="#8c1452" stroke-width="1"/>
+        <circle cx="82" cy="16" r="8.6" fill="url(#bell-gold)" stroke="#804b08" stroke-width="1.7"/>
+        <path d="M 74.2 16.2 Q 82 19 89.8 16.2" fill="none" stroke="#804b08" stroke-width="1.35"/>
+        <circle cx="82" cy="19.6" r="1.9" fill="#5e3404"/>
+        <path d="M 82 19.6 V 23.8" stroke="#5e3404" stroke-width="1.5" stroke-linecap="round"/>
+        <circle cx="78.8" cy="12.5" r="1.9" fill="#fffce0" fill-opacity="0.94"/>
+      </g>
+      <path d="M 67.5 3.5 L 68.4 6.2 L 71 7.1 L 68.4 8 L 67.5 10.7 L 66.6 8 L 64 7.1 L 66.6 6.2 Z" fill="#fff5b8" stroke="#ff3d9a" stroke-width="0.65"/>
+    </g>
+    <!-- Crisp 4-point sparkle accent for clean opposing corners. -->
+    <path id="corner-sparkle" d="M 0 -5.2 L 1.25 -1.25 L 5.2 0 L 1.25 1.25 L 0 5.2 L -1.25 1.25 L -5.2 0 L -1.25 -1.25 Z"/>
+  </defs>
+  <!-- Slim glossy bubblegum-pink and white rails straddling coordinate 10 (box edge). -->
+  <g fill="none">
+    <rect x="7.5" y="7.5" width="81" height="81" rx="6" stroke="#b8256c" stroke-width="2"/>
+    <rect x="9.3" y="9.3" width="77.4" height="77.4" rx="4.5" stroke="url(#berry-rim)" stroke-width="3.2"/>
+    <rect x="11.6" y="11.6" width="72.8" height="72.8" rx="3" stroke="#ffffff" stroke-width="2"/>
+    <rect x="13.2" y="13.2" width="69.6" height="69.6" rx="2" stroke="#ffa6d2" stroke-width="0.9"/>
+  </g>
+  <!-- Asymmetric corner accents: paw print top-left, golden neko bell bottom-right,
+       and dainty sparkles on top-right and bottom-left. -->
+  <use href="#paw"/>
+  <use href="#bell" transform="translate(-2 65)"/>
+  <g stroke-linejoin="round">
+    <use href="#corner-sparkle" transform="translate(86.5 9.5)" fill="#ffffff" stroke="#ff3d9a" stroke-width="0.7"/>
+    <circle cx="79" cy="6.5" r="1.4" fill="#fff5b8" stroke="#e03688" stroke-width="0.5"/>
+    <use href="#corner-sparkle" transform="translate(9.5 86.5)" fill="#fff5b8" stroke="#ff3d9a" stroke-width="0.7"/>
+    <circle cx="17" cy="89.5" r="1.4" fill="#ffffff" stroke="#e03688" stroke-width="0.5"/>
+  </g>
+</svg>

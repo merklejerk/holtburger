@@ -3,7 +3,6 @@ import type {
 	ObjectInspection,
 	ObjectInspectionResult,
 } from "./object-inspection-contract";
-import type { HexRgbaColor } from "../../lib/frontend-color";
 import type {
 	ObjectPreviewResult,
 	ObjectPreviewSource,
@@ -13,7 +12,10 @@ import type {
 	ClientLifecycleSessionEvent,
 } from "../session/lifecycle-session";
 import { CLIENT_TUNING } from "../settings/tuning";
-import { selectedEntityNameColor } from "../world/selected-entity-color";
+import {
+	selectedEntityNameColor,
+	type EntityNameColorToken,
+} from "../world/selected-entity-color";
 
 type InspectionSession = Pick<
 	ClientLifecycleSession,
@@ -33,7 +35,7 @@ export type ClientInspectionState =
 			readonly guid: number;
 			readonly inspection: ObjectInspection;
 			/** Name color captured through the same policy as the selected-entity HUD. */
-			readonly nameColor: HexRgbaColor | null;
+			readonly nameColor: EntityNameColorToken | null;
 			/** Null for item appraisal; creature previews retain their own cold readiness. */
 			readonly preview: ClientObjectPreviewState | null;
 	  };
@@ -73,7 +75,7 @@ export class ClientInspection {
 	#refreshFailureReported = false;
 	#previewFingerprint: string | null = null;
 	#previewRevision = 0;
-	#nameColor: HexRgbaColor | null = null;
+	#nameColor: EntityNameColorToken | null = null;
 	#destroyed = false;
 
 	constructor(
@@ -346,7 +348,7 @@ export class ClientInspection {
 		this.#previewRevision = 0;
 	}
 
-	#resolveNameColor(guid: number): HexRgbaColor | null {
+	#resolveNameColor(guid: number): EntityNameColorToken | null {
 		const read = this.#session.entities.read();
 		if (read.kind === "pending") return null;
 		const entity = read.level.entities.get(guid);

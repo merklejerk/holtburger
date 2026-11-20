@@ -129,19 +129,21 @@ is not passed directly to the stylesheet loader.
 
 ## Built-in themes
 
-**Traveler’s Kit** and **Obsidian Forge** ship alongside Base and are available in
-pregame or in-game **Settings → UI → Theme**. Traveler’s Kit is the client default
-(leather, stitching, and copper fittings); Obsidian Forge pairs hammered dark iron
-with subtle molten-ember seams and corners. Both retain transparent content
+**Traveler’s Kit**, **Obsidian Forge**, and **Berry Pop Neko** ship alongside Base
+and are available in pregame or in-game **Settings → UI → Theme**. Traveler’s Kit
+is the client default (leather, stitching, and copper fittings); Obsidian Forge
+pairs hammered dark iron with subtle molten-ember seams and corners; Berry Pop
+Neko is a light-mode frosted strawberry-pink kawaii cat theme with glossy
+bubblegum accents and paw/bell/cat-ear trim. All retain transparent content
 backgrounds. Selection, reload and saved preferences use the same owner as local
 themes. `src/app/theme/ui-bundled-themes.ts` composes trusted Vite-emitted assets
 with the validated desktop transport; native URL validation remains unchanged.
 
-The names `Traveler’s Kit` and `Obsidian Forge` are reserved. A local folder with
-either exact name makes catalog refresh report a collision; rename the folder and
-refresh. Previously available choices remain usable. Built-in choices remain
-available even if user folder discovery fails or times out. No built-in files are
-installed into the user-data directory.
+The names `Traveler’s Kit`, `Obsidian Forge`, and `Berry Pop Neko` are reserved. A
+local folder with any of those exact names makes catalog refresh report a
+collision; rename the folder and refresh. Previously available choices remain
+usable. Built-in choices remain available even if user folder discovery fails or
+times out. No built-in files are installed into the user-data directory.
 
 ## Installing and using local themes
 
@@ -269,6 +271,7 @@ physical press, selection, an open panel, or disabled controls.
 | `--ui-color-active`                                                                                                                                         | Foreground color for active or open HUD controls.                                                                                     |
 | `--ui-color-danger`, `--ui-color-warning`, `--ui-color-success`                                                                                             | Status-feedback colors.                                                                                                               |
 | `--ui-color-health`, `--ui-color-stamina`, `--ui-color-mana`                                                                                                | Vital-bar colors, independent of chat.                                                                                                |
+| `--ui-entity-name-{self-player,player,npc,mob,portal,lifestone,door,door-no-direct-use,switch,healing-kit,mana-stone,other}-color`                          | Selected-target and inspection heading colors; defaults mirror 3D nameplate/map colors.                                               |
 | `--ui-font-body`, `--ui-font-heading`, `--ui-font-mono`                                                                                                     | CSS font-family lists.                                                                                                                |
 | `--ui-font-size-body`, `--ui-font-size-heading-1`, `--ui-font-size-heading-2`, `--ui-font-size-heading-3`, `--ui-font-size-caption`, `--ui-font-size-micro` | Semantic font sizes for shared body, headings, captions, and compact HUD text.                                                        |
 | `--ui-line-height-body`, `--ui-line-height-heading`                                                                                                         | Unitless line heights for shared body and heading text.                                                                               |

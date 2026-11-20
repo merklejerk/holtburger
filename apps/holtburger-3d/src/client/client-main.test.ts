@@ -9,6 +9,9 @@ vi.mock("../app/theme/travelers-kit.css?url&no-inline", () => ({
 vi.mock("../app/theme/obsidian-forge.css?url&no-inline", () => ({
 	default: "/assets/obsidian-forge.css",
 }));
+vi.mock("../app/theme/berry-pop-neko.css?url&no-inline", () => ({
+	default: "/assets/berry-pop-neko.css",
+}));
 
 interface StartupProps {
 	mode: "client";

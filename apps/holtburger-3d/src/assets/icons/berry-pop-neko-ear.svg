@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="68" height="60" viewBox="0 0 68 60">
+  <!-- Illustrated anime cat ear (left): sharper pert point, layered cel-shading,
+       soft fur shadow, inner ridge line art, and fluffy base tufts. -->
+  <defs>
+    <linearGradient id="ear-fur" x1="0.1" y1="0" x2="0.6" y2="1">
+      <stop stop-color="#ffffff"/>
+      <stop offset="0.52" stop-color="#ffebf6"/>
+      <stop offset="0.85" stop-color="#ffc4e3"/>
+      <stop offset="1" stop-color="#f29cc9"/>
+    </linearGradient>
+    <linearGradient id="ear-inner-base" x1="0.3" y1="0" x2="0.5" y2="1">
+      <stop stop-color="#ffb8dc"/>
+      <stop offset="0.45" stop-color="#ff78ba"/>
+      <stop offset="1" stop-color="#e03688"/>
+    </linearGradient>
+    <linearGradient id="ear-inner-deep" x1="0.2" y1="0" x2="0.8" y2="1">
+      <stop stop-color="#d9297e" stop-opacity="0.72"/>
+      <stop offset="0.55" stop-color="#ff6eb4" stop-opacity="0.2"/>
+      <stop offset="1" stop-color="#ff6eb4" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <!-- Main outer ear silhouette with sharper, pert anime tip -->
+  <path d="M 8 54 C 4 33 6 14 14 4 C 24 5 44 19 60 40 C 49 49 28 55 8 54 Z" fill="url(#ear-fur)" stroke="#9e1d5c" stroke-width="2.4" stroke-linejoin="round"/>
+  <!-- Soft cel-shaded shadow along the outer/lower fur curve -->
+  <path d="M 9 52 C 7 37 8 21 13.5 9 C 10.5 23 12 40 20 49 C 34 50 48 45 57 39 C 47 48 28 54 9 52 Z" fill="#e68ab9" fill-opacity="0.45"/>
+  <!-- Crisp glossy white rim highlight along the upper-right slope -->
+  <path d="M 16.5 7.5 C 26 9.5 41 20 53.5 36" fill="none" stroke="#ffffff" stroke-width="2.2" stroke-linecap="round" stroke-opacity="0.9"/>
+  <!-- Compact inner pink ear pocket with sharper point -->
+  <path d="M 20 45 C 18 33 19 21 23 15 C 31 16 42 25 49 37 C 41 42 30 45 20 45 Z" fill="url(#ear-inner-base)"/>
+  <!-- Deeper inner-ear recess shading along the left/top ridge -->
+  <path d="M 20 45 C 18 33 19 21 23 15 C 31 16 42 25 49 37 C 41 42 30 45 20 45 Z" fill="url(#ear-inner-deep)"/>
+  <!-- Subtle illustrated inner line art: delicate ridge stroke + inner contour -->
+  <path d="M 20.5 43 C 19 32 19.8 21.5 23.2 15.6 C 29.5 16.8 39 24 46 34.5" fill="none" stroke="#b8256c" stroke-width="1.25" stroke-linecap="round" stroke-opacity="0.72"/>
+  <path d="M 24.5 20.5 C 29.5 22 36 27.5 41 34.5" fill="none" stroke="#ffdbf0" stroke-width="1.35" stroke-linecap="round" stroke-opacity="0.8"/>
+  <!-- Cute fluffy white fur tufts overlapping the lower inner base of the ear -->
+  <path d="M 18 46 Q 22 38 26 42 Q 29 36 33 41 Q 36 37 40 42 L 21 48 Z" fill="#fff5fa" stroke="#c94b88" stroke-width="1" stroke-linejoin="round"/>
+</svg>

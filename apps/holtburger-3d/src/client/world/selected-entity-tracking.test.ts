@@ -351,8 +351,7 @@ describe("ClientSelectedEntityTracking", () => {
 		f.selection.selectContentsItem(9, "toggle");
 		expect(f.interactions.display(false)).toEqual({
 			name: "Item 9",
-			nameColor:
-				SHARED_FRONTEND_TUNING.rendering.nameplates.appearance.fillColors.other,
+			nameColor: `var(--ui-entity-name-other-color, ${SHARED_FRONTEND_TUNING.rendering.nameplates.appearance.fillColors.other})`,
 			stackCount: null,
 			structure: { current: null, max: null },
 			health: { kind: "not-applicable" },
@@ -381,7 +380,7 @@ describe("ClientSelectedEntityTracking", () => {
 		);
 		f.emit("client-entity-facts-changed", entityDelta({ upserts: [creature] }));
 		expect(f.interactions.display(false).nameColor).toBe(
-			SHARED_FRONTEND_TUNING.rendering.nameplates.appearance.fillColors.mob,
+			`var(--ui-entity-name-mob-color, ${SHARED_FRONTEND_TUNING.rendering.nameplates.appearance.fillColors.mob})`,
 		);
 		f.emit(
 			"client-entity-facts-changed",
@@ -403,8 +402,7 @@ describe("ClientSelectedEntityTracking", () => {
 		);
 		expect(f.interactions.display(false)).toEqual({
 			name: "Renamed",
-			nameColor:
-				SHARED_FRONTEND_TUNING.rendering.nameplates.appearance.fillColors.other,
+			nameColor: `var(--ui-entity-name-other-color, ${SHARED_FRONTEND_TUNING.rendering.nameplates.appearance.fillColors.other})`,
 			stackCount: null,
 			structure: { current: null, max: null },
 			health: { kind: "known", fraction: 0.5 },

@@ -25,6 +25,7 @@
 		--ui-cantrip-tier-epic-color: #ff9d6c;
 		--ui-cantrip-tier-legendary-color: #f2d05c;
 		--ui-cantrip-tier-other-color: #e6a4cf;
+		/* Optional --ui-entity-name-*-color tokens resolve their 3D/map defaults at selectedEntityNameColor. */
 		/* Palette-dependent component defaults resolve at the consumer. */
 		/* Frosted HUD backings shared by the combat gauge and social wheel. */
 		--ui-hud-glass-color: color-mix(

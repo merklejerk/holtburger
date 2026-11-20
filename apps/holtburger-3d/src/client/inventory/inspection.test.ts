@@ -256,8 +256,7 @@ describe("ClientInspection", () => {
 		expect(owner.read()).toMatchObject({
 			kind: "ready",
 			guid: itemFixture.guid,
-			nameColor:
-				SHARED_FRONTEND_TUNING.rendering.nameplates.appearance.fillColors.mob,
+			nameColor: `var(--ui-entity-name-mob-color, ${SHARED_FRONTEND_TUNING.rendering.nameplates.appearance.fillColors.mob})`,
 		});
 	});
 

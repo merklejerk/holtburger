@@ -1,0 +1,1107 @@
+/* Berry Pop Neko material treatment; light-mode frosted strawberry-milk palette with glossy bubblegum accents. */
+/* Pregame owns its appearance, including controls nested inside modal dialogs. */
+@scope (:root) to (.client-pregame-screen) {
+	@layer theme {
+		:scope {
+			--ui-color-text: #2e0a20;
+			--ui-color-muted: #662e4e;
+			--ui-color-surface: #dfa3c2;
+			--ui-color-well: #cf8caf;
+			--ui-color-control: #e3a8c7;
+			--ui-color-border: #d95296;
+			--ui-color-highlight: #ffffff;
+			--ui-color-shadow: #420d2c;
+			--ui-color-accent: #ad1866;
+			--ui-color-active: #0f6e3d;
+			--ui-color-focus: #ff2e93;
+			--ui-color-danger: #b81432;
+			--ui-color-warning: #9e5200;
+			--ui-color-success: #126e3c;
+			--ui-character-upgrade-color: #10733e;
+			--ui-panel-background: #dfa3c2e0;
+			--ui-hud-background-color: #cc6aa0cc;
+			--ui-hud-glass-color: #c75f98c2;
+			/* High-contrast cantrip tier palette tuned so every tier stays distinct on rose-pink. */
+			--ui-cantrip-tier-feeble-color: #3d4654;
+			--ui-cantrip-tier-minor-color: #0d8a45;
+			--ui-cantrip-tier-moderate-color: #0077cc;
+			--ui-cantrip-tier-major-color: #7c1ee6;
+			--ui-cantrip-tier-epic-color: #e04400;
+			--ui-cantrip-tier-legendary-color: #c99300;
+			--ui-cantrip-tier-other-color: #0d8585;
+			/* Deepened entity-name palette so selected targets and inspection headings read cleanly on pink. */
+			--ui-entity-name-self-player-color: #0b6e3c;
+			--ui-entity-name-player-color: #0b5c8a;
+			--ui-entity-name-npc-color: #8a5200;
+			--ui-entity-name-mob-color: #a31026;
+			--ui-entity-name-portal-color: #6b21a8;
+			--ui-entity-name-lifestone-color: #0e6670;
+			--ui-entity-name-door-color: #0e5f7a;
+			--ui-entity-name-door-no-direct-use-color: #9c4200;
+			--ui-entity-name-switch-color: #7d5c00;
+			--ui-entity-name-healing-kit-color: #8c1973;
+			--ui-entity-name-mana-stone-color: #0a6375;
+			--ui-entity-name-other-color: #4a1233;
+			/* Candy gloss sheen overlays vital bars and animated progress fills. */
+			--ui-progress-fill-image: linear-gradient(
+				180deg,
+				#ffffff59,
+				transparent 48%,
+				#5c0f3833
+			);
+			--ui-button-background-color: #edb8d4;
+			--ui-button-border-color: #d95296;
+			--ui-radius-control: 6px;
+			--ui-radius-surface: 6px;
+			--ui-window-frame-outset: 10px;
+			--ui-item-cell-background: #f5cce066;
+			--ui-item-cell-border: 1px solid #d95c9cb3;
+			--ui-item-empty-background: #d993b859;
+			--ui-item-empty-border: 1px solid #d95c9c99;
+			--ui-item-selection-color: #2e0a20;
+			--ui-item-selection-outline: 2px solid #ff2e93;
+			--ui-item-selection-shadow: inset 0 0 8px #ff4fa359;
+			--ui-item-selection-background: #ff5da838;
+			/* Authored kawaii cat and candy-gloss materials serve windows, overlays, and controls. */
+			--ui-neko-frame: url("../../assets/icons/berry-pop-neko-frame.svg");
+			--ui-neko-pattern: url("../../assets/icons/berry-pop-neko-pattern.svg");
+			--ui-neko-compass: url("../../assets/icons/berry-pop-neko-compass.svg");
+			--ui-neko-north: url("../../assets/icons/berry-pop-neko-north.svg");
+			--ui-neko-ear: url("../../assets/icons/berry-pop-neko-ear.svg");
+			--ui-neko-bow: url("../../assets/icons/berry-pop-neko-bow.svg");
+			/* A crisp candy-gloss pearl highlight trims glossy strawberry headers. */
+			--ui-neko-gloss-seam: linear-gradient(
+					90deg,
+					#ffffff40,
+					#ffffffcc 20%,
+					#ffffffe6 50%,
+					#ffffffcc 80%,
+					#ffffff40
+				)
+				left 0 bottom 1px / 100% 1px no-repeat;
+			--ui-neko-pressed-shadow:
+				inset 0 2px 3px #8c1a5459, inset 0 -1px #ffffff80, 0 0 0 1px #c92876b3;
+			--ui-neko-inset-shadow: inset 0 1px 3px #8c1a5438, 0 1px #ffffffcc;
+			/* Warm dark cocoa-berry foreground shared by glossy pink HUD icon buttons, buttons, and pills. */
+			--ui-neko-control-ink: #5c222e;
+			--ui-filter-pill-radius: 999px;
+			/* Leave room for the shared candy rails around adjacent party cells. */
+			--ui-party-grid-gap: 8px;
+			--ui-spell-bar-color: #ff5da8;
+			--ui-spell-tab-color: #ffffff;
+			--ui-spell-tab-active-color: #ffffff;
+			--ui-spell-tab-border: 1px solid #e872aecc;
+			--ui-spell-tab-radius: 5px 5px 0 0;
+			--ui-spell-tab-active-background: #ff4fa3f2;
+			--ui-spell-tab-active-shadow:
+				inset 0 1px 0 #ffd6ebcc, inset 0 -2px #b81f68;
+			--ui-spell-scrollbar-color: #ff5da8;
+			--ui-spell-scrollbar-track-opacity: 28%;
+			--ui-spell-scrollbar-thumb-opacity: 80%;
+			--ui-combat-foreground-color: #ffffff;
+			--ui-combat-stop-color: #ff3d9a;
+			--ui-combat-outline-color: #a81c62;
+			--ui-combat-track-color: #4a15338c;
+			--ui-combat-height-color: #ffd6eb73;
+			--ui-combat-height-selected-color: #ff4fa3ad;
+			--ui-combat-height-hover-color: #ff78ba99;
+			--ui-combat-recklessness-track-color: #ffe8a373;
+			--ui-combat-recklessness-charge-color: #ffbe3b;
+			--ui-combat-recklessness-handle-color: #ffd859;
+		}
+
+		.ui-theme :is(.ui-panel:not(.hud-window), .ui-dialog) {
+			/* Nine-sliced bubblegum-pink and white frame with paw, bell, and sparkle corners
+			   paints around the 1px border without changing layout or covering translucency. */
+			border-image-source: var(--ui-neko-frame);
+			border-image-slice: 32;
+			border-image-width: 32px;
+			border-image-outset: var(--ui-window-frame-outset);
+			border-image-repeat: stretch;
+			box-shadow:
+				inset 0 0 0 1px #ffffff99,
+				0 4px 14px #4a123340;
+		}
+
+		/* Floating HUD windows paint their nine-slice frame in a foreground ::after layer
+		   so corner paws, bells, and sparkles sit cleanly above opaque title bars and content. */
+		.ui-theme .hud-window {
+			box-shadow:
+				inset 0 0 0 1px #ffffff99,
+				0 4px 14px #4a123340;
+		}
+		.ui-theme .hud-window::after {
+			content: "";
+			position: absolute;
+			inset: -1px;
+			z-index: 3;
+			pointer-events: none;
+			border: 0 solid transparent;
+			border-image-source: var(--ui-neko-frame);
+			border-image-slice: 32;
+			border-image-width: 32px;
+			border-image-outset: var(--ui-window-frame-outset);
+			border-image-repeat: stretch;
+		}
+
+		/* Frosted strawberry-cream console surface finished with a crisp candy-gloss edge. */
+		.ui-theme .ui-runtime-console {
+			background:
+				var(--ui-neko-gloss-seam),
+				linear-gradient(180deg, #f2c4dcd9, #dfa0c0eb),
+				var(--ui-neko-pattern) left top / 32px 32px repeat,
+				#dfa3c2;
+			border-bottom: 2px solid #ff5da8;
+			box-shadow:
+				inset 0 -3px #ffb8dc,
+				0 6px 16px #4a123338;
+			padding-bottom: 6px;
+			color: var(--ui-color-text);
+			--ui-console-selection-background: #ff4fa3;
+			--ui-console-selection-text: #ffffff;
+		}
+
+		.ui-theme .ui-frame {
+			/* Glossy strawberry-pink header with subtle polka dots and candy-gloss rim. */
+			background:
+				var(--ui-neko-gloss-seam),
+				var(--ui-neko-pattern) left top / 32px 32px repeat,
+				linear-gradient(180deg, #ff99cc, #ff6eb4 52%, #f2529d);
+			box-shadow:
+				inset 0 1px #ffffffa6,
+				inset 0 -1px #c9287666,
+				0 1px 3px #8c1a5426;
+			color: #ffffff;
+			text-shadow: 0 1px 2px #8c1a54b3;
+			font-family: var(--ui-font-heading);
+		}
+
+		.ui-theme .ui-frame .ui-button {
+			font-family: var(--ui-font-body);
+			text-shadow: none;
+		}
+
+		.ui-theme .ui-button {
+			/* Glossy rose-berry candy button with warm dark ink (immune to dark chat-panel text scoping). */
+			--ui-color-muted: var(--ui-neko-control-ink);
+			background-image: linear-gradient(
+				180deg,
+				#f7d2e5eb,
+				#e8a8c9e0 48%,
+				#d684b0e0
+			);
+			background-size: auto;
+			color: var(--ui-neko-control-ink);
+			box-shadow:
+				inset 0 1px #ffffffb3,
+				inset 0 -2px #c9287659,
+				0 0 0 1px #d44d91cc,
+				0 2px 3px #5c103833;
+			text-shadow: 0 1px 0 #ffffff80;
+		}
+
+		.ui-theme .ui-button:where(:hover:not(:disabled)) {
+			background-image: linear-gradient(180deg, #ffffff, #ffc9e6 46%, #ff85c0);
+			color: #3d141d;
+			box-shadow:
+				inset 0 1px #ffffff,
+				inset 0 -2px #ff2e9399,
+				0 0 0 1.5px #ff2e93,
+				0 0 10px #ff5da880;
+		}
+
+		.ui-theme .hud-window-close {
+			/* Circular marshmallow-pink close cap preserving the existing hit target. */
+			--close-diameter: max(28px, calc(1em + 10px), calc(1.35em + 6px));
+			width: var(--close-diameter);
+			height: var(--close-diameter);
+			border-radius: 50%;
+		}
+
+		.ui-theme
+			.ui-button:where(
+				:active:not(:disabled),
+				[aria-pressed="true"]:not(:disabled),
+				[aria-selected="true"]:not(:disabled)
+			) {
+			background-image: linear-gradient(180deg, #ff6eb4, #e8388d);
+			background-size: auto;
+			color: #ffffff;
+			text-shadow: 0 1px 1px #8c1a54a6;
+			box-shadow: var(--ui-neko-pressed-shadow);
+		}
+
+		.ui-theme .ui-button:where(:disabled) {
+			background-image: linear-gradient(180deg, #f7e6eecc, #ebd3dfcc);
+			background-size: auto;
+			color: #9e738c;
+			box-shadow:
+				inset 0 1px #ffffff80,
+				0 0 0 1px #d9a3bf99;
+		}
+
+		/* Compact overlays and the spell rail use the neko frame at a compact scale
+		   while keeping corner paw prints, bells, and sparkles clearly legible. */
+		.ui-theme .ui-overlay-surface:not(.ui-dialog),
+		.ui-theme .spell-rail::before {
+			border-image-source: var(--ui-neko-frame);
+			border-image-slice: 32;
+			border-image-width: 24px;
+			border-image-outset: 7.5px;
+			border-image-repeat: stretch;
+			box-shadow:
+				inset 0 0 0 1px #ffffff99,
+				0 4px 12px #4a123338;
+		}
+
+		.ui-theme :is(.ui-input, select):not(.ui-hud-input) {
+			background-color: #f2cde0eb;
+			background-image: linear-gradient(180deg, #b85c8c2e, transparent 55%);
+			color: var(--ui-color-text);
+			box-shadow: var(--ui-neko-inset-shadow);
+		}
+
+		.ui-theme :is(.ui-input, select):not(.ui-hud-input):focus-visible {
+			box-shadow:
+				var(--ui-neko-inset-shadow),
+				0 0 0 1px #ff3d9a,
+				0 0 6px #ff5da859;
+		}
+
+		.ui-theme :is(.ui-well, .ui-inset) {
+			box-shadow: var(--ui-neko-inset-shadow);
+		}
+
+		.ui-theme .ui-tab {
+			--ui-neko-tab-face: linear-gradient(180deg, #f0bed8, #d991b7f2);
+			background: var(--ui-neko-tab-face);
+			color: var(--ui-color-text);
+			border-radius: 6px 6px 0 0;
+			box-shadow:
+				inset 0 1px #ffffff99,
+				inset 1px 0 #ffffff66,
+				inset -1px 0 #c93b8259,
+				inset 0 -1px #c93b8280;
+		}
+
+		.ui-theme
+			.ui-tab:where(:hover:not(:disabled)):not([aria-selected="true"]):not(
+				[aria-pressed="true"]
+			) {
+			--ui-neko-tab-face: linear-gradient(180deg, #f7cfe4, #e69ec4);
+			color: #8c1452;
+		}
+
+		.ui-theme .ui-tab:where([aria-selected="true"], [aria-pressed="true"]) {
+			--ui-neko-tab-face: linear-gradient(180deg, #ff78ba, #ff3d9a);
+			background:
+				var(--ui-neko-pattern) left top / 32px 32px repeat,
+				var(--ui-neko-tab-face);
+			color: #ffffff;
+			text-shadow: 0 1px 1px #8c1a54a6;
+			box-shadow:
+				inset 0 1px #ffd6ebcc,
+				inset 0 -2px #b81f68;
+		}
+
+		.ui-theme
+			.ui-tabs[aria-orientation="vertical"]
+			.ui-tab:where([aria-selected="true"], [aria-pressed="true"]) {
+			box-shadow:
+				inset 0 1px #ffd6ebcc,
+				inset -2px 0 #b81f68;
+		}
+
+		.ui-theme .ui-tab:disabled {
+			color: #a37890;
+			filter: grayscale(0.5);
+		}
+
+		.ui-theme :is(.ui-pill, .ui-filter-pill) {
+			background-image: linear-gradient(180deg, #ffffffb3, #ffcce64d);
+			color: var(--ui-neko-control-ink);
+			box-shadow:
+				inset 0 1px #ffffff,
+				inset 0 -1px #d9649f4d;
+		}
+
+		.ui-theme :is(.ui-pill, .ui-filter-pill):where(:hover:not(:disabled)) {
+			background-image: linear-gradient(180deg, #ffffff, #ffc2e2);
+			color: #3d141d;
+			box-shadow:
+				inset 0 1px #ffffff,
+				0 0 0 1.5px #ff2e93,
+				0 0 8px #ff5da873;
+		}
+
+		.ui-theme .ui-filter-pill[aria-pressed="true"] {
+			box-shadow: var(--ui-neko-pressed-shadow);
+		}
+
+		.ui-theme .ui-menu-item:where(.highlighted, [aria-selected="true"]) {
+			background-image: linear-gradient(180deg, #ff78ba38, #ff4fa326);
+			box-shadow: inset 3px 0 #ff3d9a;
+		}
+
+		.ui-theme :is(.hud-window-content, .ui-overlay-surface) {
+			/* Do not override the chat buffer's deliberately fading scrollbars. */
+			scrollbar-color: #ff6eb4 #ffd6ea80;
+		}
+
+		.ui-theme
+			.ui-item-cell:not(
+				[aria-pressed="true"],
+				[data-selected="true"],
+				[data-cantrip-tier]:not([data-empty="true"])
+			) {
+			box-shadow:
+				inset 0 1px 2px #8c1a542e,
+				inset 0 -1px #ffffffcc;
+		}
+
+		/* Separate cantrip borders from the pink panel surface with a crisp pearl outer halo. */
+		.ui-theme .ui-item-cell[data-cantrip-tier]:not([data-empty="true"]) {
+			box-shadow:
+				0 0 0 1px #ffffffcc,
+				inset 0 0 0 1px var(--ui-cantrip-cell-color),
+				inset 0 0 8px
+					color-mix(in srgb, var(--ui-cantrip-cell-color) 52%, transparent);
+		}
+
+		.ui-theme .ui-shortcut-hint {
+			padding-inline: 3px;
+			border-radius: 3px;
+			background: #fff2f8e0;
+			color: #4a1233;
+			text-shadow: none;
+			box-shadow: 0 1px #e06ca866;
+		}
+
+		/* HUD readouts, groups, and compact bars default to crisp white text on saturated rose-pink. */
+		.ui-theme
+			:is(
+				.ui-readout,
+				.ui-hud-group,
+				.character-hud,
+				.party-member,
+				.action-bar
+			) {
+			--ui-color-text: #ffffff;
+			--ui-color-muted: #ffe6f3;
+			color: #ffffff;
+			text-shadow: 0 1px 2px #5c0f38b3;
+		}
+
+		/* Labelled HUD controls use glossy strawberry-pink pills with crisp white ink. */
+		.ui-theme
+			button.ui-hud-control:where(
+				:not(.ui-item-cell, .ui-readout, .party-member, .spell-tab)
+			) {
+			border-radius: var(--ui-radius-control);
+			background: linear-gradient(180deg, #f27cb8eb, #d94a93eb);
+			color: #ffffff;
+			text-shadow: 0 1px 1px #7a1247b3;
+			box-shadow:
+				inset 0 1px #ffffff99,
+				inset 0 -1px #a81c6280;
+		}
+		.ui-theme
+			button.ui-hud-control:where(
+				:not(.ui-item-cell, .ui-readout, .party-member, .spell-tab)
+			)::before {
+			content: none;
+		}
+		.ui-theme
+			button.ui-hud-control:where(
+				:not(.ui-item-cell, .ui-readout, .party-member, .spell-tab)
+			):where(:hover:not(:disabled)) {
+			background: linear-gradient(180deg, #ff99cc, #ff4fa3);
+			box-shadow:
+				inset 0 1px #ffffffcc,
+				0 0 0 1.5px #ffffffd9,
+				0 0 10px #ff4fa38c;
+		}
+		.ui-theme
+			button.ui-hud-control:where(
+				:not(.ui-item-cell, .ui-readout, .party-member, .spell-tab)
+			):where(:active:not(:disabled), [aria-pressed="true"]:not(:disabled)) {
+			background: linear-gradient(180deg, #ff6eb4, #ff3d9a);
+			color: #ffffff;
+			box-shadow: var(--ui-neko-pressed-shadow);
+		}
+
+		.ui-theme button.ui-hud-button {
+			--ui-neko-icon-face:
+				radial-gradient(circle at 32% 24%, #ffffffeb, transparent 52%),
+				radial-gradient(circle at 50% 65%, #ffd6eb, #ff99cc 65%, #ff6eb4);
+			border-radius: 50%;
+			background-image: none;
+			color: var(--ui-neko-control-ink);
+			box-shadow:
+				inset 0 0 0 1px #ffffff,
+				0 0 0 1px #d93b88b3,
+				0 3px 6px #4a123340;
+		}
+
+		.ui-theme button.ui-hud-button::before {
+			/* Glossy candy-pink and pearl medallion with crisp white rim. */
+			content: "";
+			inset: 1px;
+			border-radius: inherit;
+			mask-image: none;
+			backdrop-filter: none;
+			background: var(--ui-neko-icon-face);
+			box-shadow:
+				inset 0 1px 2px #ffffff,
+				inset 0 -2px 3px #c9287659,
+				inset 0 0 0 1px #ff85c0;
+		}
+
+		.ui-theme
+			button:is(.ui-hud-button, .ui-hud-control):where(
+				:not(.ui-item-cell, .ui-readout, .party-member, .spell-tab)
+			)
+			svg {
+			transform: none;
+		}
+
+		.ui-theme button.ui-hud-button:where(:hover:not(:disabled)) {
+			--ui-neko-icon-face:
+				radial-gradient(circle at 32% 24%, #ffffff, transparent 58%),
+				radial-gradient(circle at 50% 65%, #fff5fa, #ff9ed0 58%, #ff4fa3);
+			color: #3d141d;
+			box-shadow:
+				inset 0 0 0 1.5px #ffffff,
+				0 0 0 1.5px #ff2e93,
+				0 0 10px #ff5da899;
+		}
+
+		.ui-theme
+			button.ui-hud-button:where(
+				:active:not(:disabled),
+				[aria-pressed="true"]:not(:disabled)
+			) {
+			--ui-neko-icon-face: linear-gradient(180deg, #ff5da8, #d9267d);
+			color: #ffffff;
+			box-shadow:
+				inset 0 1px 3px #8c1a5499,
+				0 0 0 1px #ff2e93;
+		}
+
+		.ui-theme button.ui-hud-button:where(:disabled) {
+			--ui-neko-icon-face: linear-gradient(180deg, #f7e6ee, #e6ceda);
+			color: #a37890;
+			box-shadow: inset 0 0 0 1px #d9a3bf;
+		}
+
+		.ui-theme button.ui-item-strip-arrow {
+			border-radius: 999px;
+			background: linear-gradient(180deg, #ff99cc, #ff5da8 58%, #e03688);
+			color: #ffffff;
+			box-shadow:
+				inset 0 1px #ffffffb3,
+				inset 0 -1px #9e195980,
+				0 1px 2px #4a123340;
+		}
+		.ui-theme button.ui-item-strip-arrow:where(:hover:not(:disabled)) {
+			background: linear-gradient(180deg, #ffc2e2, #ff3d9a);
+			box-shadow:
+				inset 0 1px #ffffff,
+				0 0 0 1px #ffffffcc,
+				0 0 8px #ff5da88c;
+		}
+		.ui-theme button.ui-item-strip-arrow:where(:active:not(:disabled)) {
+			box-shadow: var(--ui-neko-pressed-shadow);
+		}
+
+		.ui-theme :is(.ui-meter, .selected-entity__health) {
+			border-radius: 4px;
+			background: #f5d3e5cc;
+			box-shadow:
+				inset 0 1px 2px #78204d40,
+				0 0 0 1px #e67cb2b3;
+		}
+
+		.ui-theme :is(.ui-meter > span, .selected-entity__health-fill) {
+			background-image: linear-gradient(
+				180deg,
+				#ffffff66,
+				transparent 45%,
+				#6e16422e
+			);
+			box-shadow:
+				inset 0 1px #ffffff73,
+				inset 0 -1px #6e164238;
+		}
+
+		/* Shared glossy bubblegum-pink neko frames paint in a foreground ::after overlay
+		   on HUDs and action bars so corner paws, bells, and sparkles never clip behind children. */
+		.ui-theme
+			:is(
+				.character-hud,
+				.selected-entity,
+				.party-member,
+				.chat-panel.interactive,
+				.action-bar
+			) {
+			position: relative;
+			box-shadow:
+				0 0 0 1px #ffffff80,
+				0 3px 10px #4a123338;
+		}
+		.ui-theme
+			:is(
+				.character-hud,
+				.selected-entity,
+				.party-member,
+				.chat-panel.interactive,
+				.action-bar
+			)::after {
+			content: "";
+			position: absolute;
+			inset: 0;
+			z-index: 3;
+			pointer-events: none;
+			border: 0 solid transparent;
+			border-image-source: var(--ui-neko-frame);
+			border-image-slice: 32;
+			border-image-width: 24px;
+			border-image-outset: 7.5px;
+			border-image-repeat: stretch;
+		}
+
+		.ui-theme
+			:is(
+				.character-hud,
+				.selected-entity,
+				.party-member,
+				.chat-panel.interactive
+			) {
+			border-radius: 6px;
+		}
+
+		.ui-theme .chat-panel {
+			/* Keep chat buffer and composer dark berry-plum so messages stay legible over any scene. */
+			--ui-hud-background-color: #2b1024c4;
+			--ui-color-text: #ffeef6;
+			--ui-color-muted: #e6b8d0;
+			--ui-input-background: #240c1ee6;
+			--ui-input-border-color: #e06ca8b3;
+		}
+
+		.ui-theme .chat-panel .ui-input.ui-hud-input {
+			color: #ffeef6;
+		}
+
+		.ui-theme .chat-panel .ui-input.ui-hud-input::placeholder {
+			color: #d99bbabf;
+		}
+
+		.ui-theme .chat-panel.interactive {
+			outline: none;
+		}
+
+		/* Keep chat completions dropup in dark berry-plum to match the chat buffer & composer. */
+		.ui-theme .chat-completions {
+			background: #240c1ef0;
+			color: #ffeef6;
+			--ui-color-text: #ffeef6;
+			--ui-color-muted: #e6b8d0;
+			box-shadow:
+				inset 0 0 0 1px #ff85c066,
+				0 6px 16px #240819b3;
+		}
+		.ui-theme
+			.chat-completions
+			.ui-menu-item:where(.highlighted, [aria-selected="true"]) {
+			background-image: linear-gradient(180deg, #ff5da859, #d9267d47);
+			box-shadow: inset 3px 0 #ff6eb4;
+		}
+
+		.ui-theme
+			:is(
+				.character-hud .identity-block,
+				.selected-entity__heading,
+				.party-member__name
+			) {
+			background:
+				var(--ui-neko-pattern) left top / 32px 32px repeat,
+				linear-gradient(180deg, #ff85c0, #e64998);
+			color: #ffffff;
+			text-shadow: 0 1px 2px #7a1247cc;
+			box-shadow:
+				inset 0 1px #ffffffa6,
+				inset 0 -1px #b81f6880;
+		}
+
+		.ui-theme
+			:is(
+				.character-hud .identity-block .ui-readout,
+				.party-member__name
+			)::before {
+			content: none;
+		}
+
+		.ui-theme
+			:is(.character-hud .identity-block .ui-readout, .party-member__name) {
+			padding-inline: 5px;
+		}
+
+		.ui-theme
+			:is(
+				.character-hud .identity,
+				.selected-entity__heading strong,
+				.party-member__name strong
+			) {
+			font-family: var(--ui-font-heading);
+			font-weight: 700;
+		}
+
+		.ui-theme .selected-entity {
+			position: relative;
+			/* Release local isolation so negative-z cat ears paint truly behind the border too. */
+			isolation: auto;
+			height: fit-content;
+			grid-template-rows: auto;
+			grid-auto-rows: 5px;
+			gap: 0;
+		}
+
+		/* Keep heading in the same stacking context and give darkened entity names a soft pearl halo. */
+		.ui-theme .selected-entity__heading {
+			position: relative;
+			isolation: auto;
+			z-index: auto;
+		}
+		.ui-theme .selected-entity__heading strong {
+			text-shadow:
+				0 1px 0 #ffeef6d9,
+				0 0 6px #ffeef6cc;
+		}
+
+		/* Plush anime cat ears tucked behind both the target bar foreground frame and header. */
+		.ui-theme .selected-entity::before,
+		.ui-theme .selected-entity__heading::before {
+			content: "";
+			position: absolute;
+			top: -38px;
+			width: 68px;
+			height: 60px;
+			pointer-events: none;
+			z-index: -1;
+			background: var(--ui-neko-ear) center / contain no-repeat;
+		}
+		.ui-theme .selected-entity::before {
+			left: -10px;
+		}
+		.ui-theme .selected-entity__heading::before {
+			inset: auto;
+			top: -38px;
+			right: -10px;
+			border-radius: 0;
+			backdrop-filter: none;
+			mask-image: none;
+			box-shadow: none;
+			transform: scaleX(-1);
+		}
+		/* Ribbon bow sits cleanly above both the right ear and the foreground neko frame. */
+		.ui-theme .selected-entity__heading::after {
+			content: "";
+			position: absolute;
+			top: -22px;
+			right: -6px;
+			width: 44px;
+			height: 38px;
+			z-index: 4;
+			pointer-events: none;
+			background: var(--ui-neko-bow) center / contain no-repeat;
+		}
+
+		.ui-theme .xp-progress {
+			box-shadow:
+				inset 0 1px 2px #78204d38,
+				0 0 0 1px #e67cb28c;
+		}
+
+		.ui-theme .spell-tab {
+			background-image: linear-gradient(180deg, #f07cb8d9, #d44a90cc);
+			text-shadow: 0 1px 1px #7a1247b3;
+			box-shadow: inset 0 1px #ffffff99;
+		}
+
+		.ui-theme .spell-tab::before {
+			inset: 0;
+			mask-image: none;
+			border-radius: inherit;
+		}
+		.ui-theme .spell-tab[aria-pressed="true"] {
+			box-shadow: var(--ui-spell-tab-active-shadow);
+		}
+
+		/* Translucent candy-pink combat gauge: glossy white/pink enamel bezel,
+		   hot-magenta-to-peach charge arc, and frosted rose height bands. */
+		.ui-theme .combat-bar .gauge-background {
+			display: none;
+		}
+		.ui-theme .combat-bar :is(.gauge-decoration, .height-face) {
+			display: inline;
+		}
+		.ui-theme .combat-bar .gauge-metal-light {
+			stop-color: #ffffff;
+		}
+		.ui-theme .combat-bar .gauge-metal-mid {
+			stop-color: #ffb3d9;
+		}
+		.ui-theme .combat-bar .gauge-metal-dark {
+			stop-color: #e65ca0;
+		}
+		.ui-theme .combat-bar .gauge-bezel-outline {
+			stroke: #9e1959;
+		}
+		.ui-theme .combat-bar .gauge-bezel {
+			stroke: var(--combat-metal);
+		}
+		.ui-theme .combat-bar .gauge-track {
+			stroke-width: 11;
+		}
+		.ui-theme .combat-bar .gauge-fill {
+			stroke-width: 9;
+		}
+		.ui-theme .combat-bar .gauge-fill:not(.recklessness-charge) {
+			stroke: var(--combat-charge-gradient);
+		}
+		.ui-theme .combat-bar .gauge-fill.recklessness-charge {
+			stroke: var(--combat-recklessness-gradient);
+		}
+		.ui-theme .combat-bar .gauge-charge-start {
+			stop-color: #ff2e93;
+		}
+		.ui-theme .combat-bar .gauge-charge-mid {
+			stop-color: #ff78ba;
+		}
+		.ui-theme .combat-bar .gauge-charge-end {
+			stop-color: #ffe0ec;
+		}
+		.ui-theme .combat-bar .gauge-recklessness-start {
+			stop-color: #f59e0b;
+		}
+		.ui-theme .combat-bar .gauge-recklessness-mid {
+			stop-color: #ffd859;
+		}
+		.ui-theme .combat-bar .gauge-recklessness-end {
+			stop-color: #fff9d6;
+		}
+		.ui-theme .combat-bar .gauge-engraving {
+			stroke: #ffffff;
+			stroke-width: 1;
+		}
+		.ui-theme .combat-bar .gauge-fastener {
+			fill: #ff85c0;
+			stroke: #ffffff;
+			stroke-width: 1.2;
+		}
+		.ui-theme .combat-bar .gauge-fastener-slot {
+			stroke: #ffe6f3;
+			stroke-width: 1;
+		}
+		.ui-theme .combat-bar .height {
+			--combat-height-face: var(--ui-combat-height-color);
+			background: transparent;
+			box-shadow: none;
+		}
+		.ui-theme .combat-bar .height.selected {
+			--combat-height-face: var(--ui-combat-height-selected-color);
+		}
+		.ui-theme .combat-bar .height:is(:hover:not(:disabled), :focus-visible) {
+			--combat-height-face: var(--ui-combat-height-hover-color);
+		}
+		.ui-theme .combat-bar .height-face path {
+			fill: var(--combat-height-face);
+			stroke: #ffffffcc;
+			stroke-width: 1.1;
+		}
+		.ui-theme .combat-bar .height::after {
+			position: relative;
+			text-shadow: 0 1px 2px #5c1038cc;
+		}
+		.ui-theme .combat-bar .height:focus-visible .height-face path {
+			stroke: #ff2e93;
+			stroke-width: 2;
+		}
+		.ui-theme .combat-bar .power-handle {
+			fill: #ff5da8;
+			stroke: #ffffff;
+			stroke-width: 1.8;
+			filter: drop-shadow(0 1px 2px #6e124080);
+		}
+		.ui-theme .combat-bar .power-handle .recklessness-skull-face {
+			fill: var(--ui-combat-recklessness-handle-color);
+			stroke: #8c124e;
+			stroke-width: 1.3;
+			filter: drop-shadow(0 0 2px #ffffffcc);
+		}
+		.ui-theme .combat-bar .power-control:focus-visible .power-handle {
+			filter: var(--ui-combat-handle-focus-filter);
+		}
+
+		.ui-theme .combat-bar .engagement-face {
+			stroke: #ffffff;
+			stroke-width: 2;
+			filter: drop-shadow(0 1px 2px #6e1240a6);
+		}
+		.ui-theme
+			.combat-bar
+			.engagement-toggle:active:not(:disabled)
+			.engagement-face {
+			fill: color-mix(in srgb, currentColor 76%, #6e1240);
+		}
+
+		/* Companion jump gauge in glossy pink enamel and hot-pink-to-cream gradient fill. */
+		.ui-theme .jump-power-track {
+			border-color: #ff6eb4;
+			border-radius: 4px;
+			background: linear-gradient(90deg, #4a15338c, #6e224d73);
+			box-shadow:
+				0 0 0 1px #ffffffb3,
+				inset 1px 0 #ffffff40;
+		}
+		.ui-theme .jump-power-track::before {
+			content: "";
+			position: absolute;
+			inset: 0;
+			z-index: 1;
+			background:
+				repeating-linear-gradient(to top, #ffffffcc 0 1px, transparent 1px 25%)
+					left center / 3px 100% no-repeat,
+				repeating-linear-gradient(to top, #ffffffcc 0 1px, transparent 1px 25%)
+					right center / 3px 100% no-repeat;
+			pointer-events: none;
+		}
+		.ui-theme .jump-power-fill {
+			background-image:
+				linear-gradient(90deg, #ffffff4d, transparent 42%, #9e195929),
+				linear-gradient(to top, #ff2e93, #ff78ba 55%, #ffe0ec);
+			box-shadow: inset 0 1px #ffffffcc;
+		}
+		.ui-theme .jump-power-level {
+			z-index: 2;
+			border-top-color: #ff4fa3;
+			box-shadow:
+				0 -1px 0 #ffffff,
+				0 1px 0 #b81f68;
+		}
+		.ui-theme .jump-power-level::before {
+			content: "";
+			position: absolute;
+			top: -4.5px;
+			left: -6px;
+			border-block: 4px solid transparent;
+			border-inline-start: 6px solid #ff5da8;
+			filter: drop-shadow(0 0 1px #ffffff);
+			pointer-events: none;
+		}
+		.ui-theme .jump-power-readout {
+			color: #ffd6eb;
+			font-family: var(--ui-font-heading);
+		}
+		.ui-theme :is(.jump-mode-label, .jump-power-caption) {
+			color: #fff2f8;
+		}
+		.ui-theme :is(.jump-mode-label, .jump-power-readout, .jump-power-caption) {
+			text-shadow: var(--ui-combat-breakpoint-shadow);
+		}
+
+		.ui-theme .minimap-cardinal {
+			fill: #4a1233;
+			stroke: #ffffffe6;
+			stroke-width: 2.5px;
+			filter: drop-shadow(0 1px 1px #b8256c4d);
+		}
+		.ui-theme .minimap-cardinal-north {
+			font-size: 25px;
+			font-weight: 700;
+			fill: var(--minimap-north-face);
+			stroke: #b81f68;
+			stroke-width: 3px;
+			filter: drop-shadow(0 -1px 0 #ffffff) drop-shadow(0 1px 1px #8c1a5499);
+		}
+		.ui-theme .minimap-north-gold-light {
+			stop-color: #ffffff;
+		}
+		.ui-theme .minimap-north-gold-mid {
+			stop-color: #ffc2e0;
+		}
+		.ui-theme .minimap-north-gold-dark {
+			stop-color: #ff5da8;
+		}
+		.ui-theme .minimap-north-ornament {
+			display: block;
+			inset: -22%;
+			background: var(--ui-neko-north) center / 100% 100% no-repeat;
+		}
+
+		.ui-theme .minimap-frame {
+			/* Glossy pink-and-pearl compass bezel; SVG center stays transparent. */
+			background: var(--ui-neko-compass) center / 100% 100% no-repeat;
+			box-shadow:
+				0 0 0 1px #ffffffb3,
+				0 4px 10px #4a123340;
+		}
+
+		.ui-theme
+			:is(
+				.contents-header,
+				.trade-side-heading,
+				.vendor-catalog h3,
+				.queue-heading,
+				.inventory-bottom-bar,
+				.inventory-equipment-toolbar
+			) {
+			background-image: linear-gradient(180deg, #fae0ee, #ebc0d7cc);
+			color: var(--ui-neko-control-ink);
+			text-shadow: none;
+			box-shadow:
+				inset 0 1px #ffffffcc,
+				inset 0 -1px #d9649f66;
+		}
+
+		.ui-theme
+			:is(
+				.contents-packs,
+				.inventory-equipment-strip,
+				.vendor-queue,
+				.trade-side,
+				.salvage-queue,
+				.salvage-output-content
+			) {
+			box-shadow:
+				inset 0 0 0 1px #e682b573,
+				inset 0 1px 3px #8c1a5424;
+		}
+
+		.ui-theme .vendor-offer-row {
+			box-shadow: inset 0 -1px #e682b54d;
+		}
+
+		.ui-theme .vendor-offer-row:where(:hover:not(:disabled)) {
+			background-image: linear-gradient(180deg, #ff99cc2e, #ff5da81a);
+		}
+
+		.ui-theme .vendor-offer-row[aria-pressed="true"] {
+			background-image: linear-gradient(180deg, #ff99cc4d, #ff5da833);
+			box-shadow:
+				inset 0 0 0 1.5px #ff3d9a,
+				inset 0 1px 2px #ffffff80;
+		}
+
+		.ui-theme .ui-section-heading {
+			color: var(--ui-color-accent);
+			text-shadow: 0 1px #ffffffb3;
+			box-shadow: inset 0 -1px #e682b58c;
+		}
+
+		/* Dark text on frosted pastel rose stays crisp without dark drop-shadow halos. */
+		.ui-theme .inspection-preview-identity {
+			text-shadow: none;
+		}
+
+		.ui-theme .book-page + .book-page {
+			border-top: 1px solid #e682b573;
+			padding-top: 1rem;
+		}
+
+		.ui-theme .book-scroll blockquote {
+			border-left: 2px solid var(--ui-color-border);
+			padding-left: 1rem;
+		}
+		.ui-theme .book-author {
+			color: var(--ui-color-accent);
+			font-family: var(--ui-font-heading);
+		}
+
+		/* Retain native appearance in forced-colors mode. */
+		@media (forced-colors: none) {
+			.ui-theme input[type="checkbox"] {
+				appearance: none;
+				width: 15px;
+				height: 15px;
+				padding: 0;
+				border: 1px solid #e06ca8;
+				border-radius: 4px;
+				background: linear-gradient(180deg, #ffffff, #ffe3f1);
+				box-shadow: var(--ui-neko-inset-shadow);
+				vertical-align: middle;
+				cursor: pointer;
+			}
+
+			.ui-theme input[type="checkbox"]:checked {
+				background:
+					url("../../assets/icons/berry-pop-neko-check.svg") center / contain
+						no-repeat,
+					linear-gradient(180deg, #ff78ba, #ff3d9a);
+				border-color: #c92876;
+			}
+
+			.ui-theme input[type="checkbox"]:hover:not(:disabled) {
+				border-color: #ff2e93;
+			}
+
+			.ui-theme input:is([type="checkbox"], [type="range"]):disabled {
+				filter: grayscale(0.6);
+				opacity: 0.65;
+				cursor: not-allowed;
+			}
+
+			.ui-theme input.ui-range {
+				appearance: none;
+				block-size: 20px;
+				margin-inline: 0;
+				background: transparent;
+				cursor: pointer;
+			}
+
+			.ui-theme input.ui-range::-webkit-slider-runnable-track {
+				box-sizing: border-box;
+				block-size: 6px;
+				border: 1px solid #e06ca8;
+				border-radius: 999px;
+				background:
+					linear-gradient(180deg, #ffffff66, transparent 55%, #b8256c26),
+					linear-gradient(
+						var(--ui-range-fill-direction, 90deg),
+						#ff5da8 var(--ui-range-progress),
+						#ffe6f3 var(--ui-range-progress)
+					);
+				box-shadow:
+					inset 0 1px 2px #8c1a542e,
+					0 1px #ffffffcc;
+			}
+
+			.ui-theme input.ui-range::-webkit-slider-thumb {
+				appearance: none;
+				box-sizing: border-box;
+				inline-size: 16px;
+				block-size: 16px;
+				margin-block-start: -6px;
+				border: 1.5px solid #d93b88;
+				border-radius: 50%;
+				background:
+					radial-gradient(circle at 30% 22%, #ffffff, transparent 55%),
+					linear-gradient(135deg, #ffb8dc, #ff5da8 58%, #e03688);
+				box-shadow:
+					inset 1px 1px #ffffffcc,
+					0 1px 3px #6b1a444d;
+			}
+
+			.ui-theme input.ui-range:hover:not(:disabled)::-webkit-slider-thumb {
+				border-color: #ff2e93;
+			}
+
+			.ui-theme input.ui-range:active:not(:disabled)::-webkit-slider-thumb {
+				box-shadow:
+					inset 0 1px 3px #8c1a5480,
+					0 0 0 2px #ff5da859;
+			}
+		}
+	}
+}

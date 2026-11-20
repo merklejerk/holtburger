@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="58" height="48" viewBox="-29 -20 58 48">
+  <!-- Illustrated glossy anime satin ribbon bow: pinched outer-side indents, layered back folds,
+       pleated creases, swallowtail ends, and crisp white specular sheen. -->
+  <defs>
+    <linearGradient id="bow-front" x1="0" y1="-13" x2="0" y2="12" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ffb3dc"/>
+      <stop offset="0.32" stop-color="#ff5da8"/>
+      <stop offset="0.78" stop-color="#e02b82"/>
+      <stop offset="1" stop-color="#ad145e"/>
+    </linearGradient>
+    <linearGradient id="bow-tail" x1="0" y1="2" x2="0" y2="22" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ff6eb4"/>
+      <stop offset="0.6" stop-color="#e8358a"/>
+      <stop offset="1" stop-color="#b51864"/>
+    </linearGradient>
+    <linearGradient id="bow-knot" x1="-5" y1="-6" x2="5" y2="6" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ffc4e3"/>
+      <stop offset="0.45" stop-color="#ff5da8"/>
+      <stop offset="1" stop-color="#bf1969"/>
+    </linearGradient>
+  </defs>
+  <g transform="rotate(18)">
+    <!-- Graceful swallowtail ribbon ends tucked beneath the knot -->
+    <path d="M -3 4 C -8 10 -12 17 -15 22 L -9 18.5 L -5.5 23 C -3.5 17 -2 11 -1 5 Z" fill="url(#bow-tail)" stroke="#8c124e" stroke-width="1.6" stroke-linejoin="round"/>
+    <path d="M 3 4 C 8 10 12 17 15 22 L 9 18.5 L 5.5 23 C 3.5 17 2 11 1 5 Z" fill="url(#bow-tail)" stroke="#8c124e" stroke-width="1.6" stroke-linejoin="round"/>
+    <!-- Subtle shadow where tails emerge from under the knot -->
+    <path d="M -5 5 L -2 9 M 5 5 L 2 9" stroke="#7a0d42" stroke-width="1.4" stroke-opacity="0.55" stroke-linecap="round"/>
+    <!-- Darker back-fold interior beneath each lower lobe for 3D volume -->
+    <path d="M -3 3 C -11 11.5 -21 13.5 -23 8.5 C -19 9.5 -11 7.5 -3 2 Z" fill="#9e1458"/>
+    <path d="M 3 3 C 11 11.5 21 13.5 23 8.5 C 19 9.5 11 7.5 3 2 Z" fill="#9e1458"/>
+    <!-- Sculpted left & right satin loops with distinct outer-side ribbon indents -->
+    <path d="M -2 -1.5 C -9 -13.5 -21 -14 -24.5 -6.5 C -26 -3 -21.5 -1 -19 0.5 C -22 2.5 -25.5 5 -23.5 8.5 C -20 13.5 -9 11.5 -2 3.5 Z" fill="url(#bow-front)" stroke="#8c124e" stroke-width="1.8" stroke-linejoin="round"/>
+    <path d="M 2 -1.5 C 9 -13.5 21 -14 24.5 -6.5 C 26 -3 21.5 -1 19 0.5 C 22 2.5 25.5 5 23.5 8.5 C 20 13.5 9 11.5 2 3.5 Z" fill="url(#bow-front)" stroke="#8c124e" stroke-width="1.8" stroke-linejoin="round"/>
+    <!-- Illustrated satin pleat creases radiating from the knot into each outer indent -->
+    <path d="M -5 0 C -10 -1.8 -14.5 -1 -18.5 0.5 M -5 2.5 C -9.5 3.5 -14 4.5 -17.5 3.5" fill="none" stroke="#8c124e" stroke-width="1.15" stroke-linecap="round" stroke-opacity="0.8"/>
+    <path d="M 5 0 C 10 -1.8 14.5 -1 18.5 0.5 M 5 2.5 C 9.5 3.5 14 4.5 17.5 3.5" fill="none" stroke="#8c124e" stroke-width="1.15" stroke-linecap="round" stroke-opacity="0.8"/>
+    <!-- Crisp white glossy highlight arcs on the upper crest and lower lobe of each loop -->
+    <path d="M -19.5 -7 C -15 -10 -9.5 -9 -6 -5 M 19.5 -7 C 15 -10 9.5 -9 6 -5" fill="none" stroke="#ffffff" stroke-width="1.7" stroke-linecap="round" stroke-opacity="0.9"/>
+    <path d="M -19 6.5 C -15.5 8.2 -12 8 -9.5 6.8 M 19 6.5 C 15.5 8.2 12 8 9.5 6.8" fill="none" stroke="#ffd9ec" stroke-width="1.15" stroke-linecap="round" stroke-opacity="0.72"/>
+    <!-- Sculpted center knot with top specular & lower crease -->
+    <rect x="-5.5" y="-5" width="11" height="11" rx="4.5" fill="url(#bow-knot)" stroke="#8c124e" stroke-width="1.8"/>
+    <path d="M -2.5 -2.2 Q 0 -3.4 2.5 -2.2" fill="none" stroke="#ffffff" stroke-width="1.5" stroke-linecap="round" stroke-opacity="0.9"/>
+    <path d="M -3 3 Q 0 4.2 3 3" fill="none" stroke="#8c124e" stroke-width="1" stroke-linecap="round" stroke-opacity="0.6"/>
+  </g>
+</svg>

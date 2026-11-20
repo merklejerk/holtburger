@@ -14,7 +14,7 @@
 		UiIconDisplay,
 		UiIconRepository,
 	} from "../widgets/ui-icon-repository";
-	import type { HexRgbaColor } from "../../lib/frontend-color";
+	import type { EntityNameColorToken } from "../world/selected-entity-color";
 	import { summarizeItemCantrips } from "./item-cantrips";
 	import type { ClientSpellServices } from "../magic/spells";
 	import { CLIENT_TUNING } from "../settings/tuning";
@@ -45,7 +45,7 @@
 		/** Set the current local destination without submitting chat. */
 		readonly onSetWaypoint: (target: MapWaypointTarget) => void;
 		readonly inspection: ObjectInspection;
-		readonly nameColor: HexRgbaColor | null;
+		readonly nameColor: EntityNameColorToken | null;
 		readonly item: ItemInspection;
 		readonly spells: ClientSpellServices | null;
 		readonly icons: UiIconRepository | null;

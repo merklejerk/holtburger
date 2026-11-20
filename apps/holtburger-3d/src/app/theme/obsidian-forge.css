@@ -71,7 +71,7 @@
 			--ui-combat-height-hover-color: #b85224cc;
 		}
 
-		.ui-theme :is(.ui-panel, .ui-dialog) {
+		.ui-theme :is(.ui-panel:not(.hud-window), .ui-dialog) {
 			/* Nine-sliced hammered iron with L-shaped smoldering ember corners paints
 			   around the 1px border without changing layout or covering the translucent center. */
 			border-image-source: var(--ui-forge-frame);
@@ -83,6 +83,28 @@
 				inset 0 0 0 2px #0c080799,
 				0 2px 0 3px #0a070673,
 				0 6px 14px #08050480;
+		}
+
+		/* Floating HUD windows paint their nine-slice frame in a foreground ::after layer
+		   so glowing ember corners sit cleanly above opaque title bars and content. */
+		.ui-theme .hud-window {
+			box-shadow:
+				inset 0 0 0 2px #0c080799,
+				0 2px 0 3px #0a070673,
+				0 6px 14px #08050480;
+		}
+		.ui-theme .hud-window::after {
+			content: "";
+			position: absolute;
+			inset: -1px;
+			z-index: 3;
+			pointer-events: none;
+			border: 0 solid transparent;
+			border-image-source: var(--ui-forge-frame);
+			border-image-slice: 28;
+			border-image-width: 14px;
+			border-image-outset: var(--ui-window-frame-outset);
+			border-image-repeat: stretch;
 		}
 
 		/* Dark forged-iron console surface finished with the theme's glowing lower ember seam. */
@@ -433,8 +455,8 @@
 				inset 0 -1px #08050473;
 		}
 
-		/* Shared forged-iron frames with smoldering ember corners enclose HUDs and
-		   action bars without adding an opaque backing or changing layout dimensions. */
+		/* Shared forged-iron frames paint in a foreground ::after overlay on HUDs and
+		   action bars so glowing ember corners never clip behind headers or slots. */
 		.ui-theme
 			:is(
 				.character-hud,
@@ -443,15 +465,30 @@
 				.chat-panel.interactive,
 				.action-bar
 			) {
+			position: relative;
+			box-shadow:
+				0 0 0 1px #0c0807b3,
+				0 3px 8px #0805048c;
+		}
+		.ui-theme
+			:is(
+				.character-hud,
+				.selected-entity,
+				.party-member,
+				.chat-panel.interactive,
+				.action-bar
+			)::after {
+			content: "";
+			position: absolute;
+			inset: 0;
+			z-index: 3;
+			pointer-events: none;
 			border: 0 solid transparent;
 			border-image-source: var(--ui-forge-frame);
 			border-image-slice: 28;
 			border-image-width: 10px;
 			border-image-outset: 4px;
 			border-image-repeat: stretch;
-			box-shadow:
-				0 0 0 1px #0c0807b3,
-				0 3px 8px #0805048c;
 		}
 
 		.ui-theme

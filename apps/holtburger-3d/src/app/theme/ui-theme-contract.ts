@@ -3,6 +3,7 @@ import { z } from "zod";
 /** Persisted bundled-theme IDs and display labels, shared without importing renderer assets. */
 export const TRAVELERS_KIT_THEME_ID = "Traveler’s Kit";
 export const OBSIDIAN_FORGE_THEME_ID = "Obsidian Forge";
+export const BERRY_POP_NEKO_THEME_ID = "Berry Pop Neko";
 
 /** Theme folders are portable single path components; names double as display labels. */
 export const uiThemeIdSchema = z

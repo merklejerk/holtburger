@@ -2,6 +2,7 @@ import { expect, it, vi } from "vitest";
 import { withBundledUiThemes } from "./ui-bundled-themes";
 import { UiThemeSelection } from "./ui-theme-selection";
 import {
+	BERRY_POP_NEKO_THEME_ID,
 	OBSIDIAN_FORGE_THEME_ID,
 	TRAVELERS_KIT_THEME_ID,
 	UI_THEME_LOAD_TIMEOUT_MS,
@@ -15,8 +16,15 @@ vi.mock("./travelers-kit.css?url&no-inline", () => ({
 vi.mock("./obsidian-forge.css?url&no-inline", () => ({
 	default: "/assets/obsidian-forge.css",
 }));
+vi.mock("./berry-pop-neko.css?url&no-inline", () => ({
+	default: "/assets/berry-pop-neko.css",
+}));
 
-const BUNDLED_IDS = [TRAVELERS_KIT_THEME_ID, OBSIDIAN_FORGE_THEME_ID];
+const BUNDLED_IDS = [
+	TRAVELERS_KIT_THEME_ID,
+	OBSIDIAN_FORGE_THEME_ID,
+	BERRY_POP_NEKO_THEME_ID,
+];
 
 function fixture() {
 	const source: UiThemeTransport = {
@@ -51,6 +59,13 @@ it("offers bundled choices on a clean profile and delegates user themes and fold
 	expect(source.resolve).not.toHaveBeenCalled();
 	expect(loader.replace).toHaveBeenCalledWith(
 		expect.stringContaining("obsidian-forge"),
+		null,
+		expect.any(AbortSignal),
+	);
+	expect(await owner.select(BERRY_POP_NEKO_THEME_ID)).toBe(true);
+	expect(source.resolve).not.toHaveBeenCalled();
+	expect(loader.replace).toHaveBeenCalledWith(
+		expect.stringContaining("berry-pop-neko"),
 		null,
 		expect.any(AbortSignal),
 	);

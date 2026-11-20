@@ -1,7 +1,9 @@
 import { entityDisplayName } from "../../lib/game/entity-display-name";
-import { selectedEntityNameColor } from "./selected-entity-color";
+import {
+	selectedEntityNameColor,
+	type EntityNameColorToken,
+} from "./selected-entity-color";
 import { canInteractItem } from "../hud/action-item";
-import type { HexRgbaColor } from "../../lib/frontend-color";
 import type { ItemStructure } from "../widgets/item-structure";
 import type { ClientEntityFacts } from "./entity-mirror";
 import type { ClientEntitySelection } from "./entity-selection";
@@ -18,8 +20,8 @@ type ClientSelectedHealth =
 export interface ClientSelectedEntityDisplay {
 	/** Presentation label with an unnamed fallback; absent until description is known. */
 	readonly name: string | null;
-	/** App-owned classification color, absent while description facts are pending. */
-	readonly nameColor: HexRgbaColor | null;
+	/** Theme-overridable classification color, absent while description facts are pending. */
+	readonly nameColor: EntityNameColorToken | null;
 	/** Current stack quantity, absent when the selected description has none. */
 	readonly stackCount: number | null;
 	/** Raw structure properties sampled together with the selected name and quantity. */

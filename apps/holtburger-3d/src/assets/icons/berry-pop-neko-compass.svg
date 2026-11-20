@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400" viewBox="0 0 400 400">
+  <!-- The 22-unit annulus matches Minimap's 5.5% inset. All strokes stop at
+       radius 178, leaving the existing map aperture completely transparent. -->
+  <defs>
+    <linearGradient id="berry-bezel" x1="40" y1="15" x2="355" y2="385" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ffb8dc"/>
+      <stop offset="0.3" stop-color="#ff78ba"/>
+      <stop offset="0.65" stop-color="#ff5da8"/>
+      <stop offset="1" stop-color="#d63682"/>
+    </linearGradient>
+    <linearGradient id="cream-channel" x1="60" y1="20" x2="340" y2="380" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#fff7fb"/>
+      <stop offset="0.5" stop-color="#ffd9ec"/>
+      <stop offset="1" stop-color="#ffb8dc"/>
+    </linearGradient>
+  </defs>
+  <g fill="none">
+    <!-- Outer glossy bubblegum-pink rim -->
+    <circle cx="200" cy="200" r="198.5" stroke="#b8256c" stroke-width="2.6"/>
+    <circle cx="200" cy="200" r="195.8" stroke="url(#berry-bezel)" stroke-width="5.2"/>
+    <circle cx="200" cy="200" r="197.4" stroke="#ffffff" stroke-opacity="0.65" stroke-width="1.2"/>
+    <!-- Frosted strawberry-cream pearl channel -->
+    <circle cx="200" cy="200" r="186.6" stroke="url(#cream-channel)" stroke-width="12"/>
+    <!-- Cute white pearl polka-dot ring around the channel (72 pearls, seamless) -->
+    <circle cx="200" cy="200" r="186.6" pathLength="360" stroke="#ffffff" stroke-opacity="0.9" stroke-width="3.2" stroke-linecap="round" stroke-dasharray="0.1 9.9"/>
+    <!-- Inner glossy pink retaining rim ending cleanly at r=178 -->
+    <circle cx="200" cy="200" r="179.8" stroke="url(#berry-bezel)" stroke-width="3.4"/>
+    <circle cx="200" cy="200" r="180.9" stroke="#ffffff" stroke-opacity="0.75" stroke-width="0.9"/>
+    <circle cx="200" cy="200" r="178.3" stroke="#b8256c" stroke-width="0.9"/>
+  </g>
+</svg>

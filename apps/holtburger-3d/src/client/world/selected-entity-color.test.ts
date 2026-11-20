@@ -7,17 +7,17 @@ const names = SHARED_FRONTEND_TUNING.rendering.nameplates.appearance.fillColors;
 const map = SHARED_FRONTEND_TUNING.map.blips.fillColors;
 
 describe("selected entity name colors", () => {
-	it("uses the ordinary player palette for summons without changing their category", () => {
+	it("uses the ordinary player token for summons without changing their category", () => {
 		expect(
 			selectedEntityNameColor(
 				{ mapCategory: "mob", consumable: null },
 				false,
 				true,
 			),
-		).toBe(names.player);
+		).toBe(`var(--ui-entity-name-player-color, ${names.player})`);
 	});
 	it.each(["player", "npc", "mob", "portal"] as const)(
-		"uses the nameplate palette for %s",
+		"uses the nameplate-backed token for %s",
 		(mapCategory) => {
 			expect(
 				selectedEntityNameColor(
@@ -25,7 +25,9 @@ describe("selected entity name colors", () => {
 					false,
 					false,
 				),
-			).toBe(names[mapCategory]);
+			).toBe(
+				`var(--ui-entity-name-${mapCategory}-color, ${names[mapCategory]})`,
+			);
 		},
 	);
 	it.each(["lifestone", "door", "door-no-direct-use", "switch"] as const)(
@@ -37,7 +39,7 @@ describe("selected entity name colors", () => {
 					false,
 					false,
 				),
-			).toBe(map[mapCategory]);
+			).toBe(`var(--ui-entity-name-${mapCategory}-color, ${map[mapCategory]})`);
 		},
 	);
 	it("refines the controlled player's name without overriding other categories", () => {
@@ -47,7 +49,7 @@ describe("selected entity name colors", () => {
 				true,
 				false,
 			),
-		).toBe(names.selfPlayer);
+		).toBe(`var(--ui-entity-name-self-player-color, ${names.selfPlayer})`);
 		expect(
 			selectedEntityNameColor(
 				{
@@ -60,7 +62,7 @@ describe("selected entity name colors", () => {
 				true,
 				false,
 			),
-		).toBe(names.npc);
+		).toBe(`var(--ui-entity-name-npc-color, ${names.npc})`);
 	});
 	it("reserves item accents for entities without an existing 3D category", () => {
 		expect(
@@ -75,7 +77,9 @@ describe("selected entity name colors", () => {
 				false,
 				false,
 			),
-		).toBe(CLIENT_TUNING.selectedEntityHud.healingKitColor);
+		).toBe(
+			`var(--ui-entity-name-healing-kit-color, ${CLIENT_TUNING.selectedEntityHud.healingKitColor})`,
+		);
 		expect(
 			selectedEntityNameColor(
 				{
@@ -88,7 +92,9 @@ describe("selected entity name colors", () => {
 				false,
 				false,
 			),
-		).toBe(CLIENT_TUNING.selectedEntityHud.manaStoneColor);
+		).toBe(
+			`var(--ui-entity-name-mana-stone-color, ${CLIENT_TUNING.selectedEntityHud.manaStoneColor})`,
+		);
 		expect(
 			selectedEntityNameColor(
 				{
@@ -101,13 +107,13 @@ describe("selected entity name colors", () => {
 				false,
 				false,
 			),
-		).toBe(names.other);
+		).toBe(`var(--ui-entity-name-other-color, ${names.other})`);
 		expect(
 			selectedEntityNameColor(
 				{ mapCategory: "other", consumable: null },
 				false,
 				false,
 			),
-		).toBe(names.other);
+		).toBe(`var(--ui-entity-name-other-color, ${names.other})`);
 	});
 });

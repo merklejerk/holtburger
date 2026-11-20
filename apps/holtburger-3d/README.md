@@ -86,7 +86,7 @@ In-game `/assets` (or `@assets`) prints the active content directory to chat.
 - **`launcher-settings.json`**: Saved server list, TreeStats directory imports, launcher window
   geometry, and obfuscated credential profiles.
 - **`client-settings.json`**: Normalized versioned sections for UI/text scaling (`ui.uiScale`,
-  `ui.textScale`), theme selection (bundled **Traveler's Kit** default and **Obsidian Forge**, plus custom `<themes>/<name>/theme.css`
+  `ui.textScale`), theme selection (bundled **Traveler's Kit** default, **Obsidian Forge**, and **Berry Pop Neko**, plus custom `<themes>/<name>/theme.css`
   folders via **Open themes folder** / **Reload theme**), keybindings & mouse steering, audio, HUD
   logical-unit placements, and per-character action bars, spell bars, and container affinities.
 - **`userData/character-visuals/`**: Endpoint-and-GUID-scoped `PlayerVisualCapture` cache powering

@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Subtle kawaii polka-dot gloss pattern for strawberry-pink headers and tabs. -->
+  <circle cx="8" cy="8" r="2" fill="#ffffff" fill-opacity="0.22"/>
+  <circle cx="24" cy="24" r="2" fill="#ffffff" fill-opacity="0.22"/>
+  <circle cx="24" cy="8" r="1.1" fill="#ffffff" fill-opacity="0.14"/>
+  <circle cx="8" cy="24" r="1.1" fill="#ffffff" fill-opacity="0.14"/>
+</svg>

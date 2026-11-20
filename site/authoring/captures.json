@@ -310,6 +310,14 @@
 			"expected": "Show the Nearby name search, useful filters and matching results.",
 			"priority": "later"
 		},
+		"alert-indicator": {
+			"owner": "user",
+			"session": "controls",
+			"setup": "An outdoor creature or item matching an enabled name alert rule in direct view.",
+			"framing": "Crop the alerted entity showing the star crest above its nameplate and the glowing 3D beacon cylinder around its base.",
+			"expected": "Show the cyan star above the nameplate and the hollow translucent 3D light cylinder with its glowing base ring.",
+			"priority": "later"
+		},
 		"treestats-import": {
 			"owner": "agent",
 			"session": "setup",

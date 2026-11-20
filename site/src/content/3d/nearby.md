@@ -45,12 +45,19 @@ Matches ignore capitalization. In a glob, `*` matches any text and `?` matches o
 
 Check the editor's preview against nearby names, then save the rule.
 
-Click the linked name in a chat alert to select the creature or object. Hold **Control** (**Command** on macOS) while clicking, or enable [chat-history interaction](/holtburger/3d/chat/#use-links-in-chat).
-
 </IllustratedProse>
+
+## Spot matching encounters
+
+When an entity matches an enabled alert rule, h3d highlights it across chat, the minimap, and the 3D scene:
+
+- **Chat alert:** Click the linked name in chat to select the creature or object. Hold **Control** (**Command** on macOS) while clicking, or enable [chat-history interaction](/holtburger/3d/chat/#use-links-in-chat).
+- **Minimap marker:** Matching entities appear as a star on the minimap.
+- **Nameplate star crest:** Matching entities show a star above their nameplate across Minimal, Smart and Always nameplate modes, remaining readable at distance and through walls or dungeon rooms.
+- **In-scene beacon:** Entities in direct line of sight are ringed by a glowing 3D light cylinder rising from their base—tall outdoors to spot over terrain and compact indoors in dungeons and buildings.
+
+<Media id="alert-indicator" detail />
 
 ## Manage your alerts
 
-Enable or disable individual rules as needed, and delete rules you no longer use. Rules are saved for the character.
-
-Alerts notify you about matching nearby encounters and keep their nameplates visible in Smart and Always modes. Choose patterns specific enough that the notifications stay useful.
+Enable or disable individual rules as needed, and delete rules you no longer use. Rules are saved for the character. Choose patterns specific enough that notifications and beacons stay useful.

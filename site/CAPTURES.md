@@ -154,6 +154,15 @@ Use a safe outdoor area with several nearby creatures or objects, a short practi
 - Expected result: Show the Nearby name search, useful filters and matching results.
 - Used in: [3d/nearby/#narrow-the-nearby-list](https://merklejerk.github.io/holtburger/3d/nearby/#narrow-the-nearby-list)
 
+### In-world alert indicator
+
+**Later · user · available · still** — ID: `alert-indicator`
+
+- Setup: An outdoor creature or item matching an enabled name alert rule in direct view.
+- Frame: Crop the alerted entity showing the star crest above its nameplate and the glowing 3D beacon cylinder around its base.
+- Expected result: Show the cyan star above the nameplate and the hollow translucent 3D light cylinder with its glowing base ring.
+- Used in: [3d/nearby/#spot-matching-encounters](https://merklejerk.github.io/holtburger/3d/nearby/#spot-matching-encounters)
+
 ### Missile combat HUD
 
 **Later · agent · available · still** — ID: `combat-controls-missile`

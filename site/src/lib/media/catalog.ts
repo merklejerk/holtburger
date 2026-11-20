@@ -238,6 +238,17 @@ export const media = {
 		width: 322,
 		height: 569
 	},
+	'alert-indicator': {
+		kind: 'image',
+		title: 'In-world alert indicator',
+		source: {
+			kind: 'remote',
+			url: 'https://merklejerk.github.io/holtburger-media/3d/alert-indicator-v1.webp'
+		},
+		alt: 'Kithless Siraluun highlighted by an alert with a cyan star above its nameplate and a glowing translucent 3D cylinder rising from its base.',
+		width: 500,
+		height: 682
+	},
 	'treestats-import': {
 		kind: 'image',
 		title: 'Choose a public server',

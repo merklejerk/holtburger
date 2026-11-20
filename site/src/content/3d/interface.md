@@ -49,7 +49,7 @@ The [theme authoring guide](https://github.com/merklejerk/holtburger/blob/main/a
 
 ## Keep useful information visible
 
-Vital warnings, progression feedback and the selected-target HUD help you notice changes without opening another panel. Under **Settings → UI → Display**, **Nameplate mode** switches world labels between **Minimal** (selected and hovered only), **Smart** (focus, alerts and nearby targets in front of you) and **Always**.
+Vital warnings, progression feedback and the selected-target HUD help you notice changes without opening another panel. Under **Settings → UI → Display**, **Nameplate mode** switches world labels between **Minimal** (selected, hovered and alert matches), **Smart** (focus, alerts and nearby targets in front of you) and **Always**.
 
 Use `/fps` to toggle the FPS display when adjusting graphics. For startup or rendering trouble, see [Help](/holtburger/3d/help/).
 

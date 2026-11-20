@@ -26,6 +26,9 @@ interface NameplateIndicator {
 	readonly iconId: NameplateIconId;
 }
 
+/** Prominent app-local badge painted centered above the name row. */
+type NameplateCrest = "alert";
+
 /** Complete visual value currently painted into one entity nameplate. */
 export interface NameplateContent {
 	readonly name: string;
@@ -34,9 +37,17 @@ export interface NameplateContent {
 	readonly level: number | null;
 	/** App-authored strikeout applies only to the name, not the level or icon row. */
 	readonly strikeThrough: boolean;
+	/** Optional prominent crest painted above the name row. */
+	readonly crest?: NameplateCrest;
 	/** Ordered app-local indicators painted on a dedicated final row. */
 	readonly indicators: readonly NameplateIndicator[];
 }
+
+/** Mutable app-owned decorations overlaid onto authoritative entity name and level. */
+export type NameplateDecoration = Pick<
+	NameplateContent,
+	"indicators" | "strikeThrough" | "nameColor" | "crest"
+>;
 
 /** Immutable visual and setup-default behavior facts shared by every dynamic producer. */
 export interface DynamicPresentationSource {

@@ -10,20 +10,27 @@ import {
  * Admission rank shared by every overlay component.
  *
  * Focus components (selected, hovered, active engagement, Smart immediate) survive ordinary count
- * budgets and text legibility cutoffs; alert components precede ambient components within the
- * finite ordinary budget. Priority never selects a depth route.
+ * budgets and text legibility cutoffs; alert components also bypass text legibility cutoffs and
+ * precede ambient components within the finite ordinary budget. Priority never selects a depth
+ * route.
  */
 export type EntityOverlayPriority = "focus" | "alert" | "ambient";
 
 /**
- * Physical depth route resolved once per entity: overlay components ignore scene depth and draw
- * once unscoped; scene components test depth within their admitted portal domains.
+ * Physical depth route resolved once per entity: overlay components ignore scene depth, bypass
+ * indoor portal culling when inside the camera frustum, and draw once unscoped; scene components
+ * test depth within their admitted portal domains.
  */
 export type EntityOverlayOcclusion = "overlay" | "scene";
 
-/** One entity's independently admitted label and health bar; both null is an explicit empty result. */
+/** In-scene entity beacon marker; always depth-tested and portal-scoped. */
+interface EntityBeaconPresentation {
+	readonly kind: "alert";
+}
+
+/** One entity's independently admitted label, health bar, and in-scene beacon. */
 export interface EntityOverlayPresentation {
-	/** Resolved once from entity attention; both components share the same route. */
+	/** Resolved once from entity attention; label and health bar share this route. */
 	readonly occlusion: EntityOverlayOcclusion;
 	/** Null means no label; otherwise this is its independently resolved priority. */
 	readonly nameplate: EntityOverlayPriority | null;
@@ -33,12 +40,24 @@ export interface EntityOverlayPresentation {
 		readonly fraction: number;
 		readonly priority: EntityOverlayPriority;
 	} | null;
+	/** Optional in-scene depth-tested beacon anchored at the entity base. */
+	readonly beacon?: EntityBeaconPresentation | null;
 }
 
 /** Final per-node overlay decisions borrowed for one synchronous renderer frame. */
 export interface EntityOverlayLookup {
 	/** Null means the node has no overlay this frame; it never implies a fallback policy. */
 	presentation(nodeId: SceneNodeId): EntityOverlayPresentation | null;
+	/**
+	 * Enumerate every resolved node using `occlusion: "overlay"` so scene compilation can admit
+	 * through-wall overlays for realized entities whose EnvCell was portal-culled.
+	 */
+	forEachOverlayOccluded(
+		visit: (
+			nodeId: SceneNodeId,
+			presentation: EntityOverlayPresentation,
+		) => void,
+	): void;
 }
 
 /** Placement and perspective scale shared by every overlay component. */

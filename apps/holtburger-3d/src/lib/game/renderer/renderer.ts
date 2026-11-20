@@ -31,6 +31,7 @@ import type { TexturePreparer } from "../textures/texture-preparer";
 import type { AmbientOcclusionSettings } from "./passes/ambient-occlusion-policy";
 import type { ColorGradeSettings } from "./passes/color-grade-policy";
 import type { EntityShadowSettings } from "./shadows/entity-shadow-policy";
+import type { EntityBeaconSettings } from "./overlays/entity-beacon-policy";
 import type { EntitySelectionOutlineSettings } from "./overlays/entity-selection-outline-policy";
 import type { LocalSelectionSphere } from "../selection/entity-interaction-shape";
 import type { NameplateSettings } from "./overlays/nameplate-policy";
@@ -88,6 +89,8 @@ export interface FrameSettings {
 	readonly entityShadows: EntityShadowSettings;
 	/** Depth-independent selected-entity outline appearance. */
 	readonly entitySelectionOutline: EntitySelectionOutlineSettings;
+	/** Depth-tested in-scene entity beacon appearance (hollow 3D cylinder and base ring). */
+	readonly entityBeacons: EntityBeaconSettings;
 	/** Whether render passes apply the effective region-authored distance fog. */
 	readonly distanceFogEnabled: boolean;
 	/** Retail's viewer headlamp, which makes interiors without authored lights navigable. */

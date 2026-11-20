@@ -1,3 +1,4 @@
+import type { EntityBeaconSettings } from "./game/renderer/overlays/entity-beacon-policy";
 import type { EntitySelectionOutlineSettings } from "./game/renderer/overlays/entity-selection-outline-policy";
 import type { HexRgbColor, HexRgbaColor } from "./frontend-color";
 import type { MapBlipCategory } from "./game/map/map-blip-category";
@@ -68,7 +69,7 @@ interface FrontendNameplateTuning extends Omit<
 	/** Canvas appearance with tuning-friendly hexadecimal colors. */
 	readonly appearance: Omit<
 		NameplateAppearance,
-		"fillColors" | "outlineColor"
+		"alertCrestColor" | "fillColors" | "outlineColor"
 	> & {
 		/** Fill selected for each semantic nameplate category. */
 		readonly fillColors: Readonly<
@@ -284,6 +285,8 @@ interface FrontendRenderingTuning {
 		EntitySelectionOutlineSettings,
 		"colors"
 	>;
+	/** In-scene entity beacon dimensions and animation; colors belong to the UI theme. */
+	readonly entityBeacons: Omit<EntityBeaconSettings, "color" | "sparkleColor">;
 	/** Initial finished-scene color grade. */
 	readonly colorGrade: FrontendColorGradeTuning;
 	/** Shared ambient-occlusion defaults and resource controls. */

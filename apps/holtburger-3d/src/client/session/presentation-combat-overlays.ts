@@ -12,6 +12,7 @@ import { ClientCombatHealthRequests } from "../combat/combat-health-requests";
 import { distanceBetweenDynamicWorldPoses } from "../world/entity-distance";
 import {
 	ClientEntityOverlays,
+	isAlertOverlayEntity,
 	resolveActiveCombatEngagement,
 	resolveFreshCreatureHealth,
 	type NameplateMode,
@@ -98,6 +99,8 @@ export class ClientCombatAndOverlayPresenter {
 	#combatEffectsTuning: CombatEffectsTuning = CLIENT_COMBAT_EFFECTS_TUNING;
 	readonly #overlays: ClientEntityOverlays;
 	readonly #trackedAlertGuids: () => ReadonlySet<number>;
+	/** Applied alert memberships kept in sync so crest decorations reconcile only on changes. */
+	readonly #appliedAlertGuids = new Set<number>();
 	readonly #sampleImmediateTargetCandidates:
 		| ((
 				frame: CycleSelectionPresentationFrame,
@@ -290,6 +293,7 @@ export class ClientCombatAndOverlayPresenter {
 	}
 
 	removeEntity(guid: number, generation: number): void {
+		this.#appliedAlertGuids.delete(guid);
 		this.#lockFeedback.remove(guid, generation);
 		this.#combatHealth.removeEntity(guid);
 	}
@@ -299,10 +303,12 @@ export class ClientCombatAndOverlayPresenter {
 	}
 
 	clearOverlays(): void {
+		this.#appliedAlertGuids.clear();
 		this.#overlays.clear();
 	}
 
 	clearOverlayPresentation(runtime: ClientGameplayRuntime | undefined): void {
+		this.#appliedAlertGuids.clear();
 		this.#overlays.clear();
 		runtime?.setEntityOverlayFrame(EMPTY_ENTITY_OVERLAY_FRAME);
 	}
@@ -413,6 +419,19 @@ export class ClientCombatAndOverlayPresenter {
 			readyAndCameraActive && this.#sampleImmediateTargetCandidates !== null
 				? this.#sampleImmediateTargetCandidates
 				: null;
+		const alertGuids = this.#trackedAlertGuids();
+		for (const guid of alertGuids) {
+			if (!this.#appliedAlertGuids.has(guid)) {
+				this.#appliedAlertGuids.add(guid);
+				this.reconcileEntityNameplate(guid, runtime);
+			}
+		}
+		for (const guid of this.#appliedAlertGuids) {
+			if (!alertGuids.has(guid)) {
+				this.#appliedAlertGuids.delete(guid);
+				this.reconcileEntityNameplate(guid, runtime);
+			}
+		}
 		const frame = this.#overlays.composeFrame({
 			nowMs,
 			hostNowSeconds,
@@ -425,7 +444,7 @@ export class ClientCombatAndOverlayPresenter {
 			selectedGuid,
 			hoveredGuid,
 			activeCombatTargetGuid: engagement?.target ?? null,
-			alertGuids: this.#trackedAlertGuids(),
+			alertGuids,
 			categoryVisibility:
 				CLIENT_TUNING.frameSettings.nameplates.categoryVisibility,
 			sampleImmediateTarget:
@@ -482,7 +501,7 @@ export class ClientCombatAndOverlayPresenter {
 		}
 	}
 
-	/** Project semantic corpse history into app-local decoration without copying display facts. */
+	/** Project semantic corpse, summon, and alert state into app-local decoration without copying display facts. */
 	reconcileEntityNameplate(
 		guid: number,
 		runtime: ClientGameplayRuntime | undefined,
@@ -491,12 +510,18 @@ export class ClientCombatAndOverlayPresenter {
 		if (runtime === undefined || entities.kind !== "current") return;
 		const facts = entities.level.entities.get(guid);
 		const opened = facts?.corpse === "opened";
+		const isAlert = isAlertOverlayEntity(
+			facts,
+			this.#trackedAlertGuids(),
+			guid,
+		);
 		runtime.setDynamicEntityNameplateDecoration(guid, {
 			indicators: [],
 			strikeThrough: opened,
 			...(facts !== undefined && facts.summon !== null
 				? { nameColor: "player" as const }
 				: {}),
+			...(isAlert ? { crest: "alert" as const } : {}),
 		});
 	}
 
@@ -576,6 +601,7 @@ export class ClientCombatAndOverlayPresenter {
 	}
 
 	destroy(): void {
+		this.#appliedAlertGuids.clear();
 		this.#lockFeedback.clear();
 		this.#combatHealth.destroy();
 	}

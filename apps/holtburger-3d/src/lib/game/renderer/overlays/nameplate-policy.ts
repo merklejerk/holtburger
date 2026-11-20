@@ -30,6 +30,12 @@ export interface NameplateTextAppearance {
 
 /** Complete frontend-authored recipe whose values can change nameplate pixels. */
 export interface NameplateAppearance {
+	/** Theme-owned alert crest fill; null until resolved by the frontend theme observer. */
+	readonly alertCrestColor: NameplateColor | null;
+	/** Vertical separation between the top crest and the name row. */
+	readonly crestGapPixels: number;
+	/** Width and height of the optional prominent crest above the name row. */
+	readonly crestSizePixels: number;
 	readonly fillColors: Readonly<Record<NameplateCategory, NameplateColor>>;
 	readonly fontFamily: string;
 	readonly horizontalPaddingPixels: number;
@@ -97,6 +103,18 @@ export function validateNameplateSettings(settings: NameplateSettings): void {
 		settings.appearance.outlineColor,
 		"Nameplate outline",
 	);
+	if (settings.appearance.alertCrestColor !== null) {
+		validateNormalizedColor(
+			settings.appearance.alertCrestColor,
+			"Nameplate alert crest",
+		);
+	}
+	validateNonnegativeFinite(settings.appearance.crestGapPixels, "crest gap");
+	if (
+		!Number.isFinite(settings.appearance.crestSizePixels) ||
+		settings.appearance.crestSizePixels <= 0
+	)
+		throw new Error("Nameplate crest size must be finite and positive.");
 	validateNonnegativeFinite(
 		settings.appearance.horizontalPaddingPixels,
 		"horizontal padding",

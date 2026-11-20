@@ -74,6 +74,69 @@ describe("WebGL2NameplateTextureCache", () => {
 		expect(fixture.rasterize).toHaveBeenCalledTimes(2);
 		expect(summon.category).toBe("mob");
 	});
+	it("keeps alert crest rasters distinct and paints the star above the name row", () => {
+		const alertAppearance = {
+			...APPEARANCE,
+			alertCrestColor: { red: 0.4, green: 0.9, blue: 1, alpha: 0.95 },
+		};
+		const fixture = createFixture();
+		const alerted: NameplateVisual = {
+			...PLATE,
+			content: { ...PLATE.content, crest: "alert" },
+		};
+		fixture.cache.reconcile([PLATE, alerted], alertAppearance, 1);
+		expect(fixture.cache.acquire(alerted)).not.toBe(
+			fixture.cache.acquire(PLATE),
+		);
+		expect(fixture.rasterize).toHaveBeenCalledTimes(2);
+
+		const context = {
+			font: "",
+			measureText: (text: string) => ({ width: text.length * 10 }),
+			save: vi.fn(),
+			restore: vi.fn(),
+			translate: vi.fn(),
+			scale: vi.fn(),
+			beginPath: vi.fn(),
+			moveTo: vi.fn(),
+			lineTo: vi.fn(),
+			closePath: vi.fn(),
+			stroke: vi.fn(),
+			fill: vi.fn(),
+			strokeText: vi.fn(),
+			fillText: vi.fn(),
+			fillRect: vi.fn(),
+		};
+		vi.stubGlobal("document", {
+			createElement: () => ({ getContext: () => context }),
+		});
+		try {
+			const rasterizer = new Canvas2DNameplateRasterizer({
+				read: () => {
+					throw new Error("No bottom-row icons expected");
+				},
+			});
+			expect(() => rasterizer.rasterize(alerted, APPEARANCE, 1)).toThrow(
+				/alert color/i,
+			);
+			const result = rasterizer.rasterize(alerted, alertAppearance, 1);
+			expect(context.fill).toHaveBeenCalledTimes(1);
+			expect(context.stroke).toHaveBeenCalledTimes(1);
+			expect(context.fillText).toHaveBeenCalledTimes(2);
+			const nameCenterY = context.fillText.mock.calls[0]?.[2] as number;
+			expect(nameCenterY).toBe(
+				alertAppearance.verticalPaddingPixels +
+					alertAppearance.crestSizePixels +
+					alertAppearance.crestGapPixels +
+					alertAppearance.name.fontSizePixels / 2,
+			);
+			expect(result.height).toBeGreaterThan(
+				alertAppearance.crestSizePixels + alertAppearance.name.fontSizePixels,
+			);
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
 	it.each([false, true])(
 		"paints name-only strikeout when enabled: %s",
 		(strikeThrough) => {

@@ -31,16 +31,45 @@ export function maximumLegibleOverlayDepth(
 }
 
 /**
+ * Test whether an anchor-relative overlay point projects inside the camera's forward clip volume.
+ *
+ * Portal-bypass overlay entities skip scene frustum queries, so they apply this clip test directly
+ * to prevent off-screen behind-wall entities from consuming overlay budgets or atlas storage.
+ */
+export function isOverlayAnchorInFrustum(
+	anchor: Vec3,
+	clipFromAnchor: Mat4,
+): boolean {
+	const w =
+		clipFromAnchor.m14 * anchor.x +
+		clipFromAnchor.m24 * anchor.y +
+		clipFromAnchor.m34 * anchor.z +
+		clipFromAnchor.m44;
+	if (w <= 0) return false;
+	const x =
+		clipFromAnchor.m11 * anchor.x +
+		clipFromAnchor.m21 * anchor.y +
+		clipFromAnchor.m31 * anchor.z +
+		clipFromAnchor.m41;
+	const y =
+		clipFromAnchor.m12 * anchor.x +
+		clipFromAnchor.m22 * anchor.y +
+		clipFromAnchor.m32 * anchor.z +
+		clipFromAnchor.m42;
+	return Math.abs(x) <= w && Math.abs(y) <= w;
+}
+
+/**
  * Remove components behind the camera, and those whose projection falls below legibility.
  *
- * `focusBypassesLegibility` is a component policy: focus labels stay readable intent even when
- * tiny, while focus bars still need a visible projected height.
+ * `importantBypassesLegibility` is a component policy: focus and alert labels stay readable intent
+ * even when distant, while health bars still need a visible projected height.
  */
 export function retainLegibleOverlays<T extends AnchoredOverlayComponent>(
 	candidates: T[],
 	clipFromAnchor: Mat4,
 	maximumDepth: number,
-	focusBypassesLegibility: boolean,
+	importantBypassesLegibility: boolean,
 ): void {
 	let retainedCount = 0;
 	for (const candidate of candidates) {
@@ -52,7 +81,9 @@ export function retainLegibleOverlays<T extends AnchoredOverlayComponent>(
 			clipFromAnchor.m24 * anchor.y +
 			clipFromAnchor.m34 * anchor.z +
 			clipFromAnchor.m44;
-		const bypass = focusBypassesLegibility && candidate.priority === "focus";
+		const bypass =
+			importantBypassesLegibility &&
+			(candidate.priority === "focus" || candidate.priority === "alert");
 		if (depth <= 0 || (!bypass && depth > maximumDepth)) continue;
 		candidates[retainedCount] = candidate;
 		retainedCount += 1;

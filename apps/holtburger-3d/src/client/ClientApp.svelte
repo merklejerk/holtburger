@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { observeEntityAlertColors } from "../app/theme/entity-alert-theme";
 	import { observeEntitySelectionColors } from "../app/theme/entity-selection-theme";
 	import {
 		retainRendererFailure,
@@ -1042,6 +1043,55 @@
 			};
 			presentationRoot?.setFrameSettings(frameSettings);
 		});
+	}
+	function observeAlertTheme(element: HTMLElement) {
+		const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+		const syncShimmer = (): void => {
+			const shimmerCyclesPerSecond = reducedMotion.matches
+				? 0
+				: CLIENT_TUNING.frameSettings.entityBeacons.shimmerCyclesPerSecond;
+			if (
+				frameSettings.entityBeacons.shimmerCyclesPerSecond ===
+				shimmerCyclesPerSecond
+			)
+				return;
+			frameSettings = {
+				...frameSettings,
+				entityBeacons: {
+					...frameSettings.entityBeacons,
+					shimmerCyclesPerSecond,
+				},
+			};
+			presentationRoot?.setFrameSettings(frameSettings);
+		};
+		const observer = observeEntityAlertColors(element, (colors) => {
+			frameSettings = {
+				...frameSettings,
+				nameplates: {
+					...frameSettings.nameplates,
+					appearance: {
+						...frameSettings.nameplates.appearance,
+						alertCrestColor: colors.crestColor,
+					},
+				},
+				entityBeacons: {
+					...frameSettings.entityBeacons,
+					color: colors.beaconColor,
+					sparkleColor: colors.sparkleColor,
+					shimmerCyclesPerSecond: reducedMotion.matches
+						? 0
+						: CLIENT_TUNING.frameSettings.entityBeacons.shimmerCyclesPerSecond,
+				},
+			};
+			presentationRoot?.setFrameSettings(frameSettings);
+		});
+		reducedMotion.addEventListener("change", syncShimmer);
+		return {
+			destroy() {
+				reducedMotion.removeEventListener("change", syncShimmer);
+				observer.destroy();
+			},
+		};
 	}
 
 	// Controls replace this cold policy snapshot; frame-hot consumers must receive plain objects.
@@ -3309,6 +3359,7 @@
 	use:observeCombatAppearance
 	use:observeSummonLeashAppearance
 	use:observeSelectionTheme
+	use:observeAlertTheme
 	style:--ui-text-scale={userSettings.ui.textScale}
 	style:--ui-scale={userSettings.ui.uiScale}
 	style:--ui-hud-window-opacity={userSettings.ui.hudWindowOpacity}

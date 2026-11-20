@@ -171,6 +171,15 @@ export function resolveVisibleHealthBarFraction(input: {
 	return Math.max(0, health.fraction);
 }
 
+/** Shared alert presentation eligibility: tracked alert matches exclude projectiles. */
+export function isAlertOverlayEntity(
+	facts: ClientEntityFacts | undefined,
+	alertGuids: ReadonlySet<number>,
+	guid: number,
+): boolean {
+	return facts?.targeting !== "projectile" && alertGuids.has(guid);
+}
+
 /** Inputs supplied by gameplay presentation each ready frame to compose overlays. */
 export interface ClientEntityOverlaysFrameInput {
 	readonly nowMs: number;
@@ -246,25 +255,26 @@ export class ClientEntityOverlays {
 			const isSelected = guid === input.selectedGuid;
 			const isHovered = guid === input.hoveredGuid;
 			const isCombatTarget = guid === input.activeCombatTargetGuid;
+			const isAlert = isAlertOverlayEntity(facts, input.alertGuids, guid);
 			const hasNameplate = dynamic.display.name.trim().length > 0;
 
 			let nameplate: EntityOverlayPriority | null = null;
 			if (hasNameplate) {
 				if (isSelected || isHovered) {
 					nameplate = "focus";
-				} else if (
-					this.#mode !== "minimal" &&
-					facts?.targeting !== "projectile"
-				) {
+				} else if (facts?.targeting !== "projectile") {
 					// Projectiles never receive automatic nameplates so fired shots do not flash labels.
 					const isSmartImmediate =
 						this.#mode === "smart" &&
 						this.#immediateTarget !== null &&
 						this.#immediateTarget.guid === guid &&
 						this.#immediateTarget.generation === dynamic.generation;
-					if (isCombatTarget || isSmartImmediate) {
+					if (
+						this.#mode !== "minimal" &&
+						(isCombatTarget || isSmartImmediate)
+					) {
 						nameplate = "focus";
-					} else if (input.alertGuids.has(guid)) {
+					} else if (isAlert) {
 						nameplate = "alert";
 					} else if (this.#mode === "smart") {
 						if (
@@ -279,7 +289,7 @@ export class ClientEntityOverlays {
 						) {
 							nameplate = "ambient";
 						}
-					} else {
+					} else if (this.#mode !== "minimal") {
 						const category = resolveNameplateCategory(
 							dynamic.presentation.entityClass,
 							guid === input.playerGuid,
@@ -310,15 +320,17 @@ export class ClientEntityOverlays {
 									: ("ambient" as const),
 						};
 
-			if (nameplate === null && healthBar === null) continue;
+			const beacon = isAlert ? ({ kind: "alert" } as const) : null;
+			if (nameplate === null && healthBar === null && beacon === null) continue;
 			const occlusion: EntityOverlayOcclusion =
-				isSelected || isHovered ? "overlay" : "scene";
+				isSelected || isHovered || isAlert ? "overlay" : "scene";
 			this.#entities.set(guid, {
 				generation: dynamic.generation,
 				presentation: {
 					occlusion,
 					nameplate,
 					healthBar,
+					...(beacon !== null ? { beacon } : {}),
 				},
 			});
 		}

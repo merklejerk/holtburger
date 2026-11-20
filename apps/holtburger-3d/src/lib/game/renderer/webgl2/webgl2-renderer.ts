@@ -755,6 +755,7 @@ export class WebGL2Renderer implements Renderer {
 			pipeline,
 		);
 		this.#overlayPasses.drawWorldParticles(view, particlesByScope);
+		this.#overlayPasses.drawEntityBeacons(view, pipeline);
 		this.#overlayPasses.drawEntityOverlays(view, pipeline);
 		this.#overlayPasses.drawSummonLeashes(view);
 		this.#overlayPasses.drawCombatEffects(
@@ -857,6 +858,7 @@ export class WebGL2Renderer implements Renderer {
 			this.#deviceTargets.frameClockSeconds,
 			1.0,
 		);
+		this.#overlayPasses.drawEntityBeacons(view, null);
 		this.#overlayPasses.drawEntityOverlays(view, null);
 		this.#overlayPasses.drawSummonLeashes(view);
 		this.#overlayPasses.drawCombatEffects(view, null, null);

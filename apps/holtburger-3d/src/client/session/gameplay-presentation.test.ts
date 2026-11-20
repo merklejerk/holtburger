@@ -31,7 +31,7 @@ import {
 import { AABB3, Mat4, Vec3 } from "../../lib/game/math/types";
 import type { MapTerrainSource } from "../../lib/game/map/map-renderer";
 import type { ScenePlacement, SceneResidency } from "../../lib/game/scene";
-import type { NameplateContent } from "../../lib/game/systems/dynamic-presentation-source";
+import type { NameplateDecoration } from "../../lib/game/systems/dynamic-presentation-source";
 import { createLandblockWorldOrigin } from "../../lib/game/landblocks";
 import type {
 	ClientAttackProfile,
@@ -2224,10 +2224,14 @@ describe("ClientGameplayPresentation", () => {
 		expect(
 			runtime.entityOverlayFrame.entities.get(distantItemGuid)?.presentation,
 		).toEqual({
-			occlusion: "scene",
+			occlusion: "overlay",
 			nameplate: "alert",
 			healthBar: null,
+			beacon: { kind: "alert" },
 		});
+		expect(runtime.nameplateDecoration.get(distantItemGuid)?.crest).toBe(
+			"alert",
+		);
 
 		// Switching cold mode to Always delegates ambient visibility to the configured category map.
 		transport.emit("client-spell-cast-target-updated", { target: null });
@@ -2246,6 +2250,7 @@ describe("ClientGameplayPresentation", () => {
 		expect(runtime.entityOverlayFrame.entities.has(distantItemGuid)).toBe(
 			categoryVisibility.other,
 		);
+		expect(runtime.nameplateDecoration.get(distantItemGuid)).toBeUndefined();
 	});
 });
 
@@ -2291,10 +2296,7 @@ class FakePresentationRuntime implements ClientGameplayRuntime {
 	dynamicOriginEnvCellId: string | null = null;
 	entityFrame: DynamicEntityPresentationFrame | null = null;
 	entityPresentationState: DynamicEntityPresentationState | null = null;
-	nameplateDecoration = new Map<
-		number,
-		Pick<NameplateContent, "indicators" | "strikeThrough" | "nameColor">
-	>();
+	nameplateDecoration = new Map<number, NameplateDecoration>();
 	entityOverlayFrame: EntityOverlayFrame = { kind: "ambient" };
 	/** Independent streaming availability for player and third-person camera cells. */
 	readonly unavailableEnvCellIds = new Set<string>();
@@ -2333,15 +2335,13 @@ class FakePresentationRuntime implements ClientGameplayRuntime {
 
 	setDynamicEntityNameplateDecoration(
 		guid: number,
-		decoration: Pick<
-			NameplateContent,
-			"indicators" | "strikeThrough" | "nameColor"
-		>,
+		decoration: NameplateDecoration,
 	): void {
 		if (
 			decoration.indicators.length === 0 &&
 			!decoration.strikeThrough &&
-			decoration.nameColor === undefined
+			decoration.nameColor === undefined &&
+			decoration.crest === undefined
 		)
 			this.nameplateDecoration.delete(guid);
 		else this.nameplateDecoration.set(guid, decoration);

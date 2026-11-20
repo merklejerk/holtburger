@@ -368,6 +368,14 @@
 		--ui-minimap-button-radius: 50%;
 		/* Canvas alert markers resolve this CSS color on cold theme changes. */
 		--ui-minimap-alert-color: rgba(110, 240, 255, 0.95);
+		/* In-world alert nameplate star crest and 3D hollow cylinder beacon default to the minimap alert color. */
+		--ui-entity-alert-crest-color: var(--ui-minimap-alert-color);
+		--ui-entity-alert-beacon-color: var(--ui-minimap-alert-color);
+		--ui-entity-alert-beacon-sparkle-color: color-mix(
+			in srgb,
+			color-mix(in srgb, var(--ui-entity-alert-beacon-color) 40%, white) 16%,
+			transparent
+		);
 		/* Catalog row and disclosure density; spell icon size changes display only. */
 		--ui-spell-panel-padding: 8px;
 		--ui-catalog-row-padding: 4px 6px;

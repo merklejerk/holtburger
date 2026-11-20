@@ -58,7 +58,7 @@ import type {
 	ScenePlacement,
 	SceneResidency,
 } from "../../lib/game/scene";
-import type { NameplateContent } from "../../lib/game/systems/dynamic-presentation-source";
+import type { NameplateDecoration } from "../../lib/game/systems/dynamic-presentation-source";
 import type { RenderExtent } from "../../lib/game/renderer/render-extent";
 import type {
 	SceneActivationReceipt,
@@ -247,10 +247,7 @@ export interface ClientGameplayRuntime
 	/** Apply or clear app-owned name decoration without rebuilding presentation. */
 	setDynamicEntityNameplateDecoration(
 		guid: number,
-		decoration: Pick<
-			NameplateContent,
-			"indicators" | "strikeThrough" | "nameColor"
-		>,
+		decoration: NameplateDecoration,
 	): void;
 	/** Install the active scene driver's entity overlay frame for the next render. */
 	setEntityOverlayFrame(frame: EntityOverlayFrame): void;

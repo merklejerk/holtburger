@@ -407,9 +407,10 @@ describe("ClientEntityOverlays", () => {
 			healthBar: { fraction: 0.4, priority: "focus" },
 		});
 		expect(frame.entities.get(5)?.presentation).toEqual({
-			occlusion: "scene",
+			occlusion: "overlay",
 			nameplate: "alert",
 			healthBar: null,
+			beacon: { kind: "alert" },
 		});
 		expect(frame.entities.get(6)?.presentation).toEqual({
 			occlusion: "scene",
@@ -461,7 +462,7 @@ describe("ClientEntityOverlays", () => {
 		expect(alwaysFrame.entities.get(6)).toBeUndefined();
 		expect(alwaysFrame.entities.get(7)?.presentation.nameplate).toBe("ambient");
 
-		// Switching to Minimal restricts nameplates strictly to selected and hovered while keeping independent health bars.
+		// Switching to Minimal restricts nameplates to selected, hovered, and alert matches while keeping independent health bars.
 		policy.setMode("minimal");
 		const minimalFrame = policy.composeFrame({
 			nowMs: 1_000 + TEST_TUNING.immediatePreviewIntervalMs * 2,
@@ -497,7 +498,37 @@ describe("ClientEntityOverlays", () => {
 			nameplate: null,
 			healthBar: { fraction: 0.4, priority: "focus" },
 		});
-		expect(minimalFrame.entities.get(5)).toBeUndefined();
+		expect(minimalFrame.entities.get(5)?.presentation).toEqual({
+			occlusion: "overlay",
+			nameplate: "alert",
+			healthBar: null,
+			beacon: { kind: "alert" },
+		});
+		// Selecting an alerted entity preserves its alert beacon alongside focus nameplate priority.
+		const selectedAlertFrame = policy.composeFrame({
+			nowMs: 1_000 + TEST_TUNING.immediatePreviewIntervalMs * 3,
+			hostNowSeconds: 100,
+			playerGuid: 1,
+			playerPose: pose(0, 0),
+			dynamicEntities: entities,
+			resolveDynamicGeneration: (guid) =>
+				entities.find((entity) => entity.identity.guid === guid)?.generation ??
+				null,
+			factsEntities: facts,
+			selectedGuid: 5,
+			hoveredGuid: null,
+			activeCombatTargetGuid: null,
+			alertGuids: new Set([5]),
+			categoryVisibility: CATEGORY_VISIBILITY,
+		});
+		if (selectedAlertFrame.kind !== "resolved")
+			throw new Error("Expected resolved");
+		expect(selectedAlertFrame.entities.get(5)?.presentation).toEqual({
+			occlusion: "overlay",
+			nameplate: "focus",
+			healthBar: null,
+			beacon: { kind: "alert" },
+		});
 		expect(minimalFrame.entities.get(6)).toBeUndefined();
 		expect(minimalFrame.entities.get(7)).toBeUndefined();
 		expect(minimalFrame.entities.get(8)?.presentation).toEqual({

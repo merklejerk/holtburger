@@ -37,7 +37,7 @@ import {
 	type PreparedDynamicEntity,
 } from "../systems/dynamic-entity-system";
 import type {
-	NameplateContent,
+	NameplateDecoration,
 	PlacedDynamicPresentationSource,
 } from "../systems/dynamic-presentation-source";
 import {
@@ -211,9 +211,7 @@ export interface SpawnedEntityLifecycleContext {
 	) => boolean;
 	readonly getNameplateDecoration: (
 		guid: number,
-	) =>
-		| Pick<NameplateContent, "indicators" | "strikeThrough" | "nameColor">
-		| undefined;
+	) => NameplateDecoration | undefined;
 	readonly deleteNameplateDecoration: (guid: number) => void;
 	readonly usesSelectionSphereProxy: (nodeId: SceneNodeId) => boolean;
 }

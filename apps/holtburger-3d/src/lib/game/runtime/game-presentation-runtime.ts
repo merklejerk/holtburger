@@ -78,7 +78,7 @@ import type {
 	DynamicEntityTickBatch,
 	DynamicEntityView,
 } from "./dynamic-entity-feed";
-import type { NameplateContent } from "../systems/dynamic-presentation-source";
+import type { NameplateDecoration } from "../systems/dynamic-presentation-source";
 import type { SceneInterestMap, SceneInterestRequest } from "./scene-interest";
 import type { SceneInterestMembership } from "./render-scene-interest-controller";
 import type { ResolvedSceneInterestTarget } from "./scene-target";
@@ -535,10 +535,7 @@ export class GamePresentationRuntime {
 
 	setDynamicEntityNameplateDecoration(
 		guid: number,
-		decoration: Pick<
-			NameplateContent,
-			"indicators" | "strikeThrough" | "nameColor"
-		>,
+		decoration: NameplateDecoration,
 	): void {
 		this.#framePresentation.setDynamicEntityNameplateDecoration(
 			guid,

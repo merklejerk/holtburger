@@ -507,6 +507,8 @@ export class WebGL2DeviceAndTargetPool implements RenderTargetMetricsSources {
 				dynamicOpaque: [],
 				landblockOffsets: new Map([[view.anchorLandblockId, [0, 0, 0]]]),
 				// Portal space is a presentation-only authored setup, never a dynamic-entity view.
+				entityBeacons: [],
+				entityBeaconSettings: SHARED_FRAME_SETTINGS.entityBeacons,
 				entityOverlays: [],
 				entityOverlaySettings: SHARED_FRAME_SETTINGS.entityOverlays,
 				healthBars: SHARED_FRAME_SETTINGS.healthBars,

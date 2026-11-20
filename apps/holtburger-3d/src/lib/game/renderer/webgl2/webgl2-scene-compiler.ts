@@ -109,6 +109,7 @@ import {
 	type PreparedBarComponent,
 	type PreparedDynamicBlended,
 	type PreparedDynamicOpaque,
+	type PreparedEntityBeacon,
 	type PreparedLabelComponent,
 	type PreparedObjectDrawCompatibility,
 	type PreparedObjectFrameInput,
@@ -476,6 +477,7 @@ export class SceneContributionCompilerAndSelector {
 		const dynamicOpaque: PreparedDynamicOpaque[] = [];
 		const labels: PreparedLabelComponent[] = [];
 		const bars: PreparedBarComponent[] = [];
+		const beacons: PreparedEntityBeacon[] = [];
 		const entityShadowsEnabled = frameSettings.entityShadows.mode !== "none";
 		const simpleOutdoorShadows = frameSettings.entityShadows.mode === "simple";
 		const storage = prepared.submissionStorage;
@@ -537,6 +539,22 @@ export class SceneContributionCompilerAndSelector {
 			}
 			if (contribution.kind === "dynamic") {
 				if (!this.retainsObjectFootprint(contribution.footprint, prepared)) {
+					const tinyOverlay =
+						overlayPasses.frameEntityOverlays.presentation(nodeId);
+					if (tinyOverlay?.beacon != null) {
+						const tinyTarget = this.publishDynamicPresentation(nodeId);
+						if (tinyTarget !== null) {
+							overlayPasses.prepareEntityBeacon(
+								nodeId,
+								tinyTarget,
+								contribution,
+								prepared,
+								frameSettings.entityBeacons,
+								portalVisibility,
+								beacons,
+							);
+						}
+					}
 					continue;
 				}
 				const renderTarget = this.publishDynamicPresentation(nodeId);
@@ -707,7 +725,7 @@ export class SceneContributionCompilerAndSelector {
 					renderTarget !== null && admission.sourceRangeGroupCount > 0
 						? overlayPasses.frameEntityOverlays.presentation(nodeId)
 						: null;
-				if (overlay !== null && renderTarget !== null)
+				if (overlay !== null && renderTarget !== null) {
 					overlayPasses.prepareEntityOverlay(
 						nodeId,
 						overlay,
@@ -719,6 +737,18 @@ export class SceneContributionCompilerAndSelector {
 						labels,
 						bars,
 					);
+					if (overlay.beacon != null) {
+						overlayPasses.prepareEntityBeacon(
+							nodeId,
+							renderTarget,
+							contribution,
+							prepared,
+							frameSettings.entityBeacons,
+							portalVisibility,
+							beacons,
+						);
+					}
+				}
 				this.#selectedDynamicNodeIds.add(nodeId);
 				this.#diagnostics.metrics.visibleDynamicEntityCount += 1;
 				this.#diagnostics.metrics.visibleDynamicSourceRangeCount +=
@@ -759,6 +789,29 @@ export class SceneContributionCompilerAndSelector {
 			terrain.push(this.resolveTerrainFrameInput(contribution.drawUnit));
 			this.#diagnostics.metrics.terrainFrameInputs += 1;
 		}
+		// Admit through-wall overlays for realized entities whose EnvCell was portal-culled
+		// or whose body fell below the object footprint cutoff, clipped to the camera frustum.
+		overlayPasses.frameEntityOverlays.forEachOverlayOccluded(
+			(nodeId, overlay) => {
+				if (this.#selectedDynamicNodeIds.has(nodeId)) return;
+				const contribution = this.#world.readRenderContribution(nodeId);
+				if (contribution?.kind !== "dynamic") return;
+				const renderTarget = this.publishDynamicPresentation(nodeId);
+				if (renderTarget === null) return;
+				overlayPasses.prepareEntityOverlay(
+					nodeId,
+					overlay,
+					renderTarget,
+					contribution,
+					prepared,
+					frameSettings.entityOverlays,
+					portalVisibility,
+					labels,
+					bars,
+					true,
+				);
+			},
+		);
 		if (
 			frameSettings.layerVisibility.terrain &&
 			(portalVisibility === null ||
@@ -902,6 +955,12 @@ export class SceneContributionCompilerAndSelector {
 				(left.nodeId < right.nodeId ? -1 : left.nodeId > right.nodeId ? 1 : 0),
 		);
 
+		beacons.sort(
+			(left, right) =>
+				right.distanceSquared - left.distanceSquared ||
+				right.identity.localeCompare(left.identity),
+		);
+
 		return {
 			entityAnalyticShadows: entityShadowsEnabled
 				? {
@@ -914,6 +973,8 @@ export class SceneContributionCompilerAndSelector {
 				: null,
 			dynamicOpaque,
 			landblockOffsets,
+			entityBeacons: beacons,
+			entityBeaconSettings: frameSettings.entityBeacons,
 			entityOverlays: composeEntityOverlays(labels, bars),
 			entityOverlaySettings: frameSettings.entityOverlays,
 			healthBars: frameSettings.healthBars,

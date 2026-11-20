@@ -15,6 +15,7 @@ const SHARED_NAMEPLATE_SETTINGS = {
 	...NAMEPLATE_TUNING,
 	appearance: {
 		...NAMEPLATE_TUNING.appearance,
+		alertCrestColor: null,
 		fillColors: {
 			mob: normalizedRgbaColor(NAMEPLATE_TUNING.appearance.fillColors.mob),
 			npc: normalizedRgbaColor(NAMEPLATE_TUNING.appearance.fillColors.npc),
@@ -75,6 +76,11 @@ export const SHARED_FRAME_SETTINGS = {
 	entitySelectionOutline: {
 		...SHARED_FRONTEND_TUNING.rendering.entitySelectionOutline,
 		colors: null,
+	},
+	entityBeacons: {
+		...SHARED_FRONTEND_TUNING.rendering.entityBeacons,
+		color: null,
+		sparkleColor: null,
 	},
 	distanceFogEnabled:
 		SHARED_FRONTEND_TUNING.rendering.frameDefaults.distanceFogEnabled,

@@ -1,3 +1,4 @@
+import { paintAlertStar } from "./alert-star-icon";
 import type {
 	NameplateAppearance,
 	NameplateColor,
@@ -10,7 +11,7 @@ import type {
 	NameplateIconRepository,
 } from "./nameplate-icon-repository";
 
-const NAMEPLATE_STYLE_REVISION = 4;
+const NAMEPLATE_STYLE_REVISION = 5;
 const MAX_NAMEPLATE_TEXTURE_BYTES = 16 * 1024 * 1024;
 const NAMEPLATE_ATLAS_HEIGHT = 2048;
 const NAMEPLATE_ATLAS_WIDTH = 2048;
@@ -269,6 +270,7 @@ export class WebGL2NameplateTextureCache {
 			visual.content.name,
 			visual.content.level,
 			visual.content.strikeThrough,
+			visual.content.crest ?? null,
 			visual.content.indicators.map(({ kind, iconId }) => [kind, iconId]),
 		]);
 		categoryKeys.set(colorCategory, { generation: style.generation, key });
@@ -448,17 +450,27 @@ export class Canvas2DNameplateRasterizer implements NameplateRasterizer {
 			textWidth = Math.max(textWidth, context.measureText(row.text).width);
 			textHeight += row.style.fontSizePixels;
 		}
+		const hasAlertCrest = content.crest === "alert";
+		if (hasAlertCrest && appearance.alertCrestColor === null)
+			throw new Error(
+				"Alert nameplate crest requires a resolved theme alert color.",
+			);
+		const crestWidth = hasAlertCrest ? appearance.crestSizePixels : 0;
+		const crestBlockHeight = hasAlertCrest
+			? appearance.crestSizePixels + appearance.crestGapPixels
+			: 0;
 		const iconRowWidth =
 			content.indicators.length * appearance.indicatorSizePixels +
 			Math.max(0, content.indicators.length - 1) *
 				appearance.indicatorGapPixels;
 		const cssWidth = Math.ceil(
-			Math.max(textWidth, iconRowWidth) +
+			Math.max(textWidth, iconRowWidth, crestWidth) +
 				appearance.horizontalPaddingPixels * 2,
 		);
 		const rowCount = rows.length + (content.indicators.length > 0 ? 1 : 0);
 		const cssHeight = Math.ceil(
 			appearance.verticalPaddingPixels * 2 +
+				crestBlockHeight +
 				textHeight +
 				(content.indicators.length > 0 ? appearance.indicatorSizePixels : 0) +
 				(rowCount - 1) * appearance.lineGapPixels,
@@ -466,6 +478,18 @@ export class Canvas2DNameplateRasterizer implements NameplateRasterizer {
 		canvas.width = Math.max(1, Math.ceil(cssWidth * density));
 		canvas.height = Math.max(1, Math.ceil(cssHeight * density));
 		context.scale(density, density);
+		let top = appearance.verticalPaddingPixels;
+		if (hasAlertCrest && appearance.alertCrestColor !== null) {
+			paintAlertStar(
+				context,
+				cssWidth / 2,
+				top + appearance.crestSizePixels / 2,
+				appearance.crestSizePixels,
+				canvasColor(appearance.alertCrestColor),
+				canvasColor(appearance.outlineColor),
+			);
+			top += crestBlockHeight;
+		}
 		context.textAlign = "center";
 		context.textBaseline = "middle";
 		context.lineJoin = "round";
@@ -475,7 +499,6 @@ export class Canvas2DNameplateRasterizer implements NameplateRasterizer {
 				content.nameColor === "player" ? "player" : visual.category
 			],
 		);
-		let top = appearance.verticalPaddingPixels;
 		for (const row of rows) {
 			context.font = canvasFont(row.style, appearance.fontFamily);
 			context.lineWidth = row.style.outlineWidthPixels;

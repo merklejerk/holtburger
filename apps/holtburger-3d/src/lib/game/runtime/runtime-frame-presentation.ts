@@ -42,6 +42,7 @@ import {
 	type EntityOverlayLookup,
 	type EntityOverlayPresentation,
 } from "../renderer/overlays/entity-overlay-policy";
+import { validateEntityBeaconSettings } from "../renderer/overlays/entity-beacon-policy";
 import { validateEntitySelectionOutlineSettings } from "../renderer/overlays/entity-selection-outline-policy";
 import {
 	resolveNameplateCategory,
@@ -76,7 +77,7 @@ import {
 } from "../selection/entity-interaction-shape";
 import type {
 	DynamicPresentationSource,
-	NameplateContent,
+	NameplateDecoration,
 } from "../systems/dynamic-presentation-source";
 import type { DynamicEntitySystem } from "../systems/dynamic-entity-system";
 import {
@@ -277,10 +278,7 @@ export class FramePresentationCoordinator {
 	/** Frontend hover identity, resolved against current realization at draw time. */
 	#hoveredEntityGuid: number | null = null;
 	/** App-owned decoration survives realization; name and level always come from current authority. */
-	readonly #spawnedNameplateDecoration = new Map<
-		number,
-		Pick<NameplateContent, "indicators" | "strikeThrough" | "nameColor">
-	>();
+	readonly #spawnedNameplateDecoration = new Map<number, NameplateDecoration>();
 	/**
 	 * Explicit scene-driver overlay policy. Explorer defaults to ambient; pregame and gameplay
 	 * install their own frames on handoff and never fall back between them.
@@ -293,6 +291,11 @@ export class FramePresentationCoordinator {
 	>();
 	readonly #resolvedOverlayLookup: EntityOverlayLookup = {
 		presentation: (nodeId) => this.#resolvedNodeOverlays.get(nodeId) ?? null,
+		forEachOverlayOccluded: (visit) => {
+			for (const [nodeId, presentation] of this.#resolvedNodeOverlays) {
+				if (presentation.occlusion === "overlay") visit(nodeId, presentation);
+			}
+		},
 	};
 	/** Semantic relationship levels are cold; endpoint and opacity preparation is frame-owned. */
 	readonly #summonVisuals = new Map<number, SummonVisualLevel>();
@@ -328,6 +331,7 @@ export class FramePresentationCoordinator {
 		validateEntitySelectionOutlineSettings(
 			context.frameSettings.entitySelectionOutline,
 		);
+		validateEntityBeaconSettings(context.frameSettings.entityBeacons);
 		this.#context = context;
 		this.#frameSettings = context.frameSettings;
 		this.#renderWorld = new RenderWorld({
@@ -393,11 +397,7 @@ export class FramePresentationCoordinator {
 		};
 	}
 
-	getNameplateDecoration(
-		guid: number,
-	):
-		| Pick<NameplateContent, "indicators" | "strikeThrough" | "nameColor">
-		| undefined {
+	getNameplateDecoration(guid: number): NameplateDecoration | undefined {
 		return this.#spawnedNameplateDecoration.get(guid);
 	}
 
@@ -454,15 +454,13 @@ export class FramePresentationCoordinator {
 	/** Replace app-owned decoration without copying authoritative name or level facts. */
 	setDynamicEntityNameplateDecoration(
 		guid: number,
-		decoration: Pick<
-			NameplateContent,
-			"indicators" | "strikeThrough" | "nameColor"
-		>,
+		decoration: NameplateDecoration,
 	): void {
 		if (
 			decoration.indicators.length === 0 &&
 			!decoration.strikeThrough &&
-			decoration.nameColor === undefined
+			decoration.nameColor === undefined &&
+			decoration.crest === undefined
 		)
 			this.#spawnedNameplateDecoration.delete(guid);
 		else this.#spawnedNameplateDecoration.set(guid, decoration);
@@ -553,6 +551,7 @@ export class FramePresentationCoordinator {
 		validateNameplateSettings(settings.nameplates);
 		validateHealthBarSettings(settings.healthBars);
 		validateEntitySelectionOutlineSettings(settings.entitySelectionOutline);
+		validateEntityBeaconSettings(settings.entityBeacons);
 		this.#frameSettings = settings;
 	}
 
@@ -1196,7 +1195,8 @@ export class FramePresentationCoordinator {
 					continue;
 				if (
 					entry.presentation.nameplate === null &&
-					entry.presentation.healthBar === null
+					entry.presentation.healthBar === null &&
+					(entry.presentation.beacon ?? null) === null
 				)
 					continue;
 				this.#resolvedNodeOverlays.set(installed.nodeId, entry.presentation);

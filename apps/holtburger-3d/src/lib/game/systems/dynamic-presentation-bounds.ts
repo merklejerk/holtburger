@@ -331,6 +331,7 @@ export class DynamicPresentationAndBoundsPublisher {
 			entity.nameplateContent.level === content.level &&
 			entity.nameplateContent.nameColor === content.nameColor &&
 			entity.nameplateContent.strikeThrough === content.strikeThrough &&
+			entity.nameplateContent.crest === content.crest &&
 			orderedIndicatorsEqual(
 				entity.nameplateContent.indicators,
 				content.indicators,

@@ -28,6 +28,11 @@ import {
 	type WebGL2EntitySelectionMask,
 } from "../overlays/webgl2-entity-selection-pass";
 import { WebGL2EntityOverlayPass } from "../overlays/webgl2-entity-overlay-pass";
+import { WebGL2EntityBeaconPass } from "../overlays/webgl2-entity-beacon-pass";
+import {
+	resolveEntityBeaconGeometry,
+	type EntityBeaconSettings,
+} from "../overlays/entity-beacon-policy";
 import {
 	Canvas2DNameplateRasterizer,
 	type NameplateTextureBinding,
@@ -40,6 +45,7 @@ import {
 import { NAMEPLATE_ICON_CATALOG } from "../overlays/nameplate-icon-source";
 import type { NameplateIconId } from "../../systems/dynamic-presentation-source";
 import { resolveEntityOverlayAnchor } from "../overlays/entity-overlay-anchor";
+import { isOverlayAnchorInFrustum } from "../overlays/entity-overlay-selection";
 import type {
 	EntityOverlayLookup,
 	EntityOverlaySettings,
@@ -84,9 +90,12 @@ import {
 	EMPTY_PARTICLE_RECORDS,
 	NO_ENTITY_OVERLAYS,
 	OVERLAY_ROUTE,
+	type MutableEntityBeaconDrawInstance,
+	type MutableEntityBeaconScopedDrawInstance,
 	type MutableEntityOverlayDrawInstance,
 	type MutableEntityOverlayScopedDrawInstance,
 	type PreparedBarComponent,
+	type PreparedEntityBeacon,
 	type PreparedEntityOverlay,
 	type PreparedLabelComponent,
 	type PreparedOverlayEntity,
@@ -141,6 +150,10 @@ export class SkyParticleOverlayAndSelectionPasses {
 	#entitySelectionPass: WebGL2EntitySelectionPass | null = null;
 
 	readonly #entityOverlayPass: WebGL2EntityOverlayPass;
+	#entityBeaconPass: WebGL2EntityBeaconPass | null = null;
+	readonly #entityBeaconDrawScratch: MutableEntityBeaconDrawInstance[] = [];
+	readonly #scopedEntityBeaconDrawScratch: MutableEntityBeaconScopedDrawInstance[] =
+		[];
 	readonly #nameplateIconRepository: NameplateIconRepository;
 	readonly #nameplateTextureCache: WebGL2NameplateTextureCache;
 	readonly #entityOverlayDrawScratch: MutableEntityOverlayDrawInstance[] = [];
@@ -575,6 +588,7 @@ export class SkyParticleOverlayAndSelectionPasses {
 		portalVisibility: DynamicRenderDomainSelection | null,
 		labels: PreparedLabelComponent[],
 		bars: PreparedBarComponent[],
+		requireAnchorInFrustum = false,
 	): void {
 		const facts = this.#world.getEntityOverlayFacts(nodeId);
 		if (facts === null) return;
@@ -591,6 +605,11 @@ export class SkyParticleOverlayAndSelectionPasses {
 			prepared.cameraPosition,
 			settings.anchorPaddingWorldUnits,
 		);
+		if (
+			requireAnchorInFrustum &&
+			!isOverlayAnchorInFrustum(anchor, prepared.clipFromAnchor)
+		)
+			return;
 		const entity: PreparedOverlayEntity = {
 			anchor,
 			distanceSquared,
@@ -630,6 +649,119 @@ export class SkyParticleOverlayAndSelectionPasses {
 				priority: overlay.healthBar.priority,
 				fraction: overlay.healthBar.fraction,
 			});
+	}
+
+	/** Resolve one visible entity's depth-tested beacon base, scenario height, and portal scopes. */
+	prepareEntityBeacon(
+		nodeId: SceneNodeId,
+		renderTarget: VisibleDynamicPresentation,
+		contribution: Extract<RenderContribution, { kind: "dynamic" }>,
+		prepared: PreparedViewGeometry,
+		settings: EntityBeaconSettings,
+		portalVisibility: DynamicRenderDomainSelection | null,
+		beacons: PreparedEntityBeacon[],
+	): void {
+		const facts = this.#world.getEntityOverlayFacts(nodeId);
+		if (facts === null) return;
+		const landblockOffset = createLandblockOffset(
+			getLandblockCoordinates(renderTarget.landblockId),
+			prepared.anchorCoordinates,
+		);
+		const isIndoor = renderTarget.renderScopes.some(
+			(scope) => scope.kind === "env-cell",
+		);
+		const { base, height, radius, distanceSquared } =
+			resolveEntityBeaconGeometry(
+				facts.rigidBounds,
+				contribution.footprint.placement.localToLandblock,
+				landblockOffset,
+				prepared.cameraPosition,
+				isIndoor,
+				settings,
+			);
+		beacons.push({
+			base,
+			height,
+			radius,
+			distanceSquared,
+			identity: facts.identity,
+			renderScopeKeys: selectedDynamicRenderScopeKeys(
+				renderTarget.renderScopes,
+				portalVisibility,
+			),
+		});
+	}
+
+	/** Draw depth-tested, portal-clipped in-scene beacons before entity nameplates and health bars. */
+	drawEntityBeacons(
+		view: PreparedView,
+		portalRouting: WebGL2PortalScopeAtlasPipeline | null,
+	): void {
+		if (view.entityBeacons.length === 0) return;
+		const pass = (this.#entityBeaconPass ??= new WebGL2EntityBeaconPass(
+			this.#deviceTargets.gl,
+		));
+		const viewMat = view.view;
+		const context = {
+			clipFromAnchor: mat4ToFloat32Array(
+				view.clipFromAnchor,
+				this.#objectShadowPass.matrixScratch,
+			),
+			cameraPosition: view.cameraPosition,
+			cameraRight: [viewMat.m11, viewMat.m21, viewMat.m31] as const,
+			viewportWidth: this.#deviceTargets.frameWidth,
+			viewportHeight: this.#deviceTargets.frameHeight,
+			renderScale: this.#deviceTargets.renderScale,
+			timeSeconds: this.#deviceTargets.frameClockSeconds,
+			settings: view.entityBeaconSettings,
+		};
+		if (portalRouting) {
+			let instanceCount = 0;
+			for (const beacon of view.entityBeacons) {
+				for (const renderScopeKey of beacon.renderScopeKeys) {
+					const slot = this.#scopedEntityBeaconDrawScratch[instanceCount];
+					if (slot === undefined) {
+						this.#scopedEntityBeaconDrawScratch.push({
+							base: beacon.base,
+							height: beacon.height,
+							radius: beacon.radius,
+							renderScopeKey,
+						});
+					} else {
+						slot.base = beacon.base;
+						slot.height = beacon.height;
+						slot.radius = beacon.radius;
+						slot.renderScopeKey = renderScopeKey;
+					}
+					instanceCount += 1;
+				}
+			}
+			this.#scopedEntityBeaconDrawScratch.length = instanceCount;
+			pass.drawScoped(
+				context,
+				this.#scopedEntityBeaconDrawScratch,
+				portalRouting,
+			);
+			return;
+		}
+		let instanceCount = 0;
+		for (const beacon of view.entityBeacons) {
+			const slot = this.#entityBeaconDrawScratch[instanceCount];
+			if (slot === undefined) {
+				this.#entityBeaconDrawScratch.push({
+					base: beacon.base,
+					height: beacon.height,
+					radius: beacon.radius,
+				});
+			} else {
+				slot.base = beacon.base;
+				slot.height = beacon.height;
+				slot.radius = beacon.radius;
+			}
+			instanceCount += 1;
+		}
+		this.#entityBeaconDrawScratch.length = instanceCount;
+		pass.draw(context, this.#entityBeaconDrawScratch);
 	}
 
 	#acquireOverlayTexture(
@@ -917,6 +1049,8 @@ export class SkyParticleOverlayAndSelectionPasses {
 		this.#worldTrajectoryPass.destroy();
 		this.#desiredTrajectoryPass.destroy();
 		this.#entityOverlayPass.destroy();
+		this.#entityBeaconPass?.destroy();
+		this.#entityBeaconPass = null;
 		this.#nameplateTextureCache.destroy();
 		this.#nameplateIconRepository.destroy();
 	}

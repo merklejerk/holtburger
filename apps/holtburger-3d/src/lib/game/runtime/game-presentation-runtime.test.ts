@@ -965,6 +965,7 @@ describe("GamePresentationRuntime view and interest control", () => {
 			colorGrade: SHARED_FRAME_SETTINGS.colorGrade,
 			entityShadows: SHARED_FRAME_SETTINGS.entityShadows,
 			entitySelectionOutline: SHARED_FRAME_SETTINGS.entitySelectionOutline,
+			entityBeacons: SHARED_FRAME_SETTINGS.entityBeacons,
 			distanceFogEnabled: false,
 			viewerLightEnabled: false,
 			weatherEnabled: true,
@@ -996,6 +997,7 @@ describe("GamePresentationRuntime view and interest control", () => {
 			colorGrade: SHARED_FRAME_SETTINGS.colorGrade,
 			entityShadows: SHARED_FRAME_SETTINGS.entityShadows,
 			entitySelectionOutline: SHARED_FRAME_SETTINGS.entitySelectionOutline,
+			entityBeacons: SHARED_FRAME_SETTINGS.entityBeacons,
 			distanceFogEnabled: false,
 			viewerLightEnabled: false,
 			weatherEnabled: true,
@@ -4548,6 +4550,7 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 	it("resolves overlay frames by generation without triggering nameplate texture re-rasterization", async () => {
 		const delayed = controlledPromise<DecodedStaticPresentation>();
 		const observedPresentations: Array<EntityOverlayPresentation | null> = [];
+		const observedOverlayOccludedCount: number[] = [];
 		const runtime = await buildSpawnRuntime({
 			setupVisualSource: { load: () => delayed.promise },
 			renderer: testRenderer({
@@ -4558,6 +4561,11 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 							? null
 							: input.entityOverlays.presentation(nodeId),
 					);
+					let overlayCount = 0;
+					input.entityOverlays.forEachOverlayOccluded(() => {
+						overlayCount += 1;
+					});
+					observedOverlayOccludedCount.push(overlayCount);
 					return EMPTY_RENDERER_FRAME_FEEDBACK;
 				},
 			}),
@@ -4615,11 +4623,40 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 				nameplate: "focus",
 				healthBar: { fraction: 0.25, priority: "focus" },
 			});
+			expect(observedOverlayOccludedCount.at(-1)).toBe(1);
 			expect(updateContent.mock.calls.length).toBe(contentCallsAtInstall);
 
-			runtime.setEntityOverlayFrame({ kind: "resolved", entities: new Map() });
+			// Scene-occluded beacon-only entries are retained for in-scene drawing without entering portal bypass.
+			runtime.setEntityOverlayFrame({
+				kind: "resolved",
+				entities: new Map([
+					[
+						7,
+						{
+							generation: 2,
+							presentation: {
+								occlusion: "scene",
+								nameplate: null,
+								healthBar: null,
+								beacon: { kind: "alert" },
+							},
+						},
+					],
+				]),
+			});
 			runtime.render(3);
+			expect(observedPresentations.at(-1)).toEqual({
+				occlusion: "scene",
+				nameplate: null,
+				healthBar: null,
+				beacon: { kind: "alert" },
+			});
+			expect(observedOverlayOccludedCount.at(-1)).toBe(0);
+
+			runtime.setEntityOverlayFrame({ kind: "resolved", entities: new Map() });
+			runtime.render(4);
 			expect(observedPresentations.at(-1)).toBeNull();
+			expect(observedOverlayOccludedCount.at(-1)).toBe(0);
 		} finally {
 			updateContent.mockRestore();
 			await runtime.destroy();

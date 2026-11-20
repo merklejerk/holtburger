@@ -571,10 +571,15 @@ with the stable category key, such as `monster`, `corpse`, `door`, or `switch`. 
 
 Minimap rim controls share `--ui-minimap-button-size` and
 `--ui-minimap-button-radius`. Alert matches replace ordinary entity markers with
-one filled star, painted using `--ui-minimap-alert-color`. The color can reference
-palette variables.
-The existing theme loader's change notification resolves these values for
-Canvas2D without recreating the minimap or reading CSS each frame.
+one filled star, painted using `--ui-minimap-alert-color`. In-world alert
+indicators inherit that color by default and can be overridden independently
+with `--ui-entity-alert-crest-color` (the star crest above matching nameplates),
+`--ui-entity-alert-beacon-color` (the depth-tested 3D hollow cylinder and
+base glow), and `--ui-entity-alert-beacon-sparkle-color` (rising cylinder
+sparkles; set to `transparent` to disable). All alert colors can reference
+palette variables; the existing theme
+loader's change notification resolves them on cold stylesheet updates without
+recreating the minimap or reading CSS each frame.
 
 `ui-action-row` fills the row when it contains one text button; grouped text
 actions keep their natural widths. Inline forms and icon toolbars use their own

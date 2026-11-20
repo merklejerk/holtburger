@@ -71,6 +71,11 @@ import type {
 	OutdoorDirectionalShadowSelection,
 } from "../overlays/entity-grounding";
 import type { EntityShadowSettings } from "../shadows/entity-shadow-policy";
+import type { EntityBeaconSettings } from "../overlays/entity-beacon-policy";
+import type {
+	EntityBeaconDrawInstance,
+	EntityBeaconScopedDrawInstance,
+} from "../overlays/webgl2-entity-beacon-pass";
 import type {
 	EntityOverlayDrawInstance,
 	EntityOverlayScopedDrawInstance,
@@ -453,6 +458,7 @@ export const OVERLAY_ROUTE: PreparedOverlayRoute = { kind: "overlay" };
 /** Renderer state before its first frame; every drawn frame replaces it from `FrameInput`. */
 export const NO_ENTITY_OVERLAYS: EntityOverlayLookup = {
 	presentation: () => null,
+	forEachOverlayOccluded: () => undefined,
 };
 
 /** One entity's shared overlay anchor; its components reference it by identity for composition. */
@@ -500,6 +506,29 @@ export interface MutableEntityOverlayScopedDrawInstance extends EntityOverlaySco
 	renderScopeKey: string;
 }
 
+/** One admitted in-scene beacon with its portal domains, sorted back-to-front per view. */
+export interface PreparedEntityBeacon {
+	readonly base: Vec3;
+	readonly height: number;
+	readonly radius: number;
+	readonly distanceSquared: number;
+	readonly identity: string;
+	readonly renderScopeKeys: readonly string[];
+}
+
+export interface MutableEntityBeaconDrawInstance extends EntityBeaconDrawInstance {
+	base: Vec3;
+	height: number;
+	radius: number;
+}
+
+export interface MutableEntityBeaconScopedDrawInstance extends EntityBeaconScopedDrawInstance {
+	base: Vec3;
+	height: number;
+	radius: number;
+	renderScopeKey: string;
+}
+
 export interface PreparedSceneContributions {
 	/** Opaque/alpha-test dynamic meshes submitted without per-range instance expansion. */
 	readonly dynamicOpaque: readonly PreparedDynamicOpaque[];
@@ -520,6 +549,10 @@ export interface PreparedSceneContributions {
 	readonly skyParticles: readonly ParticleDrawRange[];
 	/** Fixed per-receiver analytic-shadow records produced from the same visible-entry walk. */
 	readonly entityAnalyticShadows: PreparedEntityAnalyticShadows | null;
+	/** Depth-tested in-scene entity beacons, in back-to-front blend order. */
+	readonly entityBeacons: readonly PreparedEntityBeacon[];
+	/** In-scene entity beacon styling for this prepared view. */
+	readonly entityBeaconSettings: EntityBeaconSettings;
 	/** Composed admitted labels and bars, in back-to-front blend order. */
 	readonly entityOverlays: readonly PreparedEntityOverlay[];
 	/** Shared perspective scale applied by the overlay pass for this prepared view. */

@@ -402,6 +402,17 @@ export const SHARED_FRONTEND_TUNING = {
 			breathingMinimum: 0.35,
 			breathingPeriodSeconds: 1.0,
 		},
+		/** Depth-tested hollow 3D light cylinder and glowing base disc for alert-matched entities. */
+		entityBeacons: {
+			outdoorHeightMeters: 80.0,
+			indoorHeightMeters: 3.0,
+			entityHeadClearanceMeters: 1.5,
+			radiusScale: 0.5,
+			minimumRadiusMeters: 0.2,
+			minimumRadiusCssPixels: 2.5,
+			baseLiftMeters: 0.05,
+			shimmerCyclesPerSecond: 0.45,
+		},
 		/** Fallback framebuffer color exposed when no scene presentation covers a pixel. */
 		clearColor: hexRgba("#260d0dff"),
 		/** Placement and perspective scale shared by labels and health bars. */
@@ -430,6 +441,8 @@ export const SHARED_FRONTEND_TUNING = {
 				},
 				/** CSS font-family expression consumed directly by Canvas2D. */
 				fontFamily: "sans-serif",
+				crestGapPixels: 6,
+				crestSizePixels: 76,
 				horizontalPaddingPixels: 6,
 				indicatorGapPixels: 5,
 				indicatorSizePixels: 64,

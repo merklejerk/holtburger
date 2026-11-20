@@ -37,9 +37,11 @@ export type CycleFilter = "smart-combat" | "non-creature" | "corpse";
  * Filter admission tier:
  * - `"cycle"`: ordinary traversal and immediate acquisition
  * - `"immediate-only"`: eligible only as the immediate acquisition winner
+ * - `"immediate-fallback"`: eligible only as the immediate acquisition winner, ranked below primary immediate candidates
  * - `"fallback"`: admitted into traversal and immediate acquisition when no primary candidates exist
  */
-type CycleMembership = "cycle" | "immediate-only" | "fallback";
+type CycleMembership =
+	"cycle" | "immediate-only" | "immediate-fallback" | "fallback";
 /** Cold gameplay facts sampled with each acquisition, independent of panel visibility. */
 export interface CycleSelectionContext {
 	/** Confirmed stance; unknown uses unrestricted player admission until confirmation. */
@@ -331,19 +333,19 @@ function cycleMemberships(
 	};
 	if (facts.corpse === "unopened") filters.corpse = "cycle";
 	else if (facts.corpse === "opened") filters.corpse = "fallback";
-	if (
-		!preferences.smartTabHostileOnly &&
-		facts.targeting !== "projectile" &&
-		facts.corpse === null
-	) {
-		const traversable =
-			facts.description.kind === "known" &&
-			facts.description.mapCategory !== "door" &&
-			facts.description.mapCategory !== "door-no-direct-use" &&
-			["direct", "targeted", "salvage-tool"].includes(
-				facts.description.useCapability,
-			);
-		filters["smart-combat"] = traversable ? "cycle" : "immediate-only";
+	if (!preferences.smartTabHostileOnly && facts.targeting !== "projectile") {
+		if (facts.corpse !== null) {
+			filters["smart-combat"] = "immediate-fallback";
+		} else {
+			const traversable =
+				facts.description.kind === "known" &&
+				facts.description.mapCategory !== "door" &&
+				facts.description.mapCategory !== "door-no-direct-use" &&
+				["direct", "targeted", "salvage-tool"].includes(
+					facts.description.useCapability,
+				);
+			filters["smart-combat"] = traversable ? "cycle" : "immediate-only";
+		}
 	}
 	return filters;
 }
@@ -390,7 +392,7 @@ function hasPrimaryMember(
 ): boolean {
 	return candidates.some((candidate) => {
 		const membership = candidate.filters[filter];
-		return membership !== undefined && membership !== "fallback";
+		return membership === "cycle" || membership === "immediate-only";
 	});
 }
 
@@ -408,20 +410,25 @@ export function resolveImmediateCandidate(
 ): CycleCandidate | undefined {
 	const hasPrimary = hasPrimaryMember(candidates, filter);
 	let winner: CycleCandidate | undefined;
+	let winnerPriority = Infinity;
 	let winnerDistanceSquared = Infinity;
 	for (const candidate of candidates) {
-		if (!admits(candidate.filters[filter], hasPrimary)) continue;
+		const membership = candidate.filters[filter];
+		if (!admits(membership, hasPrimary)) continue;
 		const distanceSquared =
 			filter === "smart-combat"
 				? candidate.smartImmediate?.distanceSquared
 				: candidate.distanceSquared;
 		if (distanceSquared === undefined) continue;
+		const priority = membership === "immediate-fallback" ? 1 : 0;
 		if (
 			winner === undefined ||
-			(distanceSquared - winnerDistanceSquared ||
+			(priority - winnerPriority ||
+				distanceSquared - winnerDistanceSquared ||
 				preferredFirst(candidate, winner)) < 0
 		) {
 			winner = candidate;
+			winnerPriority = priority;
 			winnerDistanceSquared = distanceSquared;
 		}
 	}
@@ -443,7 +450,7 @@ export function rankCycleCandidates(
 ): RankedCycleCandidates {
 	const hasPrimary = hasPrimaryMember(candidates, filter);
 	const immediate = resolveImmediateCandidate(candidates, filter);
-	// The winning immediate-only entity stays in the ring; all other immediate-only entities are
+	// Only the winning immediate-only/immediate-fallback entity stays in the ring; all others are
 	// skipped. Promote the winner rather than rotating the ring: otherwise higher-ranked targets
 	// preceding it would be deferred until traversal wraps around.
 	const matching = candidates
@@ -452,7 +459,7 @@ export function rankCycleCandidates(
 			return (
 				candidate !== immediate &&
 				admits(membership, hasPrimary) &&
-				membership !== "immediate-only"
+				(membership === "cycle" || membership === "fallback")
 			);
 		})
 		.sort(preferredFirst);

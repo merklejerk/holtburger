@@ -79,6 +79,63 @@ describe("pure immediate acquisition", () => {
 		expect(ranked.matching.map(({ guid }) => guid)).toEqual([4, 2, 3, 5]);
 	});
 
+	it("ranks immediate-fallback below primary immediate targets, but lets it win when no primary immediate exists", () => {
+		const closerFallback = candidate(11, 0.25, {
+			band: 0,
+			filters: { "smart-combat": "immediate-fallback" },
+		});
+		const fartherFallback = candidate(12, 0.75, {
+			band: 0,
+			filters: { "smart-combat": "immediate-fallback" },
+		});
+		const fartherPrimaryImmediate = candidate(13, 2, {
+			band: 0,
+			filters: { "smart-combat": "immediate-only" },
+		});
+		const fartherPrimaryCycle = candidate(15, 2.5, {
+			band: 0,
+			filters: { "smart-combat": "cycle" },
+		});
+		const distantCycle = candidate(14, 10, {
+			band: 2,
+			immediate: null,
+			filters: { "smart-combat": "cycle" },
+		});
+
+		// Any primary immediate target (cycle or immediate-only) beats a closer immediate-fallback.
+		const withImmediateOnly = rankCycleCandidates(
+			[closerFallback, fartherPrimaryImmediate, distantCycle],
+			"smart-combat",
+		);
+		expect(withImmediateOnly.immediate?.guid).toBe(13);
+		expect(withImmediateOnly.matching.map(({ guid }) => guid)).toEqual([
+			13, 14,
+		]);
+		expect(
+			resolveImmediateCandidate(
+				[fartherPrimaryImmediate, closerFallback, distantCycle],
+				"smart-combat",
+			)?.guid,
+		).toBe(13);
+
+		const withCycleImmediate = rankCycleCandidates(
+			[closerFallback, fartherPrimaryCycle, distantCycle],
+			"smart-combat",
+		);
+		expect(withCycleImmediate.immediate?.guid).toBe(15);
+		expect(withCycleImmediate.matching.map(({ guid }) => guid)).toEqual([
+			15, 14,
+		]);
+
+		// When only distant non-immediate targets exist, the nearest immediate-fallback wins and others stay out of the ring.
+		const fallbackWins = rankCycleCandidates(
+			[fartherFallback, closerFallback, distantCycle],
+			"smart-combat",
+		);
+		expect(fallbackWins.immediate?.guid).toBe(11);
+		expect(fallbackWins.matching.map(({ guid }) => guid)).toEqual([11, 14]);
+	});
+
 	it("excludes fallback members while a primary member exists, then admits them", () => {
 		expect(resolveImmediateCandidate(pool, "corpse")?.guid).toBe(7);
 		const fallbackOnly = pool.filter(({ guid }) => guid !== 7);

@@ -960,20 +960,21 @@ describe("realized volume candidate sampling", () => {
 			})?.[0]?.filters["smart-combat"],
 		).toBe("cycle");
 	});
-	it("keeps non-creature and corpse admission independent of the camera and excludes corpses from smart cycling", () => {
-		const f = volumeScene(
+	it("keeps non-creature and corpse admission independent of the camera and treats corpses as Smart immediate-fallback", () => {
+		const behind = volumeScene(
 			[
 				entityFacts(2, { corpse: "unopened" }),
 				entityFacts(3, { corpse: "opened" }),
 			],
 			[boxEntity(2, 0, 0, 2, BODY_BOX), boxEntity(3, 0, 0, 3, BODY_BOX)],
 		);
-		expect(f.sample()?.map((c) => c.filters)).toEqual([
+		// Behind the camera, view restriction strips smart-combat while preserving non-creature/corpse.
+		expect(behind.sample()?.map((c) => c.filters)).toEqual([
 			{ "non-creature": "cycle", corpse: "cycle" },
 			{ "non-creature": "cycle", corpse: "fallback" },
 		]);
 		expect(
-			f
+			behind
 				.sample(
 					{ targetOnlyInView: true, smartTabHostileOnly: false },
 					POLICY,
@@ -984,8 +985,81 @@ describe("realized volume candidate sampling", () => {
 			{ "non-creature": "cycle", corpse: "cycle" },
 			{ "non-creature": "cycle", corpse: "fallback" },
 		]);
+		// Without view restriction (or in view), both unopened and opened corpses admit as immediate-fallback.
+		expect(
+			behind
+				.sample({ targetOnlyInView: false, smartTabHostileOnly: false })
+				?.map((c) => c.filters),
+		).toEqual([
+			{
+				"non-creature": "cycle",
+				corpse: "cycle",
+				"smart-combat": "immediate-fallback",
+			},
+			{
+				"non-creature": "cycle",
+				corpse: "fallback",
+				"smart-combat": "immediate-fallback",
+			},
+		]);
+		expect(
+			behind
+				.sample({ targetOnlyInView: false, smartTabHostileOnly: true })
+				?.map((c) => c.filters),
+		).toEqual([
+			{ "non-creature": "cycle", corpse: "cycle" },
+			{ "non-creature": "cycle", corpse: "fallback" },
+		]);
 	});
-	it("does not produce Smart immediate admission for excluded semantics or a missing required camera", () => {
+	it("admits corpses to Smart Tab only as lower-priority immediate targets and ignores opened state", () => {
+		// Opened corpse is closer than unopened corpse; distant mob is outside the immediate band.
+		const corpsesAndDistantMob = volumeScene(
+			[
+				entityFacts(2, { corpse: "opened" }),
+				entityFacts(3, { corpse: "unopened" }),
+				entityFacts(4, { targeting: "creature", isHostile: true }),
+			],
+			[
+				boxEntity(2, 0, 0, -1, BODY_BOX),
+				boxEntity(3, 0, 0, -2, BODY_BOX),
+				boxEntity(4, 0, 0, -8, BODY_BOX),
+			],
+		);
+		const f1 = fixture();
+		f1.set(corpsesAndDistantMob.sample());
+		f1.cycle.cycle("smart-combat", 1);
+		expect(f1.selection.selectedGuid()).toBe(2);
+		f1.cycle.cycle("smart-combat", 1);
+		expect(f1.selection.selectedGuid()).toBe(4);
+		// Second corpse stays out of the ring; cycling wraps back to the winning immediate corpse.
+		f1.cycle.cycle("smart-combat", 1);
+		expect(f1.selection.selectedGuid()).toBe(2);
+		f1.cycle.selectImmediate("smart-combat");
+		expect(f1.selection.selectedGuid()).toBe(2);
+
+		// A farther non-corpse in the immediate cone/band beats a closer corpse, keeping all corpses out of the ring.
+		const corpseWithImmediateNonCorpse = volumeScene(
+			[
+				entityFacts(2, { corpse: "unopened" }),
+				doorFacts(3),
+				entityFacts(4, { targeting: "creature", isHostile: true }),
+			],
+			[
+				boxEntity(2, 0, 0, -1, BODY_BOX),
+				boxEntity(3, 0, 0, -2, BODY_BOX),
+				boxEntity(4, 0, 0, -8, BODY_BOX),
+			],
+		);
+		const f2 = fixture();
+		f2.set(corpseWithImmediateNonCorpse.sample());
+		f2.cycle.selectImmediate("smart-combat");
+		expect(f2.selection.selectedGuid()).toBe(3);
+		f2.cycle.cycle("smart-combat", 1);
+		expect(f2.selection.selectedGuid()).toBe(4);
+		f2.cycle.cycle("smart-combat", 1);
+		expect(f2.selection.selectedGuid()).toBe(3);
+	});
+	it("restricts Smart immediate admission by semantic eligibility, hostile-only mode, and required camera", () => {
 		const f = volumeScene(
 			[
 				entityFacts(2, { corpse: "unopened" }),
@@ -999,7 +1073,7 @@ describe("realized volume candidate sampling", () => {
 			],
 		);
 		expect(f.sample()?.map((candidate) => candidate.smartImmediate)).toEqual([
-			null,
+			{ distanceSquared: 0.75 ** 2 },
 			null,
 			{ distanceSquared: 0.75 ** 2 },
 		]);

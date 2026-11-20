@@ -393,21 +393,24 @@ void main() {
 	vec3 centerPoint = aBase + vec3(0.0, heightMeters, 0.0);
 	vec4 centerClip = uBeaconClipFromAnchor * vec4(centerPoint, 1.0);
 	vec4 offsetClip = uBeaconClipFromAnchor * vec4(centerPoint + uCameraRight * aRadius, 1.0);
-	vec2 screenDeltaPx = (
-		offsetClip.xy / max(abs(offsetClip.w), 1e-4) -
-		centerClip.xy / max(abs(centerClip.w), 1e-4)
-	) * uViewportSize * 0.5;
-	float projectedRadiusPx = length(screenDeltaPx);
-	float scaleBoost = projectedRadiusPx > 1e-4
-		? max(1.0, uMinRadiusPx / projectedRadiusPx)
-		: 1.0;
+	float scaleBoost = 1.0;
+	if (centerClip.w > 0.0 && offsetClip.w > 0.0) {
+		vec2 screenDeltaPx = (
+			offsetClip.xy / max(offsetClip.w, 1e-4) -
+			centerClip.xy / max(centerClip.w, 1e-4)
+		) * uViewportSize * 0.5;
+		float projectedRadiusPx = length(screenDeltaPx);
+		if (projectedRadiusPx > 1e-4) {
+			scaleBoost = max(1.0, uMinRadiusPx / projectedRadiusPx);
+		}
+	}
 	vec3 worldPoint = centerPoint + radial * (aRadius * scaleBoost);
 	gl_Position = uBeaconClipFromAnchor * vec4(worldPoint, 1.0);
 	vNormal = radial;
 	vWorldPosition = worldPoint;
 	vHeightFraction = aVertex.y;
 	vHeightMeters = heightMeters;
-	vRadius = aRadius * scaleBoost;
+	vRadius = aRadius;
 	vPortalRenderDomain = uint(aPortalRenderDomain);
 }`;
 	const fragment = `#version 300 es

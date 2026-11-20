@@ -34,6 +34,12 @@ describe("entity beacon policy", () => {
 		expect(() =>
 			validateEntityBeaconSettings({
 				...VALID_SETTINGS,
+				entityHeadClearanceMeters: -0.5,
+			}),
+		).toThrow(/entityHeadClearanceMeters/);
+		expect(() =>
+			validateEntityBeaconSettings({
+				...VALID_SETTINGS,
 				radiusScale: 0,
 			}),
 		).toThrow(/radiusScale/);
@@ -43,6 +49,18 @@ describe("entity beacon policy", () => {
 				minimumRadiusMeters: 0,
 			}),
 		).toThrow(/minimumRadiusMeters/);
+		expect(() =>
+			validateEntityBeaconSettings({
+				...VALID_SETTINGS,
+				minimumRadiusCssPixels: 0,
+			}),
+		).toThrow(/minimumRadiusCssPixels/);
+		expect(() =>
+			validateEntityBeaconSettings({
+				...VALID_SETTINGS,
+				baseLiftMeters: -0.01,
+			}),
+		).toThrow(/baseLiftMeters/);
 		expect(() =>
 			validateEntityBeaconSettings({
 				...VALID_SETTINGS,

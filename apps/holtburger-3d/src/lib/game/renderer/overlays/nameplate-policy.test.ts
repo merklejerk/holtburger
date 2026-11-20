@@ -74,5 +74,35 @@ describe("nameplate frame policy", () => {
 				},
 			}),
 		).toThrow("outline color alpha");
+		expect(() =>
+			validateNameplateSettings({
+				...SETTINGS,
+				appearance: {
+					...SETTINGS.appearance,
+					alertCrestColor: { red: -0.1, green: 1, blue: 1, alpha: 1 },
+				},
+			}),
+		).toThrow("alert crest color red");
+	});
+
+	it("rejects malformed crest layout dimensions", () => {
+		expect(() =>
+			validateNameplateSettings({
+				...SETTINGS,
+				appearance: {
+					...SETTINGS.appearance,
+					crestGapPixels: -1,
+				},
+			}),
+		).toThrow("crest gap");
+		expect(() =>
+			validateNameplateSettings({
+				...SETTINGS,
+				appearance: {
+					...SETTINGS.appearance,
+					crestSizePixels: 0,
+				},
+			}),
+		).toThrow("crest size");
 	});
 });

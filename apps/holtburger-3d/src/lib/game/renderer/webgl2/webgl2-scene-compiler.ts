@@ -543,7 +543,13 @@ export class SceneContributionCompilerAndSelector {
 						overlayPasses.frameEntityOverlays.presentation(nodeId);
 					if (tinyOverlay?.beacon != null) {
 						const tinyTarget = this.publishDynamicPresentation(nodeId);
-						if (tinyTarget !== null) {
+						if (
+							tinyTarget !== null &&
+							this.#hasVisibleDynamicGeometry(
+								tinyTarget,
+								frameSettings.showRetailHiddenGeometry,
+							)
+						) {
 							overlayPasses.prepareEntityBeacon(
 								nodeId,
 								tinyTarget,
@@ -797,7 +803,14 @@ export class SceneContributionCompilerAndSelector {
 				const contribution = this.#world.readRenderContribution(nodeId);
 				if (contribution?.kind !== "dynamic") return;
 				const renderTarget = this.publishDynamicPresentation(nodeId);
-				if (renderTarget === null) return;
+				if (
+					renderTarget === null ||
+					!this.#hasVisibleDynamicGeometry(
+						renderTarget,
+						frameSettings.showRetailHiddenGeometry,
+					)
+				)
+					return;
 				overlayPasses.prepareEntityOverlay(
 					nodeId,
 					overlay,
@@ -1255,6 +1268,30 @@ export class SceneContributionCompilerAndSelector {
 		const presentation = this.#world.getVisibleDynamicPresentation(nodeId);
 		this.#dynamicPresentations.set(nodeId, presentation);
 		return presentation;
+	}
+
+	/** Keep tiny-footprint beacons and portal-bypass overlays aligned with normal visible-range gating. */
+	#hasVisibleDynamicGeometry(
+		presentation: VisibleDynamicPresentation,
+		showRetailHiddenGeometry: boolean,
+	): boolean {
+		const appearance = this.#dynamicAppearances.get(
+			presentation.visual.appearance,
+		);
+		const opaqueVariant = selectOpaqueDynamicAppearanceVariant(
+			appearance,
+			presentation.visual.parts.length,
+			presentation.allPartsOpaque,
+			showRetailHiddenGeometry,
+		);
+		const admission = opaqueVariant
+			? opaqueVariant.admission
+			: summarizeDynamicRangeAdmission(
+					appearance.rangeGroupsByPart,
+					presentation.visual.parts,
+					showRetailHiddenGeometry,
+				);
+		return admission.sourceRangeGroupCount > 0;
 	}
 
 	/** Resolve selected scene and particle inputs before any view begins dynamic execution. */

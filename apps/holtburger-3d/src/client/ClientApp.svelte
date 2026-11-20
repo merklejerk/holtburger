@@ -1046,10 +1046,12 @@
 	}
 	function observeAlertTheme(element: HTMLElement) {
 		const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
-		const syncShimmer = (): void => {
-			const shimmerCyclesPerSecond = reducedMotion.matches
+		const resolvedShimmer = (): number =>
+			reducedMotion.matches
 				? 0
 				: CLIENT_TUNING.frameSettings.entityBeacons.shimmerCyclesPerSecond;
+		const syncShimmer = (): void => {
+			const shimmerCyclesPerSecond = resolvedShimmer();
 			if (
 				frameSettings.entityBeacons.shimmerCyclesPerSecond ===
 				shimmerCyclesPerSecond
@@ -1078,9 +1080,7 @@
 					...frameSettings.entityBeacons,
 					color: colors.beaconColor,
 					sparkleColor: colors.sparkleColor,
-					shimmerCyclesPerSecond: reducedMotion.matches
-						? 0
-						: CLIENT_TUNING.frameSettings.entityBeacons.shimmerCyclesPerSecond,
+					shimmerCyclesPerSecond: resolvedShimmer(),
 				},
 			};
 			presentationRoot?.setFrameSettings(frameSettings);

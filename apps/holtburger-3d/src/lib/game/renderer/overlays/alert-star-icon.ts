@@ -34,7 +34,6 @@ function parseAlertStarVertices(
 		if (/^[a-zA-Z]$/.test(token)) {
 			command = token;
 			index += 1;
-			if (command === "Z" || command === "z") continue;
 			continue;
 		}
 		if (command === null)

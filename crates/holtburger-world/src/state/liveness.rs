@@ -7,7 +7,7 @@ use holtburger_protocol::messages::object::messages::description::ObjDescEventDa
 use holtburger_protocol::messages::object::types::ModelData;
 
 use super::entity_dependencies::ScenePlacementScope;
-use super::pose_orientation::recover_pose_orientation;
+use super::pose_recovery::{recover_pose, recover_vector};
 use super::visibility::{EntityVisibility, VisibilitySnapshot};
 use crate::CollisionScene;
 use crate::WorldEvent;
@@ -842,14 +842,15 @@ impl WorldState {
                 .update_last_server_motion_style(style.interpreted());
         }
         if entity.position.landblock_id != Guid::NULL {
-            entity.position = recover_pose_orientation(
+            entity.position = recover_pose(
                 guid,
                 entity.position,
-                self.entities
-                    .get(guid)
-                    .map(|current| current.position.rotation),
+                self.entities.get(guid).map(|current| current.position),
             );
         }
+        entity.velocity = recover_vector(guid, "velocity", entity.velocity);
+        entity.acceleration = recover_vector(guid, "acceleration", entity.acceleration);
+        entity.omega = recover_vector(guid, "omega", entity.omega);
         if let Some(previous) = self.entities.get(guid)
             && previous.instance_sequence() == entity.instance_sequence()
         {

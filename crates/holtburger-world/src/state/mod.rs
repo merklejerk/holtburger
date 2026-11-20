@@ -7,7 +7,7 @@ pub mod friends;
 pub mod liveness;
 pub mod motion_resolution;
 pub mod mutations;
-mod pose_orientation;
+pub(crate) mod pose_recovery;
 mod scene_placement;
 pub mod self_movement;
 pub mod squelch;

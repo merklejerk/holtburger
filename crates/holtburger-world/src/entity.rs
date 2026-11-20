@@ -1787,13 +1787,14 @@ impl Entity {
         };
 
         if let Some(v) = data.velocity {
-            self.velocity = v;
+            self.velocity = crate::state::pose_recovery::recover_vector(self.guid, "velocity", v);
         }
         if let Some(a) = data.acceleration {
-            self.acceleration = a;
+            self.acceleration =
+                crate::state::pose_recovery::recover_vector(self.guid, "acceleration", a);
         }
         if let Some(o) = data.omega {
-            self.omega = o;
+            self.omega = crate::state::pose_recovery::recover_vector(self.guid, "omega", o);
         }
 
         self.sequences = data.sequences;

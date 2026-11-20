@@ -75,7 +75,11 @@ pub(super) fn project_pose_by_offset(
     offset: Vector3,
     target_hint: Option<WorldPosition>,
 ) -> WorldPosition {
-    if offset.length_squared() <= f32::EPSILON {
+    if !offset.x.is_finite()
+        || !offset.y.is_finite()
+        || !offset.z.is_finite()
+        || offset.length_squared() <= f32::EPSILON
+    {
         return authoritative_pose;
     }
 

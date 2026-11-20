@@ -1,4 +1,4 @@
-use super::super::pose_orientation::recover_pose_orientation;
+use super::super::pose_recovery::{recover_pose, recover_vector};
 use super::super::*;
 use crate::entity::EntityMotionSnapshot;
 use crate::spatial::{
@@ -61,12 +61,10 @@ impl WorldState {
             .unwrap_or_default();
 
         let bootstrap_position = if data.pos.is_some() {
-            recover_pose_orientation(
+            recover_pose(
                 guid,
                 bootstrap_position,
-                self.entities
-                    .get(guid)
-                    .map(|entity| entity.position.rotation),
+                self.entities.get(guid).map(|entity| entity.position),
             )
         } else {
             bootstrap_position
@@ -155,7 +153,7 @@ impl WorldState {
             .is_none_or(|body| body.pose.landblock_id == Guid::NULL);
         // Retail unparents after sequence admission, before deciding whether to interpolate.
         // Missing-cell recovery applies even without contact.
-        let pos = recover_pose_orientation(guid, pos_pack.pos, Some(entity.position.rotation));
+        let pos = recover_pose(guid, pos_pack.pos, Some(entity.position));
         self.entities
             .get_mut(guid)
             .expect("admitted entity")
@@ -222,7 +220,10 @@ impl WorldState {
             .get_mut(guid)
             .expect("entity admitted from this world turn must remain present");
         let mut velocity_event = None;
-        if let Some(velocity) = pos_pack.velocity {
+        let recovered_velocity = pos_pack
+            .velocity
+            .map(|velocity| recover_vector(guid, "velocity", velocity));
+        if let Some(velocity) = recovered_velocity {
             entity.velocity = velocity;
             velocity_event = Some((velocity, entity.omega));
         } else if pos_pack.flags.contains(UpdatePositionFlag::HAS_CONTACT)
@@ -232,8 +233,7 @@ impl WorldState {
             velocity_event = Some((entity.velocity, entity.omega));
         }
 
-        let nominal_sample = pos_pack
-            .velocity
+        let nominal_sample = recovered_velocity
             .or_else(|| {
                 pos_pack
                     .flags
@@ -279,8 +279,7 @@ impl WorldState {
             data.server_control_sequence,
         );
         if accepted {
-            let pos =
-                recover_pose_orientation(data.guid, data.position, Some(entity.position.rotation));
+            let pos = recover_pose(data.guid, data.position, Some(entity.position));
             entity.position = pos;
             self.emit_entity_pose_effect(
                 data.guid,
@@ -321,11 +320,7 @@ impl WorldState {
             return None;
         }
 
-        let pos = recover_pose_orientation(
-            guid,
-            update.pose(),
-            self.player_position().map(|current| current.rotation),
-        );
+        let pos = recover_pose(guid, update.pose(), self.player_position());
 
         let entity = self.player_entity_mut()?;
         entity.position = pos;
@@ -401,6 +396,8 @@ impl WorldState {
         let Some(entity) = self.entities.get_mut(guid) else {
             return events;
         };
+        let velocity = recover_vector(guid, "velocity", velocity);
+        let omega = recover_vector(guid, "omega", omega);
         entity.velocity = velocity;
         entity.omega = omega;
         events.push(WorldEvent::EntityVectorUpdated {
@@ -492,7 +489,7 @@ impl WorldState {
                 return false;
             };
 
-            let position = recover_pose_orientation(guid, position, Some(entity.position.rotation));
+            let position = recover_pose(guid, position, Some(entity.position));
             entity.position = position;
             // Retail behavior is to store this position quality and notify its consumers.
             // A quality update does not authorize movement reconciliation or unparenting.
@@ -518,6 +515,8 @@ impl WorldState {
         omega: Vector3,
         events: &mut Vec<WorldEvent>,
     ) -> bool {
+        let velocity = recover_vector(guid, "velocity", velocity);
+        let omega = recover_vector(guid, "omega", omega);
         if let Some(pose) = self.entities.get_mut(guid).map(|entity| {
             entity.velocity = velocity;
             entity.omega = omega;

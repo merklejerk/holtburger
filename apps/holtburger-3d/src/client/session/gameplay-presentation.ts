@@ -326,6 +326,8 @@ export interface ClientGameplayPresentationDependencies {
 	readonly resources: ClientGameplayPresentationResources;
 	/** Cold initial nameplate presentation mode; live edits arrive via `setNameplateMode`. */
 	readonly nameplateMode?: NameplateMode;
+	/** Cold initial idle-orbit dwell in ms (0 disables); live edits use `setIdleOrbitDelayMs`. */
+	readonly idleOrbitDelayMs?: number;
 	/** Imperative reader for currently enabled Nearby alert matches; absent alerts mean empty set. */
 	readonly trackedAlertGuids?: () => ReadonlySet<number>;
 	/** Shared acquisition candidate sampler reused by passive Smart immediate preview. */
@@ -395,6 +397,7 @@ export class ClientGameplayPresentation {
 		this.#cameraSelection = new ClientCameraAndSelectionPresenter({
 			session: this.#session,
 			canvas: this.#canvas,
+			idleOrbitDelayMs: dependencies.idleOrbitDelayMs,
 		});
 		this.camera = this.#cameraSelection.camera;
 		this.#combatOverlays = new ClientCombatAndOverlayPresenter({
@@ -647,6 +650,15 @@ export class ClientGameplayPresentation {
 	/** The host acknowledges a projection revision before the new FOV becomes visible. */
 	setFieldOfView(degrees: number): void {
 		this.#scenePortal.setFieldOfView(degrees);
+	}
+
+	/** Apply user timeout preference or reduced-motion policy without rebuilding presentation. */
+	setIdleOrbitDelayMs(
+		delayMs: number,
+		nowMs: number,
+		options?: { readonly immediate?: boolean },
+	): void {
+		this.camera.setIdleOrbitDelayMs(delayMs, nowMs, options);
 	}
 
 	/** Install only the current opening/revision's visual, leaving all authoritative facts untouched. */
@@ -1277,12 +1289,19 @@ export class ClientGameplayPresentation {
 			this.#setStatus("loading-activation");
 			return { earlyReturn: { rendered: false, status: this.#status } };
 		}
+		const sessionState = this.#session.state();
+		const worldIdleBlocked =
+			sessionState.combat.desired !== null ||
+			sessionState.combat.state !== "idle" ||
+			sessionState.spellCastTarget !== null ||
+			this.#combatOverlays.hasActiveBarberPreview();
 		const cameraView = this.#cameraSelection.resolveWorldPrimaryView(
 			resources,
 			player,
 			resolvedOrigin,
 			this.#scenePortal.fieldOfView(),
 			nowMs,
+			worldIdleBlocked,
 			() => this.#destroyed,
 			(error) => this.#reportError(error),
 		);

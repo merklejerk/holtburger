@@ -17,6 +17,7 @@ import {
 import { initialActionBar } from "../hud/action-bar-state.js";
 import { initialSpellBarBindings } from "../magic/spell-bar-state.js";
 import {
+	clientCameraSettingsSchema,
 	clientChatSuppressionSettingsSchema,
 	clientLockInteractionSettingsSchema,
 } from "./settings-contract.js";
@@ -84,6 +85,7 @@ export function createDefaultClientUserSections(
 		chatTimestamps: true,
 		chatSuppression: clientChatSuppressionSettingsSchema.parse({}),
 		lockInteractions: clientLockInteractionSettingsSchema.parse({}),
+		camera: clientCameraSettingsSchema.parse({}),
 		graphics: { ...CLIENT_GRAPHICS_DEFAULTS },
 		nameplates: { ...CLIENT_NAMEPLATE_DEFAULTS },
 		audio: { ...CLIENT_AUDIO_DEFAULTS },

@@ -6,6 +6,14 @@ export const CLIENT_DEFAULT_THEME_ID = TRAVELERS_KIT_THEME_ID;
 /** Initial music level for new profiles and older saved audio sections. */
 export const CLIENT_MUSIC_VOLUME_DEFAULT = 0.75;
 
+/** World-idle dwell before camera orbit starts, in seconds; zero disables idle orbit. */
+export const CLIENT_IDLE_CAMERA_ORBIT_DELAY_SECONDS = {
+	initial: 30,
+	minimum: 0,
+	maximum: 300,
+	step: 5,
+} as const;
+
 /** Editable client graphics ranges, shared by durable validation and controls. */
 export const CLIENT_GRAPHICS_RANGES = {
 	sealedInteriorAmbientLevel: { minimum: 0, maximum: 1, step: 0.01 },

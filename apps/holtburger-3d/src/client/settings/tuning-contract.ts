@@ -5,6 +5,7 @@ import type { CycleSelectionPolicy } from "../combat/target-acquisition";
 import type { PortalTransitionPolicy } from "../../lib/client/portal-transition-controller";
 import type { HexRgbaColor } from "../../lib/frontend-color";
 import type {
+	PossessionCameraIdleOrbitPolicy,
 	PossessionCameraOrbitPolicy,
 	PossessionCameraRecenterPolicy,
 } from "../../lib/game/camera/possession-camera-controller";
@@ -34,6 +35,13 @@ interface ClientCameraTuning {
 	readonly orbit: PossessionCameraOrbitPolicy;
 	/** Time-based return-behind policy during continuous movement. */
 	readonly recenter: PossessionCameraRecenterPolicy;
+	/** Slow horizontal orbit policy and root-motion thresholds when the player is world-idle. */
+	readonly idleOrbit: PossessionCameraIdleOrbitPolicy & {
+		/** Minimum root-position delta in meters that counts as player movement. */
+		readonly positionThresholdMeters: number;
+		/** Minimum facing-yaw delta in radians that counts as player turning. */
+		readonly yawThresholdRadians: number;
+	};
 }
 
 /** Client transition timing paired with the shared renderer-owned appearance. */

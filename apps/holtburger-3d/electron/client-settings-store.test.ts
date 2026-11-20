@@ -21,6 +21,7 @@ import { EQUIPMENT_SLOTS } from "../src/client/inventory/inventory-equipment";
 import { loadoutActionContentSchema } from "../src/client/inventory/loadout";
 import { bindActionCell } from "../src/client/hud/action-bar-state";
 import {
+	CLIENT_IDLE_CAMERA_ORBIT_DELAY_SECONDS,
 	CLIENT_UI_SCALE,
 	CLIENT_HUD_WINDOW_OPACITY,
 	CLIENT_DEFAULT_THEME_ID,
@@ -261,6 +262,35 @@ describe("ClientSettingsStore", () => {
 				expect(await reloaded.loadUser(userContext, "persisted")).toMatchObject(
 					{
 						settings: { lockInteractions: { autoUseKeys } },
+						repaired: [],
+					},
+				);
+			} finally {
+				await rm(dirname(path), { recursive: true, force: true });
+			}
+		},
+	);
+
+	it.each([
+		CLIENT_IDLE_CAMERA_ORBIT_DELAY_SECONDS.minimum,
+		CLIENT_IDLE_CAMERA_ORBIT_DELAY_SECONDS.maximum,
+	])(
+		"persists explicit idle camera orbit timeout %s across reloads",
+		async (idleOrbitDelaySeconds) => {
+			const path = await temporarySettingsPath();
+			try {
+				const store = new ClientSettingsStore(path, initialWindow);
+				await store.load();
+				const initial = await store.loadUser(userContext, "persisted");
+				expect(initial.settings.camera).toEqual(defaultUser.camera);
+				await store.saveUserPatch({
+					sections: { camera: { idleOrbitDelaySeconds } },
+				});
+				const reloaded = new ClientSettingsStore(path, initialWindow);
+				await reloaded.load();
+				expect(await reloaded.loadUser(userContext, "persisted")).toMatchObject(
+					{
+						settings: { camera: { idleOrbitDelaySeconds } },
 						repaired: [],
 					},
 				);

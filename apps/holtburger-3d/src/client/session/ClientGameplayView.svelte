@@ -1532,6 +1532,8 @@
 							<ClientSettingsPanel
 								lockInteractions={settings.lockInteractions}
 								onLockInteractionsChange={settings.onLockInteractionsChange}
+								camera={settings.camera}
+								onCameraChange={settings.onCameraChange}
 								chatSuppression={settings.chatSuppression}
 								onChatSuppressionChange={settings.onChatSuppressionChange}
 								gameplayPreferences={character.gameplayPreferences}

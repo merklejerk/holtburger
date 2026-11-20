@@ -91,6 +91,11 @@
 				settings = { ...settings, lockInteractions };
 				persistence.publish({ sections: { lockInteractions } });
 			}}
+			camera={settings.camera}
+			onCameraChange={(camera) => {
+				settings = { ...settings, camera };
+				persistence.publish({ sections: { camera } });
+			}}
 			chatSuppression={settings.chatSuppression}
 			onChatSuppressionChange={(chatSuppression) => {
 				settings = { ...settings, chatSuppression };

@@ -1932,6 +1932,12 @@
 		onLockInteractionsChange(lockInteractions) {
 			userSettings = { ...userSettings, lockInteractions };
 		},
+		get camera() {
+			return userSettings.camera;
+		},
+		onCameraChange(camera) {
+			userSettings = { ...userSettings, camera };
+		},
 		get chatSuppression() {
 			return userSettings.chatSuppression;
 		},

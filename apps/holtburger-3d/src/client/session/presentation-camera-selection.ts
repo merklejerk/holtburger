@@ -67,6 +67,7 @@ import {
 	type ClientTargetIndicatorFrame,
 } from "../combat/target-indicator";
 import type { CycleSelectionPresentationFrame } from "../combat/target-acquisition";
+import { CLIENT_IDLE_CAMERA_ORBIT_DELAY_SECONDS } from "../settings/settings-values";
 import { CLIENT_TUNING } from "../settings/tuning";
 import type {
 	ClientDiagnosticResidency,
@@ -106,10 +107,21 @@ export class ClientCameraAndSelectionPresenter {
 	#hoveredEntityGuid: number | null = null;
 	/** Last picked location retained as pending feedback between replacement surface picks. */
 	#preciseJumpMarker: WorldIndicatorInput["marker"] | null = null;
+	/** Suppresses idle camera orbit while the player is aiming a precise jump. */
+	#preciseJumpActive = false;
+	/** Scalar root-pose history used to detect any world movement/turning without allocation. */
+	#hasLastPlayerPose = false;
+	#lastPlayerLandblockId: string | null = null;
+	#lastPlayerEnvCellId: string | null = null;
+	#lastPlayerOriginX = 0;
+	#lastPlayerOriginY = 0;
+	#lastPlayerOriginZ = 0;
+	#lastPlayerFacingYaw = 0;
 
 	constructor(options: {
 		readonly session: ClientLifecycleSession;
 		readonly canvas: HTMLCanvasElement;
+		readonly idleOrbitDelayMs?: number;
 	}) {
 		this.#canvas = options.canvas;
 		const cameraSession = new ClientCameraSession(options.session);
@@ -120,6 +132,10 @@ export class ClientCameraAndSelectionPresenter {
 			},
 			orbit: CLIENT_TUNING.camera.orbit,
 			recenter: CLIENT_TUNING.camera.recenter,
+			idleOrbit: CLIENT_TUNING.camera.idleOrbit,
+			idleOrbitDelayMs:
+				options.idleOrbitDelayMs ??
+				CLIENT_IDLE_CAMERA_ORBIT_DELAY_SECONDS.initial * 1_000,
 			session: cameraSession,
 		});
 	}
@@ -379,6 +395,7 @@ export class ClientCameraAndSelectionPresenter {
 		snapshot: ClientPreciseJumpSnapshot,
 		runtime: ClientGameplayRuntime | undefined,
 	): void {
+		this.#preciseJumpActive = snapshot.active;
 		if (snapshot.active) {
 			this.#canvas.dataset.preciseJump = "active";
 		} else {
@@ -540,6 +557,7 @@ export class ClientCameraAndSelectionPresenter {
 	clearPreciseJumpMarker(): void {
 		delete this.#canvas.dataset.preciseJump;
 		this.#preciseJumpMarker = null;
+		this.#preciseJumpActive = false;
 	}
 
 	resolveWorldPrimaryView(
@@ -548,6 +566,7 @@ export class ClientCameraAndSelectionPresenter {
 		resolvedOrigin: ResolvedSceneOrigin,
 		fieldOfView: number,
 		nowMs: number,
+		worldIdleBlocked: boolean,
 		isDestroyed: () => boolean,
 		onError: (error: unknown) => void,
 	): CameraViewResolution {
@@ -563,7 +582,17 @@ export class ClientCameraAndSelectionPresenter {
 		const facingYaw = createEntityFacingCameraYaw(
 			player.placement.pose.rotation,
 		);
-		this.camera.advance(nowMs, facingYaw);
+		const playerMovedOrTurned = this.#observePlayerMotion(
+			resolvedOrigin,
+			facingYaw,
+		);
+		const idleBlocked =
+			worldIdleBlocked ||
+			this.#preciseJumpActive ||
+			playerMovedOrTurned ||
+			player.placement.contact !== "grounded" ||
+			this.camera.status().kind !== "active";
+		this.camera.advance(nowMs, facingYaw, { idleBlocked });
 		const submitCamera = this.camera.queueSynchronization(projection);
 		if (submitCamera !== null) {
 			this.#cameraSynchronization = this.#cameraSynchronization
@@ -679,6 +708,7 @@ export class ClientCameraAndSelectionPresenter {
 			void this.camera.stop().catch((error: unknown) => onError?.(error));
 		}
 		this.#cameraTarget = null;
+		this.#hasLastPlayerPose = false;
 	}
 
 	resetOnDiscontinuity(onError: (error: unknown) => void): void {
@@ -686,10 +716,48 @@ export class ClientCameraAndSelectionPresenter {
 		this.#cameraTarget = null;
 		this.#cameraProjection = null;
 		this.#lastPrimaryView = null;
+		this.#hasLastPlayerPose = false;
 	}
 
 	awaitSynchronization(): Promise<void> {
 		return this.#cameraSynchronization;
+	}
+
+	#observePlayerMotion(
+		origin: ResolvedSceneOrigin,
+		facingYaw: number,
+	): boolean {
+		const x = origin.landblockOrigin.x;
+		const y = origin.landblockOrigin.y;
+		const z = origin.landblockOrigin.z;
+		let movedOrTurned = false;
+		if (this.#hasLastPlayerPose) {
+			const cellChanged =
+				this.#lastPlayerLandblockId !== origin.landblockId ||
+				this.#lastPlayerEnvCellId !== origin.envCellId;
+			const dx = x - this.#lastPlayerOriginX;
+			const dy = y - this.#lastPlayerOriginY;
+			const dz = z - this.#lastPlayerOriginZ;
+			const { positionThresholdMeters, yawThresholdRadians } =
+				CLIENT_TUNING.camera.idleOrbit;
+			const moved =
+				cellChanged ||
+				dx * dx + dy * dy + dz * dz >
+					positionThresholdMeters * positionThresholdMeters;
+			const yawDelta = Math.atan2(
+				Math.sin(facingYaw - this.#lastPlayerFacingYaw),
+				Math.cos(facingYaw - this.#lastPlayerFacingYaw),
+			);
+			movedOrTurned = moved || Math.abs(yawDelta) > yawThresholdRadians;
+		}
+		this.#hasLastPlayerPose = true;
+		this.#lastPlayerLandblockId = origin.landblockId;
+		this.#lastPlayerEnvCellId = origin.envCellId;
+		this.#lastPlayerOriginX = x;
+		this.#lastPlayerOriginY = y;
+		this.#lastPlayerOriginZ = z;
+		this.#lastPlayerFacingYaw = facingYaw;
+		return movedOrTurned;
 	}
 
 	#resolveCameraProjection(
@@ -731,6 +799,7 @@ export class ClientCameraAndSelectionPresenter {
 			return;
 		}
 		this.#cameraTarget = target;
+		this.#hasLastPlayerPose = false;
 		this.camera.replaceLook({
 			pitchRadians: CLIENT_TUNING.camera.pitchRadians,
 			yawRadians: createEntityFacingCameraYaw(player.placement.pose.rotation),

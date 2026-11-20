@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { SPELL_BAR_INDICES } from "../magic/spell-bar-state";
 import {
 	clientAudioSettingsSchema,
+	clientCameraSettingsSchema,
 	clientGraphicsSettingsSchema,
 	clientUiSettingsSchema,
 	clientCharacterSettingsSchema,
@@ -21,6 +22,7 @@ import {
 } from "./input-settings";
 
 import {
+	CLIENT_IDLE_CAMERA_ORBIT_DELAY_SECONDS,
 	CLIENT_VITAL_WARNING_PERCENT,
 	CLIENT_GRAPHICS_RANGES,
 	CLIENT_VITAL_WARNING_THRESHOLDS,
@@ -509,4 +511,35 @@ it("defaults legacy audio profiles to foreground playback while retaining the ba
 		clientAudioSettingsSchema.parse({ ...legacy, playInBackground: true })
 			.playInBackground,
 	).toBe(true);
+});
+
+it("defaults camera idle orbit timeout, accepts zero and bounded integers, and rejects invalid values", () => {
+	expect(clientCameraSettingsSchema.parse({})).toEqual({
+		idleOrbitDelaySeconds: CLIENT_IDLE_CAMERA_ORBIT_DELAY_SECONDS.initial,
+	});
+	expect(
+		clientCameraSettingsSchema.parse({
+			idleOrbitDelaySeconds: CLIENT_IDLE_CAMERA_ORBIT_DELAY_SECONDS.minimum,
+		}),
+	).toEqual({
+		idleOrbitDelaySeconds: CLIENT_IDLE_CAMERA_ORBIT_DELAY_SECONDS.minimum,
+	});
+	expect(
+		clientCameraSettingsSchema.parse({
+			idleOrbitDelaySeconds: CLIENT_IDLE_CAMERA_ORBIT_DELAY_SECONDS.maximum,
+		}),
+	).toEqual({
+		idleOrbitDelaySeconds: CLIENT_IDLE_CAMERA_ORBIT_DELAY_SECONDS.maximum,
+	});
+	for (const invalid of [
+		CLIENT_IDLE_CAMERA_ORBIT_DELAY_SECONDS.minimum - 1,
+		CLIENT_IDLE_CAMERA_ORBIT_DELAY_SECONDS.maximum + 1,
+		15.5,
+		"30",
+	]) {
+		expect(
+			clientCameraSettingsSchema.safeParse({ idleOrbitDelaySeconds: invalid })
+				.success,
+		).toBe(false);
+	}
 });

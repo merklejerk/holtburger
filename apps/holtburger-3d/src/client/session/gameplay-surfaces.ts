@@ -71,6 +71,7 @@ import type { ClientSelectedEntity } from "../world/selected-entity";
 import type { ClientSelectedEntityDisplay } from "../world/selected-entity-tracking";
 import type {
 	ClientAudioSettings,
+	ClientCameraSettings,
 	ClientCharacterSettings,
 	ClientChatChannelFilters,
 	ClientChatSuppressionSettings,
@@ -169,6 +170,9 @@ export interface ClientGameplaySettingsSurface {
 	readonly onLockInteractionsChange: (
 		settings: ClientLockInteractionSettings,
 	) => void;
+	/** Local gameplay camera preferences. */
+	readonly camera: ClientCameraSettings;
+	readonly onCameraChange: (settings: ClientCameraSettings) => void;
 	/** Local chat admission preferences, independent of server character options. */
 	readonly chatSuppression: ClientChatSuppressionSettings;
 	readonly onChatSuppressionChange: (

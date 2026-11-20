@@ -15,6 +15,7 @@ import { ENTITY_SHADOW_MODES } from "../../lib/game/renderer/shadows/entity-shad
 import { TEXTURE_FILTERING_POLICIES } from "../../lib/game/renderer/webgl2/texture-filtering-policy.js";
 import {
 	CLIENT_DEFAULT_THEME_ID,
+	CLIENT_IDLE_CAMERA_ORBIT_DELAY_SECONDS,
 	CLIENT_MUSIC_VOLUME_DEFAULT,
 	CLIENT_FONT_FAMILY_OPTIONS,
 	CLIENT_VITAL_WARNING_PERCENT,
@@ -163,6 +164,21 @@ export const clientLockInteractionSettingsSchema = z
 export type ClientLockInteractionSettings = z.infer<
 	typeof clientLockInteractionSettingsSchema
 >;
+
+/** Local camera behavior preferences, independent of server gameplay options. */
+export const clientCameraSettingsSchema = z
+	.object({
+		/** World-idle delay in seconds before horizontal camera orbit starts; zero disables it. */
+		idleOrbitDelaySeconds: z
+			.number()
+			.int()
+			.min(CLIENT_IDLE_CAMERA_ORBIT_DELAY_SECONDS.minimum)
+			.max(CLIENT_IDLE_CAMERA_ORBIT_DELAY_SECONDS.maximum)
+			.default(CLIENT_IDLE_CAMERA_ORBIT_DELAY_SECONDS.initial),
+	})
+	.strict()
+	.readonly();
+export type ClientCameraSettings = z.infer<typeof clientCameraSettingsSchema>;
 
 /** User-scoped graphics preferences; implementation tuning stays in renderer policy. */
 export const clientGraphicsSettingsSchema = z
@@ -320,6 +336,7 @@ export const clientUserSettingsSchema = z
 		chatTimestamps: z.boolean(),
 		chatSuppression: clientChatSuppressionSettingsSchema,
 		lockInteractions: clientLockInteractionSettingsSchema,
+		camera: clientCameraSettingsSchema,
 		graphics: clientGraphicsSettingsSchema,
 		nameplates: clientNameplateSettingsSchema,
 		audio: clientAudioSettingsSchema,

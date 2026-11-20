@@ -240,6 +240,7 @@
 		type TextureFilteringCapabilities,
 	} from "../lib/game/renderer/webgl2/texture-filtering-policy";
 	import type {
+		ClientCameraSettings,
 		ClientCharacterSettings,
 		ClientAudioSettings,
 		ClientGraphicsSettings,
@@ -249,6 +250,7 @@
 	} from "./settings/settings-contract";
 	import {
 		clientAudioSettingsSchema,
+		clientCameraSettingsSchema,
 		clientGraphicsSettingsSchema,
 		clientNameplateSettingsSchema,
 		clientUiSettingsSchema,
@@ -1128,6 +1130,38 @@
 		changeUserSection("nameplates", accepted);
 		gameplayPresentation?.setNameplateMode(accepted.mode);
 	}
+	const reducedMotionQuery = window.matchMedia(
+		"(prefers-reduced-motion: reduce)",
+	);
+	let reducedMotion = reducedMotionQuery.matches;
+	function effectiveIdleOrbitDelayMs(camera: ClientCameraSettings): number {
+		return reducedMotion ? 0 : camera.idleOrbitDelaySeconds * 1_000;
+	}
+	onMount(() => {
+		const sync = (): void => {
+			reducedMotion = reducedMotionQuery.matches;
+			gameplayPresentation?.setIdleOrbitDelayMs(
+				effectiveIdleOrbitDelayMs(userSettings.camera),
+				performance.now(),
+				{ immediate: reducedMotion },
+			);
+		};
+		reducedMotionQuery.addEventListener("change", sync);
+		return () => reducedMotionQuery.removeEventListener("change", sync);
+	});
+	function changeCamera(camera: ClientCameraSettings): void {
+		const accepted = clientCameraSettingsSchema.parse(camera);
+		if (
+			accepted.idleOrbitDelaySeconds ===
+			userSettings.camera.idleOrbitDelaySeconds
+		)
+			return;
+		changeUserSection("camera", accepted);
+		gameplayPresentation?.setIdleOrbitDelayMs(
+			effectiveIdleOrbitDelayMs(accepted),
+			performance.now(),
+		);
+	}
 	function changeGraphics(graphics: ClientGraphicsSettings): void {
 		const accepted = clientGraphicsSettingsSchema.parse(graphics);
 		const previous = userSettings.graphics;
@@ -1251,6 +1285,7 @@
 		if (edge.kind !== "reset") {
 			postureController?.forget();
 			facingInput?.flush();
+			cameraController?.noteWorldActivity(performance.now());
 		}
 		if (edge.kind === "begin-jump") {
 			activeJumpBeginSequence = edge.sequence;
@@ -2119,6 +2154,9 @@
 					resources,
 					session: currentSession,
 					nameplateMode: untrack(() => userSettings.nameplates.mode),
+					idleOrbitDelayMs: effectiveIdleOrbitDelayMs(
+						untrack(() => userSettings.camera),
+					),
 					trackedAlertGuids: () =>
 						nearby?.trackedGuids() ?? EMPTY_TRACKED_GUIDS,
 					sampleImmediateTargetCandidates: (frame) =>
@@ -2914,6 +2952,10 @@
 		onLockInteractionsChange(settings) {
 			changeUserSection("lockInteractions", settings);
 		},
+		get camera() {
+			return userSettings.camera;
+		},
+		onCameraChange: changeCamera,
 		get chatSuppression() {
 			return userSettings.chatSuppression;
 		},

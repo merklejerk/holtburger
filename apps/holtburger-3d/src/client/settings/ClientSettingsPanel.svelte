@@ -2,6 +2,7 @@
 	import { type InputPlatform } from "../../lib/input/input-platform";
 
 	import type {
+		ClientCameraSettings,
 		ClientChatSuppressionSettings,
 		ClientLockInteractionSettings,
 	} from "./settings-contract";
@@ -52,6 +53,7 @@
 		ClientUiSettings,
 	} from "./settings-contract";
 	import {
+		CLIENT_IDLE_CAMERA_ORBIT_DELAY_SECONDS,
 		CLIENT_VITAL_WARNING_PERCENT,
 		CLIENT_VITAL_WARNING_KINDS,
 	} from "./settings-values";
@@ -80,6 +82,9 @@
 		readonly onChatSuppressionChange: (
 			settings: ClientChatSuppressionSettings,
 		) => void;
+		/** Local gameplay camera preferences. */
+		readonly camera: ClientCameraSettings;
+		readonly onCameraChange: (settings: ClientCameraSettings) => void;
 		/** Server-saved gameplay choices and current character admission. */
 		readonly gameplayPreferences: ClientGameplayPreferences | null;
 		readonly gameplayEnabled: boolean;
@@ -119,6 +124,8 @@
 	let {
 		lockInteractions,
 		onLockInteractionsChange,
+		camera,
+		onCameraChange,
 		chatSuppression,
 		onChatSuppressionChange,
 		gameplayPreferences,
@@ -451,6 +458,27 @@
 			active={selectedTab === "ui"}
 		>
 			<div class="settings-section">
+				<fieldset class="ui-fieldset ui-fieldset-section">
+					<legend>Camera</legend>
+					<div class="ui-fieldset-body settings-section">
+						<label
+							>Idle orbit timeout: {camera.idleOrbitDelaySeconds === 0
+								? "Off"
+								: `${camera.idleOrbitDelaySeconds}s`}
+							<UiRange
+								aria-label="Idle orbit timeout"
+								min={CLIENT_IDLE_CAMERA_ORBIT_DELAY_SECONDS.minimum}
+								max={CLIENT_IDLE_CAMERA_ORBIT_DELAY_SECONDS.maximum}
+								step={CLIENT_IDLE_CAMERA_ORBIT_DELAY_SECONDS.step}
+								value={camera.idleOrbitDelaySeconds}
+								oninput={(event) =>
+									onCameraChange({
+										idleOrbitDelaySeconds: event.currentTarget.valueAsNumber,
+									})}
+							/>
+						</label>
+					</div>
+				</fieldset>
 				<details class="ui-disclosure ui-disclosure-section" open>
 					<summary>Display</summary>
 					<div class="settings-section ui-disclosure-body">

@@ -529,6 +529,11 @@ export class ClientCombatAndOverlayPresenter {
 		this.#barberPreview = preview;
 	}
 
+	/** Active barber appearance editing suppresses idle camera orbit. */
+	hasActiveBarberPreview(): boolean {
+		return this.#barberPreview !== null;
+	}
+
 	async reconcileBarberPresentation(
 		snapshot: BarberSnapshot,
 		playerGuid: number | null,

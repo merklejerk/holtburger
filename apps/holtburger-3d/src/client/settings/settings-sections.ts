@@ -23,6 +23,7 @@ export const clientUserSectionSchemas = {
 	chatTimestamps: userShape.chatTimestamps,
 	chatSuppression: userShape.chatSuppression,
 	lockInteractions: userShape.lockInteractions,
+	camera: userShape.camera,
 	recentEmotes: userShape.recentEmotes,
 	graphics: userShape.graphics,
 	nameplates: userShape.nameplates,

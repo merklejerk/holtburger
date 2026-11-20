@@ -67,6 +67,22 @@ export interface PossessionCameraRecenterPolicy {
 	readonly durationMs: number;
 }
 
+/** Optional motion profile for a possessed third-person camera's horizontal idle orbit. */
+export interface PossessionCameraIdleOrbitPolicy {
+	/** Steady-state horizontal yaw velocity after ease-in, in radians per second. */
+	readonly angularSpeedRadiansPerSecond: number;
+	/** Smooth ramp duration from zero angular speed to full speed, in milliseconds. */
+	readonly easeInDurationMs: number;
+	/** Smooth return duration back to the pre-idle yaw on non-camera wake, in milliseconds. */
+	readonly returnDurationMs: number;
+}
+
+/** Per-frame world-activity context consumed by camera policy advancement. */
+export interface PossessionCameraAdvanceOptions {
+	/** Suppresses idle-orbit arming and wakes an active idle orbit with a smooth return. */
+	readonly idleBlocked?: boolean;
+}
+
 /** Lifecycle states for the sticky rear-facing policy. */
 type PossessionCameraRecenterState =
 	| { readonly kind: "free" }
@@ -77,6 +93,24 @@ type PossessionCameraRecenterState =
 			readonly startedAtMs: number;
 	  }
 	| { readonly kind: "pinned" };
+
+/** Lifecycle states for the optional world-idle horizontal orbit. */
+type PossessionCameraIdleOrbitState =
+	| { readonly kind: "inactive" }
+	| { readonly kind: "armed"; readonly deadlineMs: number }
+	| {
+			readonly kind: "orbiting";
+			readonly startedAtMs: number;
+			readonly originYawRadians: number;
+			readonly originWasPinned: boolean;
+	  }
+	| {
+			readonly kind: "returning";
+			readonly fromYawRadians: number;
+			readonly targetYawRadians: number;
+			readonly startedAtMs: number;
+			readonly restorePinned: boolean;
+	  };
 
 const REAR_ALIGNMENT_EPSILON_RADIANS = 1e-9;
 
@@ -90,6 +124,7 @@ export class PossessionCameraController<
 	readonly #look: CameraLookController;
 	readonly #orbit: PossessionCameraOrbitPolicy;
 	readonly #recenter: PossessionCameraRecenterPolicy;
+	readonly #idleOrbit: PossessionCameraIdleOrbitPolicy | null;
 	readonly #session: PossessionCameraBoomSession<
 		Target,
 		Tick,
@@ -102,6 +137,10 @@ export class PossessionCameraController<
 	#orbitHeld = false;
 	/** Explicit state prevents an armed dwell, transition, and pin from coexisting. */
 	#recenterState: PossessionCameraRecenterState = { kind: "free" };
+	/** Idle dwell in milliseconds before orbit starts; zero disables idle orbit. */
+	#idleOrbitDelayMs: number;
+	/** Explicit state separates idle dwell, active orbiting, and smooth return. */
+	#idleOrbitState: PossessionCameraIdleOrbitState = { kind: "inactive" };
 	#pendingZoomDisplacement = 0;
 	/** Last queued input, recorded before async transport so idle frames queue no work. */
 	#queuedLook: CameraLook | null = null;
@@ -114,6 +153,8 @@ export class PossessionCameraController<
 		readonly initialLook: CameraLook;
 		readonly orbit: PossessionCameraOrbitPolicy;
 		readonly recenter: PossessionCameraRecenterPolicy;
+		readonly idleOrbit?: PossessionCameraIdleOrbitPolicy;
+		readonly idleOrbitDelayMs?: number;
 		readonly transport?: HostKinematicBoomTransport;
 		readonly session?: PossessionCameraBoomSession<
 			Target,
@@ -124,9 +165,25 @@ export class PossessionCameraController<
 	}) {
 		validateOrbitPolicy(options.orbit);
 		validateRecenterPolicy(options.recenter);
+		if (options.idleOrbit !== undefined) {
+			validateIdleOrbitPolicy(options.idleOrbit);
+		}
+		const idleOrbitDelayMs = options.idleOrbitDelayMs ?? 0;
+		assertValidIdleOrbitDelay(idleOrbitDelayMs);
 		this.#look = new CameraLookController(options.initialLook);
 		this.#orbit = { ...options.orbit };
 		this.#recenter = { ...options.recenter };
+		this.#idleOrbit =
+			options.idleOrbit === undefined
+				? null
+				: {
+						angularSpeedRadiansPerSecond:
+							options.idleOrbit.angularSpeedRadiansPerSecond,
+						easeInDurationMs: options.idleOrbit.easeInDurationMs,
+						returnDurationMs: options.idleOrbit.returnDurationMs,
+					};
+		this.#idleOrbitDelayMs =
+			options.idleOrbit === undefined ? 0 : idleOrbitDelayMs;
 		if (options.session !== undefined) {
 			this.#session = options.session;
 		} else {
@@ -154,6 +211,7 @@ export class PossessionCameraController<
 	): Promise<void> {
 		this.#sessionGeneration += 1;
 		this.#resetRecenter();
+		this.#cancelIdleOrbitInPlace();
 		this.#queuedLook = null;
 		this.#queuedProjectionRevision = null;
 		return this.#session.start(
@@ -167,6 +225,7 @@ export class PossessionCameraController<
 	/** Rotate desired orbit from semantic pointer deltas. */
 	orbit(deltaX: number, deltaY: number, nowMs: number): CameraLook {
 		assertFiniteTimestamp(nowMs);
+		this.#cancelIdleOrbitInPlace();
 		this.#rearmRecenter(nowMs);
 		return this.#look.rotate(
 			deltaX,
@@ -191,6 +250,7 @@ export class PossessionCameraController<
 	/** Release automatic rear-follow for the whole hold; release begins a fresh movement dwell. */
 	setOrbitHeld(held: boolean, nowMs: number): void {
 		assertFiniteTimestamp(nowMs);
+		if (held) this.#cancelIdleOrbitInPlace();
 		if (held === this.#orbitHeld) return;
 		this.#orbitHeld = held;
 		this.#rearmRecenter(nowMs);
@@ -199,6 +259,7 @@ export class PossessionCameraController<
 	/** Enter sticky rear-follow explicitly, bypassing the translation dwell. */
 	followRear(nowMs: number): void {
 		assertFiniteTimestamp(nowMs);
+		this.#cancelIdleOrbitInPlace();
 		if (this.#recenterState.kind === "pinned") return;
 		this.#recenterState =
 			this.#recenter.durationMs === 0
@@ -213,12 +274,45 @@ export class PossessionCameraController<
 	/** Seed a new target's facing without carrying orbit or recenter state across generations. */
 	replaceLook(look: CameraLook): CameraLook {
 		this.#resetRecenter();
+		this.#cancelIdleOrbitInPlace();
 		return this.#look.replace(look);
+	}
+
+	/** Set idle-orbit dwell in milliseconds; zero disables it (`immediate` stops without returning). */
+	setIdleOrbitDelayMs(
+		delayMs: number,
+		nowMs: number,
+		options?: { readonly immediate?: boolean },
+	): void {
+		assertValidIdleOrbitDelay(delayMs);
+		assertFiniteTimestamp(nowMs);
+		if (this.#idleOrbit === null) return;
+		if (delayMs === 0 && options?.immediate === true) {
+			this.#idleOrbitDelayMs = 0;
+			this.#cancelIdleOrbitInPlace();
+			return;
+		}
+		if (delayMs === this.#idleOrbitDelayMs) return;
+		this.#idleOrbitDelayMs = delayMs;
+		if (delayMs === 0) {
+			this.#wakeIdleOrbit(nowMs);
+			return;
+		}
+		if (this.#idleOrbitState.kind === "armed") {
+			this.#idleOrbitState = { kind: "inactive" };
+		}
+	}
+
+	/** Record one-shot world activity (such as jump input) to wake idle orbit. */
+	noteWorldActivity(nowMs: number): void {
+		assertFiniteTimestamp(nowMs);
+		this.#wakeIdleOrbit(nowMs);
 	}
 
 	/** Arms or disarms the rear-facing dwell from semantic translation intent. */
 	setTranslationIntent(active: boolean, nowMs: number): void {
 		assertFiniteTimestamp(nowMs);
+		if (active) this.#wakeIdleOrbit(nowMs);
 		if (active === this.#translationActive) return;
 		this.#translationActive = active;
 		if (!active) {
@@ -229,7 +323,14 @@ export class PossessionCameraController<
 				this.#recenterState = { kind: "free" };
 			return;
 		}
-		if (!this.#orbitHeld && this.#recenterState.kind === "free")
+		if (
+			!this.#orbitHeld &&
+			this.#recenterState.kind === "free" &&
+			!(
+				this.#idleOrbitState.kind === "returning" &&
+				this.#idleOrbitState.restorePinned
+			)
+		)
 			this.#recenterState = {
 				kind: "arming",
 				deadlineMs: nowMs + this.#recenter.delayMs,
@@ -241,17 +342,27 @@ export class PossessionCameraController<
 		if (!Number.isFinite(displacement)) {
 			throw new Error("Possession camera zoom displacement must be finite.");
 		}
+		if (displacement !== 0) this.#cancelIdleOrbitInPlace();
 		this.#pendingZoomDisplacement += displacement;
 		if (!Number.isFinite(this.#pendingZoomDisplacement)) {
 			throw new Error("Possession camera zoom displacement overflowed.");
 		}
 	}
 
-	/** Advance rear-follow synchronously so a pending IPC cannot delay the visible camera pose. */
-	advance(nowMs: number, targetFacingYawRadians: number): void {
+	/** Advance rear-follow and idle orbit synchronously so pending IPC cannot delay visible yaw. */
+	advance(
+		nowMs: number,
+		targetFacingYawRadians: number,
+		options?: PossessionCameraAdvanceOptions,
+	): void {
 		assertFiniteTimestamp(nowMs);
 		assertFiniteYaw(targetFacingYawRadians);
 		this.#advanceRecenter(nowMs, targetFacingYawRadians);
+		this.#advanceIdleOrbit(
+			nowMs,
+			targetFacingYawRadians,
+			options?.idleBlocked === true,
+		);
 	}
 
 	/** Capture changed input once; the returned submission may be serialized by the caller. */
@@ -300,8 +411,9 @@ export class PossessionCameraController<
 		projection: ProjectionClearanceRevision,
 		nowMs: number,
 		targetFacingYawRadians: number,
+		options?: PossessionCameraAdvanceOptions,
 	): Promise<void> {
-		this.advance(nowMs, targetFacingYawRadians);
+		this.advance(nowMs, targetFacingYawRadians, options);
 		return this.queueSynchronization(projection)?.() ?? Promise.resolve();
 	}
 
@@ -333,6 +445,7 @@ export class PossessionCameraController<
 		this.#queuedProjectionRevision = null;
 		this.#orbitHeld = false;
 		this.#resetRecenter();
+		this.#cancelIdleOrbitInPlace();
 		return this.#session.stop();
 	}
 
@@ -402,19 +515,135 @@ export class PossessionCameraController<
 			Math.abs(shortestYawDelta(fromYawRadians, targetYawRadians)) <=
 			REAR_ALIGNMENT_EPSILON_RADIANS
 		) {
+			this.#cancelIdleOrbitInPlace();
 			this.#pinRear(targetYawRadians);
 			return;
 		}
 		if (this.#recenter.durationMs === 0) {
+			this.#cancelIdleOrbitInPlace();
 			this.#pinRear(targetYawRadians);
 			return;
 		}
+		// Active rear-recenter takes exclusive yaw ownership from any in-flight idle return.
+		this.#cancelIdleOrbitInPlace();
 		this.#recenterState = {
 			kind: "transition",
 			fromYawRadians,
 			startedAtMs: state.deadlineMs,
 		};
 		this.#advanceRecenter(nowMs, targetYawRadians);
+	}
+
+	#cancelIdleOrbitInPlace(): void {
+		this.#idleOrbitState = { kind: "inactive" };
+	}
+
+	#wakeIdleOrbit(nowMs: number): void {
+		const policy = this.#idleOrbit;
+		if (policy === null) return;
+		const state = this.#idleOrbitState;
+		if (state.kind === "armed") {
+			this.#idleOrbitState = { kind: "inactive" };
+			return;
+		}
+		if (state.kind !== "orbiting") return;
+		const currentYaw = normalizeYaw(this.#look.snapshot().yawRadians);
+		const targetYaw = normalizeYaw(state.originYawRadians);
+		if (
+			policy.returnDurationMs === 0 ||
+			Math.abs(shortestYawDelta(currentYaw, targetYaw)) <=
+				REAR_ALIGNMENT_EPSILON_RADIANS
+		) {
+			this.#idleOrbitState = { kind: "inactive" };
+			this.#replaceYaw(targetYaw);
+			if (
+				state.originWasPinned &&
+				!this.#orbitHeld &&
+				this.#recenterState.kind !== "transition"
+			) {
+				this.#recenterState = { kind: "pinned" };
+			}
+			return;
+		}
+		this.#idleOrbitState = {
+			kind: "returning",
+			fromYawRadians: currentYaw,
+			targetYawRadians: targetYaw,
+			startedAtMs: nowMs,
+			restorePinned: state.originWasPinned,
+		};
+	}
+
+	#advanceIdleOrbit(
+		nowMs: number,
+		targetFacingYawRadians: number,
+		idleBlocked: boolean,
+	): void {
+		const policy = this.#idleOrbit;
+		if (policy === null) return;
+		const state = this.#idleOrbitState;
+		if (state.kind === "returning") {
+			const targetYaw = state.restorePinned
+				? normalizeYaw(targetFacingYawRadians)
+				: state.targetYawRadians;
+			// Returning state is only entered when returnDurationMs > 0.
+			const progress = clamp(
+				(nowMs - state.startedAtMs) / policy.returnDurationMs,
+				0,
+				1,
+			);
+			const easedProgress = progress * progress * (3 - 2 * progress);
+			const yaw = normalizeYaw(
+				state.fromYawRadians +
+					shortestYawDelta(state.fromYawRadians, targetYaw) * easedProgress,
+			);
+			this.#replaceYaw(yaw);
+			if (progress >= 1) {
+				this.#idleOrbitState = { kind: "inactive" };
+				if (state.restorePinned) this.#pinRear(targetYaw);
+			}
+			return;
+		}
+		const blocked =
+			this.#idleOrbitDelayMs === 0 ||
+			idleBlocked ||
+			this.#orbitHeld ||
+			this.#translationActive ||
+			this.#recenterState.kind === "arming" ||
+			this.#recenterState.kind === "transition";
+		if (blocked) {
+			this.#wakeIdleOrbit(nowMs);
+			// Zero-duration return that restored rear-pin should align immediately with current facing.
+			if (state.kind === "orbiting" && this.#recenterState.kind === "pinned") {
+				this.#replaceYaw(normalizeYaw(targetFacingYawRadians));
+			}
+			return;
+		}
+		if (state.kind === "inactive") {
+			this.#idleOrbitState = {
+				kind: "armed",
+				deadlineMs: nowMs + this.#idleOrbitDelayMs,
+			};
+			return;
+		}
+		if (state.kind === "armed") {
+			if (nowMs < state.deadlineMs) return;
+			// Capture and release sticky rear-pin so neither pinned follow nor followRear fights orbit.
+			const originYawRadians = normalizeYaw(this.#look.snapshot().yawRadians);
+			const originWasPinned = this.#recenterState.kind === "pinned";
+			this.#recenterState = { kind: "free" };
+			// Stamp start to nowMs rather than deadlineMs so resume from sleep always eases in from rest.
+			this.#idleOrbitState = {
+				kind: "orbiting",
+				startedAtMs: nowMs,
+				originYawRadians,
+				originWasPinned,
+			};
+			return;
+		}
+		const elapsedSeconds = Math.max(0, nowMs - state.startedAtMs) / 1_000;
+		const deltaYaw = idleOrbitAngleOffset(elapsedSeconds, policy);
+		this.#replaceYaw(normalizeYaw(state.originYawRadians + deltaYaw));
 	}
 
 	#pinRear(yawRadians: number): void {
@@ -427,6 +656,46 @@ export class PossessionCameraController<
 			...this.#look.snapshot(),
 			yawRadians,
 		});
+	}
+}
+
+/** Closed-form integral of smoothstep angular velocity from rest to steady orbit speed. */
+function idleOrbitAngleOffset(
+	elapsedSeconds: number,
+	policy: PossessionCameraIdleOrbitPolicy,
+): number {
+	const rampSeconds = policy.easeInDurationMs / 1_000;
+	const speed = policy.angularSpeedRadiansPerSecond;
+	if (rampSeconds <= 0) return speed * elapsedSeconds;
+	if (elapsedSeconds < rampSeconds) {
+		const u = elapsedSeconds / rampSeconds;
+		return speed * rampSeconds * (u * u * u - 0.5 * u * u * u * u);
+	}
+	return speed * (elapsedSeconds - 0.5 * rampSeconds);
+}
+
+function validateIdleOrbitPolicy(
+	policy: PossessionCameraIdleOrbitPolicy,
+): void {
+	if (
+		!Number.isFinite(policy.angularSpeedRadiansPerSecond) ||
+		policy.angularSpeedRadiansPerSecond === 0 ||
+		!Number.isFinite(policy.easeInDurationMs) ||
+		policy.easeInDurationMs < 0 ||
+		!Number.isFinite(policy.returnDurationMs) ||
+		policy.returnDurationMs < 0
+	) {
+		throw new Error(
+			"Possession camera idle orbit policy requires finite non-negative durations and non-zero speed.",
+		);
+	}
+}
+
+function assertValidIdleOrbitDelay(delayMs: number): void {
+	if (!Number.isFinite(delayMs) || delayMs < 0) {
+		throw new Error(
+			"Possession camera idle orbit delay must be finite and non-negative.",
+		);
 	}
 }
 

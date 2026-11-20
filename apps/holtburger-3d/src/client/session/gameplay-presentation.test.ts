@@ -2252,6 +2252,147 @@ describe("ClientGameplayPresentation", () => {
 		);
 		expect(runtime.nameplateDecoration.get(distantItemGuid)).toBeUndefined();
 	});
+
+	it("orbits camera horizontally when world-idle (including combat stance) and smoothly returns on root movement", async () => {
+		const runtime = new FakePresentationRuntime();
+		const owner = fakeOwner(runtime, activeRegion());
+		const { transport, presentation } = await setupPresentation({
+			state: currentState(0x0101_0001),
+			runtime,
+			resources: owner,
+		});
+		const idle = CLIENT_TUNING.camera.idleOrbit;
+		const delayMs = 5_000;
+		const startMs = 1_000;
+		presentation.setIdleOrbitDelayMs(delayMs, startMs);
+		transport.emit("client-combat-mode-changed", { mode: "melee" });
+		await vi.waitFor(() => {
+			expect(presentation.frame(startMs).rendered).toBe(true);
+		});
+		const initialLook = presentation.camera.desiredLook();
+
+		// Enter orbiting at deadline and advance beyond ease-in so yaw shifts cleanly.
+		const orbitStartMs = startMs + delayMs;
+		expect(presentation.frame(orbitStartMs).rendered).toBe(true);
+		const orbitedMs = orbitStartMs + idle.easeInDurationMs + 1_000;
+		expect(presentation.frame(orbitedMs).rendered).toBe(true);
+		const orbitedLook = presentation.camera.desiredLook();
+		expect(orbitedLook.pitchRadians).toBe(initialLook.pitchRadians);
+		expect(orbitedLook.yawRadians).not.toBeCloseTo(initialLook.yawRadians, 4);
+
+		// Passive combat outcomes do not interrupt an active idle orbit.
+		transport.emit("client-combat-outcome", {
+			worldGeneration: 1,
+			attribution: { kind: "unplaced" },
+			outcome: { kind: "damage", amount: 5, criticalHit: false },
+		});
+		const afterOutcomeMs = orbitedMs + 500;
+		expect(presentation.frame(afterOutcomeMs).rendered).toBe(true);
+		expect(presentation.camera.desiredLook().yawRadians).not.toBeCloseTo(
+			orbitedLook.yawRadians,
+			4,
+		);
+
+		// Root movement (e.g. server-directed approach) wakes idle orbit and eases back.
+		runtime.dynamicOriginPosition = new Vec3(13.5, 3, -4);
+		expect(presentation.frame(afterOutcomeMs + 16).rendered).toBe(true);
+		expect(
+			presentation.frame(afterOutcomeMs + 16 + idle.returnDurationMs).rendered,
+		).toBe(true);
+		expect(presentation.camera.desiredLook().yawRadians).toBeCloseTo(
+			initialLook.yawRadians,
+			5,
+		);
+	});
+
+	it("suppresses idle orbit during active combat, spell casting, and precise jump, and honors immediate disable", async () => {
+		const runtime = new FakePresentationRuntime();
+		const owner = fakeOwner(runtime, activeRegion());
+		const { transport, presentation } = await setupPresentation({
+			state: currentState(0x0101_0001),
+			runtime,
+			resources: owner,
+		});
+		const idle = CLIENT_TUNING.camera.idleOrbit;
+		const delayMs = 5_000;
+		let nowMs = 1_000;
+		presentation.setIdleOrbitDelayMs(delayMs, nowMs);
+		await vi.waitFor(() => {
+			expect(presentation.frame(nowMs).rendered).toBe(true);
+		});
+		const initialYaw = presentation.camera.desiredLook().yawRadians;
+
+		// Active combat engagement suppresses idle orbit even past delayMs.
+		transport.emit("client-combat-status", {
+			processedIntentSequence: 1,
+			desired: {
+				target: 0x0101_0099,
+				profile: { kind: "melee", height: "medium", power: 0.5 },
+			},
+			state: "active",
+			refill: null,
+		});
+		nowMs += delayMs + idle.easeInDurationMs + 2_000;
+		expect(presentation.frame(nowMs).rendered).toBe(true);
+		expect(presentation.camera.desiredLook().yawRadians).toBeCloseTo(
+			initialYaw,
+			6,
+		);
+
+		// Clearing combat + starting a spell cast still suppresses idle orbit.
+		transport.emit("client-combat-status", {
+			processedIntentSequence: 2,
+			desired: null,
+			state: "idle",
+			refill: null,
+		});
+		transport.emit("client-spell-cast-target-updated", {
+			target: 0x0101_0099,
+		});
+		nowMs += delayMs + idle.easeInDurationMs + 2_000;
+		expect(presentation.frame(nowMs).rendered).toBe(true);
+		expect(presentation.camera.desiredLook().yawRadians).toBeCloseTo(
+			initialYaw,
+			6,
+		);
+
+		// Precise jump aiming suppresses idle orbit.
+		transport.emit("client-spell-cast-target-updated", { target: null });
+		presentation.setPreciseJumpPresentation({
+			active: true,
+			marker: null,
+			refreshing: false,
+		});
+		nowMs += delayMs + idle.easeInDurationMs + 2_000;
+		expect(presentation.frame(nowMs).rendered).toBe(true);
+		expect(presentation.camera.desiredLook().yawRadians).toBeCloseTo(
+			initialYaw,
+			6,
+		);
+
+		// Clearing precise jump allows orbit; immediate zero timeout (reduced motion) stops in place.
+		presentation.setPreciseJumpPresentation({
+			active: false,
+			marker: null,
+			refreshing: false,
+		});
+		nowMs += 16;
+		expect(presentation.frame(nowMs).rendered).toBe(true);
+		nowMs += delayMs;
+		expect(presentation.frame(nowMs).rendered).toBe(true);
+		nowMs += idle.easeInDurationMs + 1_000;
+		expect(presentation.frame(nowMs).rendered).toBe(true);
+		const orbitedYaw = presentation.camera.desiredLook().yawRadians;
+		expect(orbitedYaw).not.toBeCloseTo(initialYaw, 4);
+
+		presentation.setIdleOrbitDelayMs(0, nowMs, { immediate: true });
+		nowMs += idle.returnDurationMs + 500;
+		expect(presentation.frame(nowMs).rendered).toBe(true);
+		expect(presentation.camera.desiredLook().yawRadians).toBeCloseTo(
+			orbitedYaw,
+			6,
+		);
+	});
 });
 
 class FakePresentationRuntime implements ClientGameplayRuntime {
@@ -2294,6 +2435,7 @@ class FakePresentationRuntime implements ClientGameplayRuntime {
 	completedActivations: number[] = [];
 	realizationDisposition: DynamicEntityRealizationDisposition = "installed";
 	dynamicOriginEnvCellId: string | null = null;
+	dynamicOriginPosition = new Vec3(12, 3, -4);
 	entityFrame: DynamicEntityPresentationFrame | null = null;
 	entityPresentationState: DynamicEntityPresentationState | null = null;
 	nameplateDecoration = new Map<number, NameplateDecoration>();
@@ -2545,7 +2687,7 @@ class FakePresentationRuntime implements ClientGameplayRuntime {
 		return {
 			envCellId: this.dynamicOriginEnvCellId,
 			landblockId: "0x0100ffff",
-			landblockOrigin: new Vec3(12, 3, -4),
+			landblockOrigin: this.dynamicOriginPosition.clone(),
 			scope:
 				this.dynamicOriginEnvCellId === null
 					? { kind: "outdoor" }

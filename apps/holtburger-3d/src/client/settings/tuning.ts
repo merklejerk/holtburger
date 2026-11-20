@@ -235,6 +235,13 @@ export const CLIENT_TUNING = {
 			delayMs: 350,
 			durationMs: 180,
 		},
+		idleOrbit: {
+			angularSpeedRadiansPerSecond: 0.08,
+			easeInDurationMs: 2_500,
+			returnDurationMs: 450,
+			positionThresholdMeters: 1e-3,
+			yawThresholdRadians: 1e-3,
+		},
 	},
 	preciseJump: {
 		/** Explicit power selected on first entry; kept while aiming. */

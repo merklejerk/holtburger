@@ -2,8 +2,11 @@ Holtburger beta includes the 3D client and the terminal client (CLI).
 
 ## In this beta
 
-- **3D client, alerts:** Alerting entities now show a star crest on their nameplate and a glowing beacon in the world, so threats are easier to spot at a distance.
-- **3D client, animation:** Characters can now move and blend upper-body animation while switching stances and performing manual gestures.
+- **3D client, themes:** Two new bundled UI themes, Obsidian Forge and Berry Pop Neko, are available, with matching compass and combat styling.
+- **3D client, camera:** The camera now slowly orbits your character after a period of inactivity; adjust or turn this off with the Idle orbit timeout setting under Camera in the UI settings.
+- **3D client, targeting:** Smart Tab can now target corpses when no other target is available.
+- **Spellcasting:** A spell cast while another action is in progress is now queued and cast automatically when that action ends.
+- **Movement:** Characters and other entities recover more reliably from malformed position and movement data sent by a server.
 
 ## Known issues
 

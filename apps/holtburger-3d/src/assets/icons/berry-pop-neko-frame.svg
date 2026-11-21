@@ -1,9 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96">
-  <!-- Nine-slice at 32 source pixels (rendered 1:1 at 32px with 10px outset on panels,
-       and 24px with 7.5px outset on compact HUDs). The straight candy rails align with
-       coordinate 10 so they hug the box edge flush while asymmetric charms (paw print
-       top-left, golden neko bell bottom-right, dainty sparkles on opposing corners) accent
-       the frame cleanly without crowding headers or slots. -->
+  <!-- Nine-slice at 32 source pixels (rendered 1:1 at 32px with 10px outset on floating
+       HUD windows). The straight candy rails align with coordinate 10 so they hug the
+       window edge flush while asymmetric charms (paw print top-left, rotated golden neko
+       bell bottom-right, dainty sparkles on opposing corners) accent the frame cleanly. -->
   <defs>
     <linearGradient id="berry-rim" x1="0" y1="0" x2="1" y2="1">
       <stop stop-color="#ff8cc6"/>

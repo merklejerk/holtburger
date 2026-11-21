@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="48" height="24" viewBox="-2 0 48 24">
+  <!-- Symmetrical pair of cute pointed cat ears rolled slightly outward behind circular HUD icon buttons. -->
+  <defs>
+    <linearGradient id="btn-ear-fur" x1="0" y1="0" x2="0" y2="1">
+      <stop stop-color="#ffffff"/>
+      <stop offset="0.55" stop-color="#ffd6eb"/>
+      <stop offset="1" stop-color="#ff85c0"/>
+    </linearGradient>
+    <linearGradient id="btn-ear-inner" x1="0" y1="0" x2="0" y2="1">
+      <stop stop-color="#ff9ed0"/>
+      <stop offset="1" stop-color="#e8388d"/>
+    </linearGradient>
+  </defs>
+  <!-- Left ear rolled slightly outward -->
+  <g transform="rotate(-14 11 19)">
+    <path d="M 4.5 22 C 3.2 14 4.2 6.5 7.2 2.2 C 11.2 2.8 16.5 7.5 19.5 14.5 L 15 22 Z" fill="url(#btn-ear-fur)" stroke="#b8256c" stroke-width="1.8" stroke-linejoin="round"/>
+    <path d="M 7.5 19 C 7 13.5 7.6 8.5 9.2 6.2 C 11.8 7 15 10.2 16.8 14.8 L 12 19.5 Z" fill="url(#btn-ear-inner)"/>
+  </g>
+  <!-- Right ear rolled slightly outward -->
+  <g transform="rotate(14 33 19)">
+    <path d="M 39.5 22 C 40.8 14 39.8 6.5 36.8 2.2 C 32.8 2.8 27.5 7.5 24.5 14.5 L 29 22 Z" fill="url(#btn-ear-fur)" stroke="#b8256c" stroke-width="1.8" stroke-linejoin="round"/>
+    <path d="M 36.5 19 C 37 13.5 36.4 8.5 34.8 6.2 C 32.2 7 29 10.2 27.2 14.8 L 32 19.5 Z" fill="url(#btn-ear-inner)"/>
+  </g>
+</svg>

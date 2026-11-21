@@ -69,6 +69,7 @@
 			--ui-neko-north: url("../../assets/icons/berry-pop-neko-north.svg");
 			--ui-neko-ear: url("../../assets/icons/berry-pop-neko-ear.svg");
 			--ui-neko-bow: url("../../assets/icons/berry-pop-neko-bow.svg");
+			--ui-neko-button-ears: url("../../assets/icons/berry-pop-neko-button-ears.svg");
 			/* A crisp candy-gloss pearl highlight trims glossy strawberry headers. */
 			--ui-neko-gloss-seam: linear-gradient(
 					90deg,
@@ -82,6 +83,10 @@
 			--ui-neko-pressed-shadow:
 				inset 0 2px 3px #8c1a5459, inset 0 -1px #ffffff80, 0 0 0 1px #c92876b3;
 			--ui-neko-inset-shadow: inset 0 1px 3px #8c1a5438, 0 1px #ffffffcc;
+			/* Clean glossy pearl-and-bubblegum rail shared by HUDs, overlays, and non-window panels. */
+			--ui-neko-candy-rail:
+				0 0 0 1.5px #ffffffe6, 0 0 0 3.5px #ff5da8, 0 0 0 4.5px #b8256c,
+				0 4px 12px #4a123340;
 			/* Warm dark cocoa-berry foreground shared by glossy pink HUD icon buttons, buttons, and pills. */
 			--ui-neko-control-ink: #5c222e;
 			--ui-filter-pill-radius: 999px;
@@ -111,16 +116,8 @@
 		}
 
 		.ui-theme :is(.ui-panel:not(.hud-window), .ui-dialog) {
-			/* Nine-sliced bubblegum-pink and white frame with paw, bell, and sparkle corners
-			   paints around the 1px border without changing layout or covering translucency. */
-			border-image-source: var(--ui-neko-frame);
-			border-image-slice: 32;
-			border-image-width: 32px;
-			border-image-outset: var(--ui-window-frame-outset);
-			border-image-repeat: stretch;
-			box-shadow:
-				inset 0 0 0 1px #ffffff99,
-				0 4px 14px #4a123340;
+			/* Non-window panels and dialogs use the clean glossy candy rail without corner charms. */
+			box-shadow: var(--ui-neko-candy-rail);
 		}
 
 		/* Floating HUD windows paint their nine-slice frame in a foreground ::after layer
@@ -240,18 +237,10 @@
 				0 0 0 1px #d9a3bf99;
 		}
 
-		/* Compact overlays and the spell rail use the neko frame at a compact scale
-		   while keeping corner paw prints, bells, and sparkles clearly legible. */
+		/* Compact overlays and the spell rail use the clean glossy candy rail without corner charms. */
 		.ui-theme .ui-overlay-surface:not(.ui-dialog),
 		.ui-theme .spell-rail::before {
-			border-image-source: var(--ui-neko-frame);
-			border-image-slice: 32;
-			border-image-width: 24px;
-			border-image-outset: 7.5px;
-			border-image-repeat: stretch;
-			box-shadow:
-				inset 0 0 0 1px #ffffff99,
-				0 4px 12px #4a123338;
+			box-shadow: var(--ui-neko-candy-rail);
 		}
 
 		.ui-theme :is(.ui-input, select):not(.ui-hud-input) {
@@ -434,6 +423,7 @@
 			--ui-neko-icon-face:
 				radial-gradient(circle at 32% 24%, #ffffffeb, transparent 52%),
 				radial-gradient(circle at 50% 65%, #ffd6eb, #ff99cc 65%, #ff6eb4);
+			overflow: visible;
 			border-radius: 50%;
 			background-image: none;
 			color: var(--ui-neko-control-ink);
@@ -457,6 +447,20 @@
 				inset 0 0 0 1px #ff85c0;
 		}
 
+		/* Cute cat-ear silhouette peeking behind each circular HUD icon button. */
+		.ui-theme button.ui-hud-button::after {
+			content: "";
+			position: absolute;
+			inset: -20% -6% auto;
+			height: 58%;
+			z-index: -2;
+			pointer-events: none;
+			background: var(--ui-neko-button-ears) center top / 100% 100% no-repeat;
+		}
+		.ui-theme .emote-wheel button.ui-hud-button::after {
+			content: none;
+		}
+
 		.ui-theme
 			button:is(.ui-hud-button, .ui-hud-control):where(
 				:not(.ui-item-cell, .ui-readout, .party-member, .spell-tab)
@@ -475,6 +479,9 @@
 				0 0 0 1.5px #ff2e93,
 				0 0 10px #ff5da899;
 		}
+		.ui-theme button.ui-hud-button:where(:hover:not(:disabled))::after {
+			filter: brightness(1.06) drop-shadow(0 0 3px #ff5da8aa);
+		}
 
 		.ui-theme
 			button.ui-hud-button:where(
@@ -487,11 +494,21 @@
 				inset 0 1px 3px #8c1a5499,
 				0 0 0 1px #ff2e93;
 		}
+		.ui-theme
+			button.ui-hud-button:where(
+				:active:not(:disabled),
+				[aria-pressed="true"]:not(:disabled)
+			)::after {
+			filter: saturate(1.25) brightness(0.92);
+		}
 
 		.ui-theme button.ui-hud-button:where(:disabled) {
 			--ui-neko-icon-face: linear-gradient(180deg, #f7e6ee, #e6ceda);
 			color: #a37890;
 			box-shadow: inset 0 0 0 1px #d9a3bf;
+		}
+		.ui-theme button.ui-hud-button:where(:disabled)::after {
+			filter: grayscale(0.6) opacity(0.65);
 		}
 
 		.ui-theme button.ui-item-strip-arrow {
@@ -534,8 +551,8 @@
 				inset 0 -1px #6e164238;
 		}
 
-		/* Shared glossy bubblegum-pink neko frames paint in a foreground ::after overlay
-		   on HUDs and action bars so corner paws, bells, and sparkles never clip behind children. */
+		/* Compact HUDs and action bars use the clean glossy candy rail; paw and bell corner
+		   charms are reserved for floating HUD windows. */
 		.ui-theme
 			:is(
 				.character-hud,
@@ -544,30 +561,7 @@
 				.chat-panel.interactive,
 				.action-bar
 			) {
-			position: relative;
-			box-shadow:
-				0 0 0 1px #ffffff80,
-				0 3px 10px #4a123338;
-		}
-		.ui-theme
-			:is(
-				.character-hud,
-				.selected-entity,
-				.party-member,
-				.chat-panel.interactive,
-				.action-bar
-			)::after {
-			content: "";
-			position: absolute;
-			inset: 0;
-			z-index: 3;
-			pointer-events: none;
-			border: 0 solid transparent;
-			border-image-source: var(--ui-neko-frame);
-			border-image-slice: 32;
-			border-image-width: 24px;
-			border-image-outset: 7.5px;
-			border-image-repeat: stretch;
+			box-shadow: var(--ui-neko-candy-rail);
 		}
 
 		.ui-theme
@@ -637,6 +631,7 @@
 		.ui-theme
 			:is(
 				.character-hud .identity-block .ui-readout,
+				.selected-entity__heading,
 				.party-member__name
 			)::before {
 			content: none;
@@ -679,9 +674,9 @@
 				0 0 6px #ffeef6cc;
 		}
 
-		/* Plush anime cat ears tucked behind both the target bar foreground frame and header. */
+		/* Plush anime cat ears tucked behind both the target bar rail and header. */
 		.ui-theme .selected-entity::before,
-		.ui-theme .selected-entity__heading::before {
+		.ui-theme .selected-entity::after {
 			content: "";
 			position: absolute;
 			top: -38px;
@@ -694,17 +689,11 @@
 		.ui-theme .selected-entity::before {
 			left: -10px;
 		}
-		.ui-theme .selected-entity__heading::before {
-			inset: auto;
-			top: -38px;
+		.ui-theme .selected-entity::after {
 			right: -10px;
-			border-radius: 0;
-			backdrop-filter: none;
-			mask-image: none;
-			box-shadow: none;
 			transform: scaleX(-1);
 		}
-		/* Ribbon bow sits cleanly above both the right ear and the foreground neko frame. */
+		/* Ribbon bow sits cleanly above both the right ear and the target bar rail. */
 		.ui-theme .selected-entity__heading::after {
 			content: "";
 			position: absolute;

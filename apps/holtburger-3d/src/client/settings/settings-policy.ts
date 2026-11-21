@@ -1,27 +1,6 @@
 import type { FrameSettings } from "../../lib/game/renderer/renderer";
 import type { SceneInterestRadii } from "../../lib/game/runtime/types";
-import type {
-	ClientGraphicsSettings,
-	ClientNameplateSettings,
-} from "./settings-contract";
-import { SHARED_FRAME_SETTINGS } from "../../lib/frontend-frame-settings.js";
-
-/** Absence defaults composed from shared rendering policy and client-only view choices. */
-export const CLIENT_GRAPHICS_DEFAULTS = {
-	viewDistance: 6,
-	sealedInteriorAmbientLevel: SHARED_FRAME_SETTINGS.sealedInteriorAmbientLevel,
-	ambientOcclusionEnabled: SHARED_FRAME_SETTINGS.ambientOcclusion.enabled,
-	entityShadowMode: SHARED_FRAME_SETTINGS.entityShadows.mode,
-	verticalFovDegrees: 75,
-	textureFiltering: SHARED_FRAME_SETTINGS.quality.textureFiltering,
-	renderScale: SHARED_FRAME_SETTINGS.quality.renderScale,
-	weatherEnabled: SHARED_FRAME_SETTINGS.weatherEnabled,
-} as const satisfies ClientGraphicsSettings;
-
-/** Smart Nameplates are the default cutover mode for new and upgraded installs. */
-export const CLIENT_NAMEPLATE_DEFAULTS = {
-	mode: "smart",
-} as const satisfies ClientNameplateSettings;
+import type { ClientGraphicsSettings } from "./settings-contract";
 
 const EXPLICIT_OBJECT_RADIUS_CAP = 1;
 const GENERATED_OBJECT_RADIUS_CAP = 2;

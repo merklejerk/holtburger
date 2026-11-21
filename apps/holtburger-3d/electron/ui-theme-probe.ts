@@ -4,7 +4,7 @@ import { join, resolve } from "node:path";
 import assert from "node:assert/strict";
 import { once } from "node:events";
 import { TRAVELERS_KIT_THEME_ID } from "../src/app/theme/ui-theme-contract.js";
-import { CLIENT_DEFAULT_THEME_ID } from "../src/client/settings/settings-values.js";
+import { CLIENT_DEFAULT_THEME_ID } from "../src/client/settings/settings-defaults.js";
 import { clientUserSettingsPatchSchema } from "../src/client/settings/settings-sections.js";
 import { z } from "zod";
 import { ClientSettingsStore } from "./client-settings-store.js";

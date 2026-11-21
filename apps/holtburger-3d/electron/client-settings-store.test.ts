@@ -6,6 +6,11 @@ import * as replacement from "./replace-local-file";
 import { ClientSettingsStore } from "./client-settings-store";
 import {
 	CLIENT_AUDIO_DEFAULTS,
+	CLIENT_DEFAULT_THEME_ID,
+	CLIENT_HUD_WINDOW_OPACITY,
+	CLIENT_IDLE_CAMERA_ORBIT_DELAY_SECONDS,
+	CLIENT_TEXT_SCALE,
+	CLIENT_UI_SCALE,
 	createDefaultClientCharacterSettings,
 	createDefaultClientUserSettings,
 } from "../src/client/settings/settings-defaults";
@@ -20,13 +25,6 @@ import { clientWeatherPresets } from "../src/client/settings/environment";
 import { EQUIPMENT_SLOTS } from "../src/client/inventory/inventory-equipment";
 import { loadoutActionContentSchema } from "../src/client/inventory/loadout";
 import { bindActionCell } from "../src/client/hud/action-bar-state";
-import {
-	CLIENT_IDLE_CAMERA_ORBIT_DELAY_SECONDS,
-	CLIENT_UI_SCALE,
-	CLIENT_HUD_WINDOW_OPACITY,
-	CLIENT_DEFAULT_THEME_ID,
-	CLIENT_TEXT_SCALE,
-} from "../src/client/settings/settings-values";
 
 const userContext = {
 	viewport: { width: 1440, height: 900 },

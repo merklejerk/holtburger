@@ -2,8 +2,10 @@
 	import ClientDisplaySettingsControls from "./ClientDisplaySettingsControls.svelte";
 	import UiRange from "../../app/ui/UiRange.svelte";
 	import type { ClientGraphicsSettings } from "./settings-contract";
-	import { CLIENT_GRAPHICS_DEFAULTS } from "./settings-policy";
-	import { CLIENT_GRAPHICS_RANGES } from "./settings-values";
+	import {
+		CLIENT_GRAPHICS_DEFAULTS,
+		CLIENT_GRAPHICS_RANGES,
+	} from "./settings-defaults";
 	import { ENTITY_SHADOW_MODES } from "../../lib/game/renderer/shadows/entity-shadow-modes";
 	import {
 		resolveTextureFilteringPolicy,

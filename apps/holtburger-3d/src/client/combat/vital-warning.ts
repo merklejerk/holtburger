@@ -3,7 +3,7 @@ import type { ClientVitalWarningThresholds } from "../settings/settings-contract
 import {
 	CLIENT_VITAL_WARNING_KINDS,
 	CLIENT_VITAL_WARNING_RECOVERY_MARGIN_PERCENT,
-} from "../settings/settings-values";
+} from "../settings/settings-defaults";
 
 /** Client-owned arbitration; appearance belongs to the CSS theme. */
 export interface ClientVitalWarningTuning {

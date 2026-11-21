@@ -27,11 +27,11 @@ import type {
 	PortalTransitionPresentationPlan,
 	PortalTransitionPresentationReceipt,
 } from "../../lib/client/portal-transition-presentation";
+import { clientSceneInterestRadii } from "../settings/settings-policy";
 import {
 	CLIENT_GRAPHICS_DEFAULTS,
-	clientSceneInterestRadii,
-} from "../settings/settings-policy";
-import { CLIENT_GRAPHICS_RANGES } from "../settings/settings-values";
+	CLIENT_GRAPHICS_RANGES,
+} from "../settings/settings-defaults";
 import { CLIENT_TUNING } from "../settings/tuning";
 import type { ClientLifecycle } from "./host-contract";
 import type { ClientGameplayPresentationResources } from "./gameplay-presentation";

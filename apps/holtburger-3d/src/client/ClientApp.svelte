@@ -263,10 +263,7 @@
 	} from "./settings/environment-settings";
 	import type { ClientWeatherPreset } from "./settings/environment";
 	import type { ClientHudLayout, ClientHudPlacement } from "./hud/hud-layout";
-	import {
-		CLIENT_FONT_FAMILY_CSS,
-		type ClientFontFamily,
-	} from "./settings/settings-values";
+	import type { ClientFontFamily } from "./settings/settings-defaults";
 	import {
 		clientSceneInterestRadii,
 		frameSettingsWithGraphics,
@@ -941,6 +938,14 @@
 		changeUserSection("input", accepted);
 		gameplayPresentation?.invalidateImmediateOverlayPreview();
 	}
+	/** CSS family lists applied at the client root, separate from theme-owned defaults. */
+	const CLIENT_FONT_FAMILY_CSS: Readonly<
+		Record<Exclude<ClientFontFamily, "theme">, string>
+	> = {
+		sans: "Arimo, sans-serif",
+		serif: "Gelasio, serif",
+		mono: "Cousine, monospace",
+	};
 	function fontCss(family: ClientFontFamily): string | undefined {
 		return family === "theme" ? undefined : CLIENT_FONT_FAMILY_CSS[family];
 	}

@@ -56,7 +56,7 @@
 		CLIENT_IDLE_CAMERA_ORBIT_DELAY_SECONDS,
 		CLIENT_VITAL_WARNING_PERCENT,
 		CLIENT_VITAL_WARNING_KINDS,
-	} from "./settings-values";
+	} from "./settings-defaults";
 	import { useAppInputPolicy } from "../../lib/input/app-input-policy-context";
 	import type {
 		ClientInputConfiguration,

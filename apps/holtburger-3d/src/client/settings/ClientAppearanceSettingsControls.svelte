@@ -9,7 +9,7 @@
 		CLIENT_UI_SCALE,
 		CLIENT_HUD_WINDOW_OPACITY,
 		type ClientFontFamily,
-	} from "./settings-values";
+	} from "./settings-defaults";
 	import "./settings-controls.css";
 	interface Props {
 		/** Shared selection owner and settings commit used by both appearance surfaces. */

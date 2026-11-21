@@ -21,7 +21,7 @@
 	import {
 		CLIENT_TEXT_SCALE,
 		CLIENT_UI_SCALE,
-	} from "../../client/settings/settings-values";
+	} from "../../client/settings/settings-defaults";
 	import type { ClientVital } from "../../client/session/host-contract";
 	import {
 		fixtureThemeIds,

@@ -1,9 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { SHARED_FRAME_SETTINGS } from "../../lib/frontend-frame-settings";
-import {
-	CLIENT_GRAPHICS_DEFAULTS,
-	frameSettingsWithGraphics,
-} from "./settings-policy";
+import { CLIENT_GRAPHICS_DEFAULTS } from "./settings-defaults";
+import { frameSettingsWithGraphics } from "./settings-policy";
 
 describe("client interior lighting preference", () => {
 	it("passes the selected ambient level into frame settings", () => {

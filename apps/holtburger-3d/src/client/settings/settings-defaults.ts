@@ -1,52 +1,163 @@
-import type { InputPlatform } from "../../lib/input/input-platform.js";
-import type { ClientUserSectionValues } from "./settings-sections.js";
-import {
-	CLIENT_DEFAULT_THEME_ID,
-	CLIENT_MUSIC_VOLUME_DEFAULT,
-	CLIENT_TEXT_SCALE,
-	CLIENT_UI_SCALE,
-	CLIENT_HUD_WINDOW_OPACITY,
-	CLIENT_VITAL_WARNING_THRESHOLDS,
-} from "./settings-values.js";
+import { TRAVELERS_KIT_THEME_ID } from "../../app/theme/ui-theme-contract.js";
+import { SHARED_FRAME_SETTINGS } from "../../lib/frontend-frame-settings.js";
 import { MAP_DEFAULT_VIEW_DIAMETERS } from "../../lib/game/map/map-appearance.js";
-import { CLIENT_CHAT_FILTER_TAGS } from "../social/chat-policy.js";
+import type { InputPlatform } from "../../lib/input/input-platform.js";
+import { initialActionBar } from "../hud/action-bar-state.js";
 import {
 	createClientHudLayout,
 	type ClientHudViewport,
 } from "../hud/hud-layout.js";
-import { initialActionBar } from "../hud/action-bar-state.js";
-import { initialSpellBarBindings } from "../magic/spell-bar-state.js";
-import {
-	clientCameraSettingsSchema,
-	clientChatSuppressionSettingsSchema,
-	clientLockInteractionSettingsSchema,
-} from "./settings-contract.js";
-import type {
-	ClientAudioSettings,
-	ClientCharacterSettings,
-	ClientUserSettings,
-} from "./settings-contract.js";
-import { CLIENT_TUNING } from "./tuning.js";
 import { CLIENT_UI_DEFAULTS } from "../hud/ui-defaults.js";
-import {
-	CLIENT_GRAPHICS_DEFAULTS,
-	CLIENT_NAMEPLATE_DEFAULTS,
-} from "./settings-policy.js";
-import { createClientInputDefaults } from "./input-settings.js";
+import { initialSpellBarBindings } from "../magic/spell-bar-state.js";
+import { CLIENT_CHAT_FILTER_TAGS } from "../social/chat-policy.js";
 import {
 	CLIENT_CLOCK_FORMAT_DEFAULT,
 	CLIENT_ENVIRONMENT_OVERRIDES_DEFAULT,
 } from "./environment-settings.js";
+import { createClientInputDefaults } from "./input-settings.js";
+import type {
+	ClientCharacterSettings,
+	ClientUserSettings,
+} from "./settings-contract.js";
+import type { ClientUserSectionValues } from "./settings-sections.js";
+import { CLIENT_TUNING } from "./tuning.js";
+
+// --- Bounds and closed option sets shared by validation and settings controls ---
+
+/** World-idle dwell before camera orbit starts, in seconds; zero disables idle orbit. */
+export const CLIENT_IDLE_CAMERA_ORBIT_DELAY_SECONDS = {
+	initial: 60,
+	minimum: 0,
+	maximum: 300,
+	step: 5,
+} as const;
+
+/** Editable client graphics ranges, shared by durable validation and controls. */
+export const CLIENT_GRAPHICS_RANGES = {
+	sealedInteriorAmbientLevel: { minimum: 0, maximum: 1, step: 0.01 },
+	viewDistance: { minimum: 0, maximum: 8, step: 1 },
+	verticalFovDegrees: { minimum: 50, maximum: 100, step: 1 },
+	renderScale: { minimum: 0.5, maximum: 2 },
+} as const;
+
+/** Theme used by fresh/reset settings and sections without an explicit theme choice. */
+export const CLIENT_DEFAULT_THEME_ID = TRAVELERS_KIT_THEME_ID;
+
+/** Additional client text enlargement, composed with the overall UI scale. */
+export const CLIENT_TEXT_SCALE = {
+	initial: 1,
+	minimum: 0.75,
+	maximum: 2,
+	step: 0.05,
+} as const;
+
+/** Overall client interface scale, applied once at UI layout boundaries. */
+export const CLIENT_UI_SCALE = {
+	initial: 1,
+	minimum: 0.75,
+	maximum: 2,
+	step: 0.05,
+} as const;
+
+/** Background opacity for floating gameplay windows; foreground content stays opaque. */
+export const CLIENT_HUD_WINDOW_OPACITY = {
+	initial: 0.74,
+	minimum: 0,
+	maximum: 1,
+	step: 0.01,
+} as const;
+
+/** Closed font choices for each client UI role; Theme default inherits the active theme. */
+export const CLIENT_FONT_FAMILY_OPTIONS = [
+	"theme",
+	"sans",
+	"serif",
+	"mono",
+] as const;
+export type ClientFontFamily = (typeof CLIENT_FONT_FAMILY_OPTIONS)[number];
+
+/** Fixed recovery buffer prevents warning flicker near the user's threshold. */
+export const CLIENT_VITAL_WARNING_RECOVERY_MARGIN_PERCENT = 5;
+/** Remaining-vital percentage limits apply to each vital's glow and veins. */
+export const CLIENT_VITAL_WARNING_PERCENT = {
+	initial: 20,
+	minimum: 1,
+	maximum: 100 - CLIENT_VITAL_WARNING_RECOVERY_MARGIN_PERCENT,
+	step: 1,
+} as const;
+
+/** Canonical vital order and labels for the warning controls and policy. */
+export const CLIENT_VITAL_WARNING_KINDS = [
+	{ kind: "health", label: "Health" },
+	{ kind: "stamina", label: "Stamina" },
+	{ kind: "mana", label: "Mana" },
+] as const;
+/** Absence defaults for independently saved vital percentages. */
+export const CLIENT_VITAL_WARNING_THRESHOLDS = {
+	health: CLIENT_VITAL_WARNING_PERCENT.initial,
+	stamina: CLIENT_VITAL_WARNING_PERCENT.initial,
+	mana: CLIENT_VITAL_WARNING_PERCENT.initial,
+} as const;
+
+// --- Section defaults for first-run, reset, and schema upgrade fallbacks ---
+
+/** Local camera behavior defaults. */
+export const CLIENT_CAMERA_DEFAULTS = {
+	idleOrbitDelaySeconds: CLIENT_IDLE_CAMERA_ORBIT_DELAY_SECONDS.initial,
+} as const;
+
+/** Local chat admission defaults; suppressed messages never enter retained history. */
+export const CLIENT_CHAT_SUPPRESSION_DEFAULTS = {
+	hideSelfEvasionsAndResists: true,
+	hideSpellIncantations: true,
+} as const;
+
+/** Local lock interaction defaults; server gameplay options do not own this automation. */
+export const CLIENT_LOCK_INTERACTION_DEFAULTS = {
+	autoUseKeys: false,
+} as const;
+
+/** Absence defaults composed from shared rendering policy and client-only view choices. */
+export const CLIENT_GRAPHICS_DEFAULTS = {
+	viewDistance: 6,
+	sealedInteriorAmbientLevel: SHARED_FRAME_SETTINGS.sealedInteriorAmbientLevel,
+	ambientOcclusionEnabled: SHARED_FRAME_SETTINGS.ambientOcclusion.enabled,
+	entityShadowMode: SHARED_FRAME_SETTINGS.entityShadows.mode,
+	verticalFovDegrees: 75,
+	textureFiltering: SHARED_FRAME_SETTINGS.quality.textureFiltering,
+	renderScale: SHARED_FRAME_SETTINGS.quality.renderScale,
+	weatherEnabled: SHARED_FRAME_SETTINGS.weatherEnabled,
+} as const;
+
+/** Smart Nameplates are the default cutover mode for new and upgraded installs. */
+const CLIENT_NAMEPLATE_DEFAULTS = {
+	mode: "smart",
+} as const;
 
 /** First-run and reset mix; frontend preferences remain separate from engine tuning. */
 export const CLIENT_AUDIO_DEFAULTS = {
 	masterVolume: 1,
-	musicVolume: CLIENT_MUSIC_VOLUME_DEFAULT,
+	musicVolume: 0.75,
 	effectVolume: 1,
 	ambientVolume: 1,
 	muted: false,
 	playInBackground: false,
-} as const satisfies ClientAudioSettings;
+} as const;
+
+/** First-run and reset UI preferences; schema upgrades draw per-field defaults from here. */
+export const CLIENT_UI_SETTINGS_DEFAULTS = {
+	showFps: false,
+	showHelpLabels: true,
+	useUnlockHelper: true,
+	textScale: CLIENT_TEXT_SCALE.initial,
+	uiScale: CLIENT_UI_SCALE.initial,
+	hudWindowOpacity: CLIENT_HUD_WINDOW_OPACITY.initial,
+	vitalWarningThresholds: CLIENT_VITAL_WARNING_THRESHOLDS,
+	themeId: CLIENT_DEFAULT_THEME_ID,
+	fonts: { body: "theme", heading: "theme", mono: "theme" },
+} as const;
+
+// --- Composite profile builders ---
 
 /** Build absence defaults from the same constants consumed by the live client. */
 export function createDefaultClientUserSettings(
@@ -83,22 +194,18 @@ export function createDefaultClientUserSections(
 			olthoi: true,
 		},
 		chatTimestamps: true,
-		chatSuppression: clientChatSuppressionSettingsSchema.parse({}),
-		lockInteractions: clientLockInteractionSettingsSchema.parse({}),
-		camera: clientCameraSettingsSchema.parse({}),
+		chatSuppression: { ...CLIENT_CHAT_SUPPRESSION_DEFAULTS },
+		lockInteractions: { ...CLIENT_LOCK_INTERACTION_DEFAULTS },
+		camera: { ...CLIENT_CAMERA_DEFAULTS },
 		graphics: { ...CLIENT_GRAPHICS_DEFAULTS },
 		nameplates: { ...CLIENT_NAMEPLATE_DEFAULTS },
 		audio: { ...CLIENT_AUDIO_DEFAULTS },
 		ui: {
-			showFps: false,
-			showHelpLabels: true,
-			useUnlockHelper: true,
-			textScale: CLIENT_TEXT_SCALE.initial,
-			uiScale: CLIENT_UI_SCALE.initial,
-			hudWindowOpacity: CLIENT_HUD_WINDOW_OPACITY.initial,
-			vitalWarningThresholds: CLIENT_VITAL_WARNING_THRESHOLDS,
-			themeId: CLIENT_DEFAULT_THEME_ID,
-			fonts: { body: "theme", heading: "theme", mono: "theme" },
+			...CLIENT_UI_SETTINGS_DEFAULTS,
+			vitalWarningThresholds: {
+				...CLIENT_UI_SETTINGS_DEFAULTS.vitalWarningThresholds,
+			},
+			fonts: { ...CLIENT_UI_SETTINGS_DEFAULTS.fonts },
 		},
 		input: createClientInputDefaults(platform),
 		clockFormat: CLIENT_CLOCK_FORMAT_DEFAULT,

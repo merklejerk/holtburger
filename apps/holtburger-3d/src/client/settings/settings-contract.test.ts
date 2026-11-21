@@ -10,6 +10,14 @@ import {
 } from "./settings-contract";
 import {
 	CLIENT_AUDIO_DEFAULTS,
+	CLIENT_DEFAULT_THEME_ID,
+	CLIENT_GRAPHICS_RANGES,
+	CLIENT_HUD_WINDOW_OPACITY,
+	CLIENT_IDLE_CAMERA_ORBIT_DELAY_SECONDS,
+	CLIENT_TEXT_SCALE,
+	CLIENT_UI_SCALE,
+	CLIENT_VITAL_WARNING_PERCENT,
+	CLIENT_VITAL_WARNING_THRESHOLDS,
 	createDefaultClientCharacterSettings,
 	createDefaultClientUserSettings,
 } from "./settings-defaults";
@@ -20,17 +28,6 @@ import {
 	clientInputSettingsSchema,
 	clientKeyboardSettingsEqual,
 } from "./input-settings";
-
-import {
-	CLIENT_IDLE_CAMERA_ORBIT_DELAY_SECONDS,
-	CLIENT_VITAL_WARNING_PERCENT,
-	CLIENT_GRAPHICS_RANGES,
-	CLIENT_VITAL_WARNING_THRESHOLDS,
-	CLIENT_DEFAULT_THEME_ID,
-	CLIENT_TEXT_SCALE,
-	CLIENT_UI_SCALE,
-	CLIENT_HUD_WINDOW_OPACITY,
-} from "./settings-values";
 
 const viewport = { width: 1440, height: 900 };
 

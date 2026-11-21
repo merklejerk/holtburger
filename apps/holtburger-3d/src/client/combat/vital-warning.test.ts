@@ -4,7 +4,7 @@ import {
 	type ClientVitalWarningTuning,
 } from "./vital-warning";
 import type { ClientVital } from "../session/host-contract";
-import { CLIENT_VITAL_WARNING_RECOVERY_MARGIN_PERCENT } from "../settings/settings-values";
+import { CLIENT_VITAL_WARNING_RECOVERY_MARGIN_PERCENT } from "../settings/settings-defaults";
 
 const tuning: ClientVitalWarningTuning = {
 	selectionMargin: 0.03,

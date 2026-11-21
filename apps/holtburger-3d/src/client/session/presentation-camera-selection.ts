@@ -67,7 +67,7 @@ import {
 	type ClientTargetIndicatorFrame,
 } from "../combat/target-indicator";
 import type { CycleSelectionPresentationFrame } from "../combat/target-acquisition";
-import { CLIENT_IDLE_CAMERA_ORBIT_DELAY_SECONDS } from "../settings/settings-values";
+import { CLIENT_IDLE_CAMERA_ORBIT_DELAY_SECONDS } from "../settings/settings-defaults";
 import { CLIENT_TUNING } from "../settings/tuning";
 import type {
 	ClientDiagnosticResidency,

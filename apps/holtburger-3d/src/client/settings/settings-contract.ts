@@ -1,6 +1,5 @@
 import { z } from "zod";
 import { packAffinitiesSchema } from "./pack-affinity-contract.js";
-import { SHARED_FRONTEND_TUNING } from "../../lib/frontend-tuning.js";
 import { uiThemeIdSchema } from "../../app/theme/ui-theme-contract.js";
 import { entityAlertRulesSchema } from "../world/entity-alerts.js";
 import { loadoutActionContentSchema } from "../inventory/loadout.js";
@@ -14,17 +13,20 @@ import { CLIENT_INSPECTION_PREVIEW_HEIGHT } from "../inventory/inspection-layout
 import { ENTITY_SHADOW_MODES } from "../../lib/game/renderer/shadows/entity-shadow-modes.js";
 import { TEXTURE_FILTERING_POLICIES } from "../../lib/game/renderer/webgl2/texture-filtering-policy.js";
 import {
-	CLIENT_DEFAULT_THEME_ID,
-	CLIENT_IDLE_CAMERA_ORBIT_DELAY_SECONDS,
-	CLIENT_MUSIC_VOLUME_DEFAULT,
+	CLIENT_AUDIO_DEFAULTS,
+	CLIENT_CAMERA_DEFAULTS,
+	CLIENT_CHAT_SUPPRESSION_DEFAULTS,
 	CLIENT_FONT_FAMILY_OPTIONS,
-	CLIENT_VITAL_WARNING_PERCENT,
-	CLIENT_VITAL_WARNING_THRESHOLDS,
+	CLIENT_GRAPHICS_DEFAULTS,
 	CLIENT_GRAPHICS_RANGES,
+	CLIENT_HUD_WINDOW_OPACITY,
+	CLIENT_IDLE_CAMERA_ORBIT_DELAY_SECONDS,
+	CLIENT_LOCK_INTERACTION_DEFAULTS,
 	CLIENT_TEXT_SCALE,
 	CLIENT_UI_SCALE,
-	CLIENT_HUD_WINDOW_OPACITY,
-} from "./settings-values.js";
+	CLIENT_UI_SETTINGS_DEFAULTS,
+	CLIENT_VITAL_WARNING_PERCENT,
+} from "./settings-defaults.js";
 import { clientInputSettingsSchema } from "./input-settings.js";
 import {
 	clientClockFormatSchema,
@@ -140,12 +142,16 @@ export type ClientChatChannelFilters = z.infer<
 >;
 
 /** Local chat admission preferences; suppressed messages never enter retained history. */
-export const clientChatSuppressionSettingsSchema = z
+const clientChatSuppressionSettingsSchema = z
 	.object({
 		/** Hide successful self defense against physical attacks and hostile spells. */
-		hideSelfEvasionsAndResists: z.boolean().default(true),
+		hideSelfEvasionsAndResists: z
+			.boolean()
+			.default(CLIENT_CHAT_SUPPRESSION_DEFAULTS.hideSelfEvasionsAndResists),
 		/** Hide casting words from every speaker, preserving other magic feedback. */
-		hideSpellIncantations: z.boolean().default(true),
+		hideSpellIncantations: z
+			.boolean()
+			.default(CLIENT_CHAT_SUPPRESSION_DEFAULTS.hideSpellIncantations),
 	})
 	.strict()
 	.readonly();
@@ -154,10 +160,12 @@ export type ClientChatSuppressionSettings = z.infer<
 >;
 
 /** Local lock interaction policy; server gameplay options do not own this automation. */
-export const clientLockInteractionSettingsSchema = z
+const clientLockInteractionSettingsSchema = z
 	.object({
 		/** Opt in to trying distinct inventory key templates before offering lockpicks. */
-		autoUseKeys: z.boolean().default(false),
+		autoUseKeys: z
+			.boolean()
+			.default(CLIENT_LOCK_INTERACTION_DEFAULTS.autoUseKeys),
 	})
 	.strict()
 	.readonly();
@@ -174,7 +182,7 @@ export const clientCameraSettingsSchema = z
 			.int()
 			.min(CLIENT_IDLE_CAMERA_ORBIT_DELAY_SECONDS.minimum)
 			.max(CLIENT_IDLE_CAMERA_ORBIT_DELAY_SECONDS.maximum)
-			.default(CLIENT_IDLE_CAMERA_ORBIT_DELAY_SECONDS.initial),
+			.default(CLIENT_CAMERA_DEFAULTS.idleOrbitDelaySeconds),
 	})
 	.strict()
 	.readonly();
@@ -193,10 +201,7 @@ export const clientGraphicsSettingsSchema = z
 		sealedInteriorAmbientLevel: finiteNumber
 			.min(CLIENT_GRAPHICS_RANGES.sealedInteriorAmbientLevel.minimum)
 			.max(CLIENT_GRAPHICS_RANGES.sealedInteriorAmbientLevel.maximum)
-			.default(
-				SHARED_FRONTEND_TUNING.rendering.frameDefaults
-					.sealedInteriorAmbientLevel,
-			),
+			.default(CLIENT_GRAPHICS_DEFAULTS.sealedInteriorAmbientLevel),
 		entityShadowMode: z.enum(ENTITY_SHADOW_MODES),
 		verticalFovDegrees: finiteNumber
 			.min(CLIENT_GRAPHICS_RANGES.verticalFovDegrees.minimum)
@@ -253,31 +258,37 @@ export type ClientVitalWarningThresholds = z.infer<
 export const clientUiSettingsSchema = z
 	.object({
 		/** Show the FPS HUD; older profiles keep it hidden until explicitly enabled. */
-		showFps: z.boolean().default(false),
+		showFps: z.boolean().default(CLIENT_UI_SETTINGS_DEFAULTS.showFps),
 		/** Reveal combat control labels on hover; older profiles receive help by default. */
-		showHelpLabels: z.boolean().default(true),
+		showHelpLabels: z
+			.boolean()
+			.default(CLIENT_UI_SETTINGS_DEFAULTS.showHelpLabels),
 		/** Enable the unlock window and automatic-key workflow; existing profiles keep it enabled. */
-		useUnlockHelper: z.boolean().default(true),
+		useUnlockHelper: z
+			.boolean()
+			.default(CLIENT_UI_SETTINGS_DEFAULTS.useUnlockHelper),
 		/** Absent choices use the client default; explicit Base/null and saved IDs are retained. */
-		themeId: uiThemeIdSchema.nullable().default(CLIENT_DEFAULT_THEME_ID),
+		themeId: uiThemeIdSchema
+			.nullable()
+			.default(CLIENT_UI_SETTINGS_DEFAULTS.themeId),
 		/** Older sections inherit neutral scaling without losing fonts or warning thresholds. */
 		textScale: finiteNumber
 			.min(CLIENT_TEXT_SCALE.minimum)
 			.max(CLIENT_TEXT_SCALE.maximum)
-			.default(CLIENT_TEXT_SCALE.initial),
+			.default(CLIENT_UI_SETTINGS_DEFAULTS.textScale),
 		/** Overall UI geometry starts neutral when older sections omit this preference. */
 		uiScale: finiteNumber
 			.min(CLIENT_UI_SCALE.minimum)
 			.max(CLIENT_UI_SCALE.maximum)
-			.default(CLIENT_UI_SCALE.initial),
+			.default(CLIENT_UI_SETTINGS_DEFAULTS.uiScale),
 		/** Floating-window background opacity; old profiles retain the existing tint. */
 		hudWindowOpacity: finiteNumber
 			.min(CLIENT_HUD_WINDOW_OPACITY.minimum)
 			.max(CLIENT_HUD_WINDOW_OPACITY.maximum)
-			.default(CLIENT_HUD_WINDOW_OPACITY.initial),
+			.default(CLIENT_UI_SETTINGS_DEFAULTS.hudWindowOpacity),
 		/** Profiles without warnings get the same thresholds as first-run settings. */
 		vitalWarningThresholds: clientVitalWarningThresholdsSchema.default(
-			CLIENT_VITAL_WARNING_THRESHOLDS,
+			CLIENT_UI_SETTINGS_DEFAULTS.vitalWarningThresholds,
 		),
 		fonts: z
 			.object({
@@ -303,11 +314,13 @@ export const clientAudioSettingsSchema = z
 		musicVolume: finiteNumber
 			.min(0)
 			.max(1)
-			.default(CLIENT_MUSIC_VOLUME_DEFAULT),
+			.default(CLIENT_AUDIO_DEFAULTS.musicVolume),
 		/** Environmental ambience. */
 		ambientVolume: finiteNumber.min(0).max(1),
 		/** Keep gameplay audio and title music audible when the window lacks focus. */
-		playInBackground: z.boolean().default(false),
+		playInBackground: z
+			.boolean()
+			.default(CLIENT_AUDIO_DEFAULTS.playInBackground),
 		/** Silence all output, including title music, without discarding saved volume levels. */
 		muted: z.boolean(),
 	})

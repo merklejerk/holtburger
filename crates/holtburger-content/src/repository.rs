@@ -1836,6 +1836,179 @@ mod tests {
         );
     }
 
+    /// Retail determines each part's base palette from its surfaces' load-time original palettes
+    /// before any ObjDesc texture swap. Swapping onto a texture with a different default palette
+    /// must still apply the ObjDesc palette composite to parts whose original palette matches,
+    /// while leaving parts on another original palette with the swapped texture's default palette.
+    #[test]
+    fn palette_composite_matches_pre_swap_original_palette_after_texture_change() {
+        use crate::test_support::CountingSource;
+        use crate::{MaterialAppearanceInput, ResolvedMaterialSource};
+
+        let (setup_id, body_gfx, head_gfx) = (0x0200_0050, 0x0100_0050, 0x0100_0051);
+        let (unpaletted_surface, body_surface, head_surface) =
+            (0x0800_0050, 0x0800_0051, 0x0800_0052);
+        let (direct_tex, body_orig_tex, head_orig_tex, swapped_tex) =
+            (0x0500_0050, 0x0500_0051, 0x0500_0052, 0x0500_0053);
+        let (body_base_pal, head_base_pal, swapped_default_pal, replacement_pal) =
+            (0x0400_0050, 0x0400_0051, 0x0400_0052, 0x0400_0053);
+
+        let pack_setup = |id, parts: &[u32]| {
+            let mut buf = Cursor::new(Vec::new());
+            test_setup_model(id, parts).pack(&mut buf).unwrap();
+            buf.into_inner()
+        };
+        let pack_gfx = |id, surfaces: &[u32]| {
+            let mut buf = Cursor::new(Vec::new());
+            test_gfx_obj(id, surfaces).pack(&mut buf).unwrap();
+            buf.into_inner()
+        };
+
+        let mut files = HashMap::from([
+            (
+                (EOR_PORTAL_NAMESPACE.into(), setup_id),
+                pack_setup(setup_id, &[body_gfx, head_gfx]),
+            ),
+            (
+                (EOR_PORTAL_NAMESPACE.into(), body_gfx),
+                pack_gfx(body_gfx, &[unpaletted_surface, body_surface]),
+            ),
+            (
+                (EOR_PORTAL_NAMESPACE.into(), head_gfx),
+                pack_gfx(head_gfx, &[head_surface]),
+            ),
+            // Surfaces author no explicit palette (0), so each inherits its original texture's default.
+            (
+                (EOR_PORTAL_NAMESPACE.into(), unpaletted_surface),
+                textured_csurface_bytes(direct_tex, 0),
+            ),
+            (
+                (EOR_PORTAL_NAMESPACE.into(), body_surface),
+                textured_csurface_bytes(body_orig_tex, 0),
+            ),
+            (
+                (EOR_PORTAL_NAMESPACE.into(), head_surface),
+                textured_csurface_bytes(head_orig_tex, 0),
+            ),
+        ]);
+        for (index, (st_id, fmt, pixels, default_pal)) in [
+            (direct_tex, PixelFormatId::A8R8G8B8, &[1, 2, 3, 4][..], None),
+            (
+                body_orig_tex,
+                PixelFormatId::Index16,
+                &[0, 0][..],
+                Some(body_base_pal),
+            ),
+            (
+                head_orig_tex,
+                PixelFormatId::Index16,
+                &[0, 0][..],
+                Some(head_base_pal),
+            ),
+            (
+                swapped_tex,
+                PixelFormatId::Index16,
+                &[0, 0][..],
+                Some(swapped_default_pal),
+            ),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let rs_id = 0x0600_0050 + index as u32;
+            files.insert(
+                (EOR_PORTAL_NAMESPACE.into(), st_id),
+                surface_texture_bytes(st_id, &[rs_id]),
+            );
+            files.insert(
+                (EOR_PORTAL_NAMESPACE.into(), rs_id),
+                render_surface_bytes(rs_id, fmt, pixels, default_pal),
+            );
+        }
+        for palette_id in [
+            body_base_pal,
+            head_base_pal,
+            swapped_default_pal,
+            replacement_pal,
+        ] {
+            files.insert(
+                (EOR_PORTAL_NAMESPACE.into(), palette_id),
+                palette_bytes(palette_id),
+            );
+        }
+
+        let repository = ContentRepository::from_mounts(vec![Arc::new(CountingSource::new(files))]);
+        let appearance = repository
+            .resolve_setup_appearance(
+                setup_id,
+                MaterialAppearanceInput {
+                    obj_desc: Some(ObjDesc {
+                        palette_id: Some(body_base_pal),
+                        sub_palettes: vec![SubPalette {
+                            sub_id: replacement_pal,
+                            offset: 0,
+                            num_colors: 2,
+                        }],
+                        texture_changes: vec![
+                            TextureMapChange {
+                                part_index: 0,
+                                old_texture: body_orig_tex,
+                                new_texture: swapped_tex,
+                            },
+                            TextureMapChange {
+                                part_index: 1,
+                                old_texture: head_orig_tex,
+                                new_texture: swapped_tex,
+                            },
+                        ],
+                        anim_part_changes: Vec::new(),
+                    }),
+                },
+            )
+            .expect("setup appearance should resolve");
+
+        // Part 0: leading unpaletted surface is skipped; paletted surface swapped onto swapped_tex
+        // still matched body_base_pal from its pre-swap original texture and received the composite.
+        let ResolvedMaterialSource::Texture(unpaletted) =
+            &appearance.parts[0].material_slots[0].material.source
+        else {
+            panic!("slot 0 should be textured");
+        };
+        assert_eq!(unpaletted.palette_id, None);
+        assert_eq!(unpaletted.palette_composite, None);
+
+        let ResolvedMaterialSource::Texture(body) =
+            &appearance.parts[0].material_slots[1].material.source
+        else {
+            panic!("slot 1 should be textured");
+        };
+        assert_eq!(body.surface_texture_id, swapped_tex);
+        let body_composite = body
+            .palette_composite
+            .as_ref()
+            .expect("matching part must receive composite after texture swap");
+        assert_eq!(body_composite.base_palette_id, body_base_pal);
+        assert_eq!(
+            body_composite
+                .ranges
+                .iter()
+                .map(|range| range.replacement_palette_id)
+                .collect::<Vec<_>>(),
+            vec![replacement_pal]
+        );
+
+        // Part 1: original texture was on head_base_pal != body_base_pal, so it keeps swapped_tex's
+        // default palette without the composite.
+        let ResolvedMaterialSource::Texture(head) =
+            &appearance.parts[1].material_slots[0].material.source
+        else {
+            panic!("head slot should be textured");
+        };
+        assert_eq!(head.surface_texture_id, swapped_tex);
+        assert_eq!(head.palette_id, Some(swapped_default_pal));
+        assert_eq!(head.palette_composite, None);
+    }
+
     fn texture_id(source: &crate::ResolvedMaterialSource) -> Option<u32> {
         match source {
             crate::ResolvedMaterialSource::SolidColor(_) => None,

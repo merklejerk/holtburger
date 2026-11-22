@@ -261,12 +261,16 @@ struct MaterialDefinition {
 enum MaterialSourceDefinition {
     /// Authored packed color, with no texture dependencies.
     SolidColor(u32),
-    /// Original texture and optional explicit palette selected by the surface.
+    /// Original texture and palette facts resolved before any ObjDesc texture swap.
     Texture {
         /// Original source identity; validated facts are looked up without pinning another cache entry.
         original_texture_id: u32,
         /// An authored palette wins over the effective texture's default palette.
         authored_palette_id: Option<u32>,
+        /// Load-time original palette (`authored_palette_id` or the original texture's default
+        /// palette). Retail records this once at load and matches ObjDesc palette compositions
+        /// against it even after a texture swap replaces the active texture.
+        original_palette_id: Option<u32>,
     },
 }
 
@@ -303,7 +307,7 @@ impl ContentRepository {
                         orig_texture_id,
                         orig_palette_id,
                     } => {
-                        self.surface_texture_facts(orig_texture_id)?;
+                        let original_texture = self.surface_texture_facts(orig_texture_id)?;
                         let authored_palette_id = if orig_palette_id == 0 {
                             None
                         } else {
@@ -311,9 +315,12 @@ impl ContentRepository {
                             self.read_palette(orig_palette_id)?;
                             Some(orig_palette_id)
                         };
+                        let original_palette_id =
+                            authored_palette_id.or(original_texture.default_palette_id);
                         MaterialSourceDefinition::Texture {
                             original_texture_id: orig_texture_id,
                             authored_palette_id,
+                            original_palette_id,
                         }
                     }
                 };
@@ -671,16 +678,17 @@ impl ContentRepository {
             let texture_changes = appearance
                 .map(|obj_desc| texture_changes_for_part(&obj_desc.texture_changes, part_index))
                 .unwrap_or_default();
-            let mut material_slots = self
-                .resolve_gfx_obj_material_slots_with_texture_changes(gfx_obj_id, &texture_changes)
+            let material_slots = self
+                .resolve_gfx_obj_material_slots_for_appearance(
+                    gfx_obj_id,
+                    &texture_changes,
+                    palette_composite.as_ref(),
+                )
                 .with_context(|| {
                     format!(
                         "failed to resolve setup 0x{setup_model_id:08X} part {part_index} materials"
                     )
                 })?;
-            if let Some(composite) = &palette_composite {
-                apply_palette_composite(&mut material_slots, composite);
-            }
 
             parts.push(ResolvedSetupAppearancePart {
                 part_index,
@@ -739,10 +747,11 @@ impl ContentRepository {
             .collect()
     }
 
-    fn resolve_gfx_obj_material_slots_with_texture_changes(
+    fn resolve_gfx_obj_material_slots_for_appearance(
         &self,
         gfx_obj_id: u32,
         texture_changes: &[TextureMapChange],
+        palette_composite: Option<&ResolvedPaletteComposite>,
     ) -> Result<Vec<ResolvedMaterialSlot>> {
         let resource = self
             .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, gfx_obj_id))
@@ -751,25 +760,32 @@ impl ContentRepository {
             .decode(|bytes| Ok(GfxObj::unpack(&mut Cursor::new(bytes))?))
             .with_context(|| format!("failed to parse GfxObj 0x{gfx_obj_id:08X}"))?;
 
-        gfx_obj
-            .surfaces
-            .into_iter()
-            .enumerate()
-            .map(|(slot_index, surface_id)| {
-                let definition = self.material_definition(surface_id)?;
-                let texture_override = match &definition.source {
-                    MaterialSourceDefinition::SolidColor(_) => None,
-                    MaterialSourceDefinition::Texture {
-                        original_texture_id,
-                        ..
-                    } => texture_override_for_material(*original_texture_id, texture_changes),
-                };
-                Ok(ResolvedMaterialSlot {
-                    slot_index,
-                    material: material_recipe_from_definition(self, &definition, texture_override)?,
-                })
-            })
-            .collect()
+        let mut part_base_palette_id = None;
+        let mut slots = Vec::with_capacity(gfx_obj.surfaces.len());
+        for (slot_index, surface_id) in gfx_obj.surfaces.into_iter().enumerate() {
+            let definition = self.material_definition(surface_id)?;
+            let texture_override = match &definition.source {
+                MaterialSourceDefinition::SolidColor(_) => None,
+                MaterialSourceDefinition::Texture {
+                    original_texture_id,
+                    original_palette_id,
+                    ..
+                } => {
+                    if part_base_palette_id.is_none() {
+                        part_base_palette_id = *original_palette_id;
+                    }
+                    texture_override_for_material(*original_texture_id, texture_changes)
+                }
+            };
+            slots.push(ResolvedMaterialSlot {
+                slot_index,
+                material: material_recipe_from_definition(self, &definition, texture_override)?,
+            });
+        }
+        if let Some(composite) = palette_composite {
+            apply_palette_composite(&mut slots, part_base_palette_id, composite);
+        }
+        Ok(slots)
     }
 }
 
@@ -894,6 +910,7 @@ fn material_recipe_from_definition(
         MaterialSourceDefinition::Texture {
             original_texture_id,
             authored_palette_id,
+            ..
         } => {
             let effective_texture_id = match texture_override {
                 Some(id) => id,
@@ -1016,24 +1033,21 @@ fn resolve_palette_composite(
 
 /// Apply retail's part-level palette selection to one setup part's resolved materials.
 ///
-/// Retail part-palette application matches the ObjDesc's base palette against the *part's* base
-/// palette — the first surface carrying an authored palette, per retail base-palette selection
-/// — and then hands the composite to every surface of that part, not only the surface that
-/// matched. So the decision is per part while the effect is per material, and a part sitting on
-/// a different base palette is left alone.
+/// Retail part-palette application matches the ObjDesc's base palette against the *part's*
+/// load-time original palette — the first surface carrying an original palette (its authored
+/// palette or, when zero, its original texture's default palette), determined before any
+/// `TextureMapChange` swaps the active texture — and then hands the composite to every surface of
+/// that part, not only the surface that matched. So the decision is per part while the effect is
+/// per material, and a part sitting on a different base palette is left alone.
 ///
-/// The match reads `palette_id`, which already resolves a surface that authors no palette to
-/// the one its texture supplies, exactly as retail's load-time backfill does. Almost every
-/// character surface reaches its palette that way, so matching only authored palettes would
-/// recolour nothing at all.
+/// Matching against the post-swap texture's default palette breaks objects (such as WCID 19208)
+/// whose `ClothingBase` swaps onto textures authored against a different default palette than the
+/// part's original palette.
 fn apply_palette_composite(
     slots: &mut [ResolvedMaterialSlot],
+    part_base_palette_id: Option<u32>,
     composite: &ResolvedPaletteComposite,
 ) {
-    let part_base_palette_id = slots.iter().find_map(|slot| match &slot.material.source {
-        ResolvedMaterialSource::Texture(texture) => texture.palette_id,
-        ResolvedMaterialSource::SolidColor(_) => None,
-    });
     if part_base_palette_id != Some(composite.base_palette_id) {
         return;
     }
@@ -1214,14 +1228,14 @@ mod palette_composite_tests {
             .collect()
     }
 
-    /// Retail matches the part's base palette, then recolours every surface of that part, so a
-    /// sibling surface on a different palette is recoloured too.
+    /// Retail matches the part's original base palette, then recolours every paletted surface of
+    /// that part — even when a texture swap left those surfaces pointing at another default palette.
     #[test]
     fn a_matching_part_hands_the_composite_to_all_of_its_paletted_materials() {
-        let mut slots = vec![slot(0, Some(0x0400_0AAA)), slot(1, Some(0x0400_0BBB))];
+        let mut slots = vec![slot(0, Some(0x0400_0DDD)), slot(1, Some(0x0400_0BBB))];
         let composite = composite(0x0400_0AAA, vec![range(0x0400_0CCC, 0x18, 0x08)]);
 
-        apply_palette_composite(&mut slots, &composite);
+        apply_palette_composite(&mut slots, Some(0x0400_0AAA), &composite);
 
         let identity = composite.identity.clone();
         assert_eq!(
@@ -1230,14 +1244,15 @@ mod palette_composite_tests {
         );
     }
 
-    /// The part's base palette is the first surface that has one, so a leading unpaletted surface
-    /// must not stop the part from matching.
+    /// An unpaletted surface on a matching part samples no palette, so it must not receive a
+    /// composite while paletted siblings on the same part do.
     #[test]
-    fn the_part_base_palette_skips_leading_materials_without_a_palette() {
-        let mut slots = vec![slot(0, None), slot(1, Some(0x0400_0AAA))];
+    fn a_matching_part_skips_unpaletted_materials() {
+        let mut slots = vec![slot(0, None), slot(1, Some(0x0400_0BBB))];
 
         apply_palette_composite(
             &mut slots,
+            Some(0x0400_0AAA),
             &composite(0x0400_0AAA, vec![range(0x0400_0CCC, 0x18, 0x08)]),
         );
 
@@ -1248,24 +1263,26 @@ mod palette_composite_tests {
 
     #[test]
     fn a_part_on_another_base_palette_is_left_alone() {
-        let mut slots = vec![slot(0, Some(0x0400_0BBB))];
+        let mut slots = vec![slot(0, Some(0x0400_0AAA))];
 
         apply_palette_composite(
             &mut slots,
+            Some(0x0400_0BBB),
             &composite(0x0400_0AAA, vec![range(0x0400_0CCC, 0x18, 0x08)]),
         );
 
         assert_eq!(composites(&slots), vec![None]);
     }
 
-    /// A part whose surfaces sample no palette at all — a direct-color static — has nothing an
-    /// ObjDesc can select, and must render byte-identically.
+    /// A part whose surfaces have no original palette at all — a direct-color static — has nothing
+    /// an ObjDesc can select, and must render byte-identically.
     #[test]
     fn a_part_with_no_palette_at_all_is_left_alone() {
         let mut slots = vec![slot(0, None), slot(1, None)];
 
         apply_palette_composite(
             &mut slots,
+            None,
             &composite(0x0400_0AAA, vec![range(0x0400_0CCC, 0x18, 0x08)]),
         );
 

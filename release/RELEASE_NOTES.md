@@ -2,8 +2,7 @@ Holtburger beta includes the 3D client and the terminal client (CLI).
 
 ## In this beta
 
-- **3D client, camera:** The idle camera orbit now starts after 60 seconds of inactivity by default; you can adjust or turn it off with the Idle orbit timeout setting under Camera.
-- **3D client, themes:** The Berry Pop Neko theme's paw and bell decorations now appear only on HUD windows, and HUD buttons gain cat-ear styling.
+- **3D client, appearance:** Characters and creatures whose equipment swaps textures now keep their intended palette colors, fixing wrong or missing recoloring on some clothing and objects.
 
 ## Known issues
 

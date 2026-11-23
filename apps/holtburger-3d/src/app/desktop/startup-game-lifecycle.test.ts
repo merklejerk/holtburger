@@ -1,5 +1,9 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { StartupGameLifecycle } from "./startup-game-lifecycle";
+import {
+	isElectronDocumentClosing,
+	registerElectronStartupClose,
+} from "../../lib/host/electron-host-transport";
 
 function gate() {
 	const waiters: Array<() => void> = [];
@@ -69,6 +73,53 @@ describe("startup game ownership", () => {
 		expect(await lifecycle.prepareClose()).toEqual({
 			kind: "failed",
 			diagnostic: "mount effect failed",
+		});
+	});
+
+	describe("document close state", () => {
+		afterEach(() => {
+			vi.unstubAllGlobals();
+		});
+
+		it("marks the document closing synchronously when close preparation begins", async () => {
+			const lifecycle = new StartupGameLifecycle();
+			const cleanupGate = gate();
+			let closeHandler: (() => Promise<unknown>) | null = null;
+			vi.stubGlobal("window", {
+				holtburgerClient: {
+					start: async () => {},
+					quit: async () => {},
+					onPrepareClose: (handler: () => Promise<unknown>) => {
+						closeHandler = handler;
+						return () => {
+							closeHandler = null;
+						};
+					},
+				},
+			});
+			const unregister = registerElectronStartupClose(lifecycle);
+			try {
+				lifecycle.registerCleanup(async () => {
+					await cleanupGate.promise;
+					return { kind: "prepared" };
+				});
+				expect(lifecycle.closing).toBe(false);
+				expect(isElectronDocumentClosing()).toBe(false);
+				if (closeHandler === null)
+					throw new Error("Expected startup close handler registration.");
+				const triggerClose: () => Promise<unknown> = closeHandler;
+
+				const closing = triggerClose();
+				expect(lifecycle.closing).toBe(true);
+				expect(isElectronDocumentClosing()).toBe(true);
+
+				cleanupGate.open();
+				expect(await closing).toEqual({ kind: "prepared" });
+				expect(isElectronDocumentClosing()).toBe(true);
+			} finally {
+				unregister();
+			}
+			expect(isElectronDocumentClosing()).toBe(false);
 		});
 	});
 });

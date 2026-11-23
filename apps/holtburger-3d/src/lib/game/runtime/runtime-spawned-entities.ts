@@ -903,12 +903,12 @@ export class SpawnedEntityLifecycleCoordinator {
 			);
 	}
 
-	destroyVisualTemplates(): void {
-		this.#objectVisualTemplates.destroy();
+	destroyVisualTemplates(): Promise<void> {
+		return this.#objectVisualTemplates.destroy();
 	}
 
-	destroyDynamics(): void {
-		this.#dynamics.destroy();
+	destroyDynamics(): Promise<void> {
+		return this.#dynamics.destroy();
 	}
 
 	async destroyLocalModels(

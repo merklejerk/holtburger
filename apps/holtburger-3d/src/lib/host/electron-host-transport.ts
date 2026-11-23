@@ -83,6 +83,11 @@ export function registerElectronClientClose(
 
 let startupCloseOwner: StartupGameLifecycle | null = null;
 
+/** True once the native desktop shell has begun retiring this document. */
+export function isElectronDocumentClosing(): boolean {
+	return startupCloseOwner?.closing === true;
+}
+
 /** The stable startup shell owns the sole preload handler and delegates game cleanup later. */
 export function registerElectronStartupClose(
 	owner: StartupGameLifecycle,

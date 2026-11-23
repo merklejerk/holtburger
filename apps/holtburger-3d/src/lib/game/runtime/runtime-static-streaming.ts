@@ -627,12 +627,12 @@ export class StaticSceneStreamingCoordinator {
 		this.#activeRegionStaticDetailOwner = null;
 	}
 
-	destroyTerrainWorker(): void {
-		this.#terrainGenerator.destroy();
+	destroyTerrainWorker(): Promise<void> {
+		return this.#terrainGenerator.destroy();
 	}
 
-	destroyTerrain(): void {
-		this.#terrain.destroy();
+	destroyTerrain(): Promise<void> {
+		return this.#terrain.destroy();
 	}
 
 	destroyOcean(): void {

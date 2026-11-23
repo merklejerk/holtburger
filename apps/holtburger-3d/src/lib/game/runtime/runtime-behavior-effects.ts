@@ -780,8 +780,8 @@ export class BehaviorCueAndEffectsCoordinator {
 		effects?.dispose();
 	}
 
-	destroySkyScripts(): void {
-		this.#skyScripts.destroy();
+	destroySkyScripts(): Promise<void> {
+		return this.#skyScripts.destroy();
 	}
 
 	/** Stage drawable meshes before activating any producer of particle hooks. */

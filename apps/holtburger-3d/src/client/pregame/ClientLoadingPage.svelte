@@ -30,6 +30,9 @@
 	const returning = $derived(
 		page.kind === "pending" && page.activity === "return",
 	);
+	const disconnecting = $derived(
+		page.kind === "pending" && page.activity === "disconnect",
+	);
 	const { quips, quipIdleDelayMs, quipIntervalMs } = CLIENT_LOADING_TUNING;
 	/** Real phase identity invalidates stale playful text synchronously with new page content. */
 	const phaseKey = $derived(
@@ -123,6 +126,7 @@
 <LoadingScreen
 	branding={returning ? "corner" : "hero"}
 	showPortalLogo={returning || page.kind !== "pending"}
+	showUpdates={!disconnecting}
 	pending={page.kind === "pending"}
 	{failed}
 	{headingIcon}

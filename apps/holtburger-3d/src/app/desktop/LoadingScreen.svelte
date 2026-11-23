@@ -11,6 +11,8 @@
 	interface Props {
 		readonly branding: "hero" | "corner";
 		readonly showPortalLogo: boolean;
+		/** Suppress native update registration on transient disconnect or close screens. */
+		readonly showUpdates?: boolean;
 		readonly pending: boolean;
 		readonly failed: boolean;
 		readonly headingIcon: "portal" | "warning" | "disconnect" | null;
@@ -28,6 +30,7 @@
 	const {
 		branding,
 		showPortalLogo,
+		showUpdates = true,
 		pending,
 		failed,
 		headingIcon,
@@ -47,7 +50,7 @@
 	const titleId = `${id}-loading-title`;
 </script>
 
-<PregameScreen {branding} {showPortalLogo} backdrop={false}>
+<PregameScreen {branding} {showPortalLogo} {showUpdates} backdrop={false}>
 	{#snippet footer()}
 		{@render footerActions()}
 		{#if contentLocation !== null}

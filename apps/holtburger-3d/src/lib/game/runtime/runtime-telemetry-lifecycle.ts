@@ -117,10 +117,10 @@ export interface RuntimeTeardownHooks {
 	readonly destroyGeometry: () => void;
 	readonly clearStaticDetails: () => void;
 	readonly assertNoRetainedSetupVisuals: () => void;
-	readonly destroyTextures: () => void;
+	readonly destroyTextures: () => Promise<void>;
 	readonly destroyResidentAtlas: () => void;
-	readonly destroyTerrainWorker: () => void;
-	readonly destroyTerrain: () => void;
+	readonly destroyTerrainWorker: () => Promise<void>;
+	readonly destroyTerrain: () => Promise<void>;
 	readonly destroyOcean: () => void;
 	readonly destroyEnvCells: () => void;
 	readonly clearTargetSoundTables: () => void;
@@ -129,8 +129,8 @@ export interface RuntimeTeardownHooks {
 	readonly destroySoundTables: () => void;
 	readonly clearAmbientState: () => void;
 	readonly releaseAmbientHandles: () => void;
-	readonly destroyVisualTemplates: () => void;
-	readonly destroyDynamicEntities: () => void;
+	readonly destroyVisualTemplates: () => Promise<void>;
+	readonly destroyDynamicEntities: () => Promise<void>;
 	readonly destroyAudio: () => void;
 	readonly destroyWorldPhysicsScripts: () => void;
 	readonly destroyPhysicsScripts: () => void;
@@ -139,9 +139,9 @@ export interface RuntimeTeardownHooks {
 	readonly clearPortalState: () => void;
 	readonly destroyRenderer: () => Promise<void> | undefined;
 	readonly disposeCombatEffects: () => void;
-	readonly destroySkyScripts: () => void;
-	readonly destroyEnvCellLayers: () => void;
-	readonly destroyStaticLayers: () => void;
+	readonly destroySkyScripts: () => Promise<void>;
+	readonly destroyEnvCellLayers: () => Promise<void>;
+	readonly destroyStaticLayers: () => Promise<void>;
 	readonly clearCommitArtifacts: () => void;
 	readonly destroySceneInterest: () => void;
 	readonly destroyLocalModels: (

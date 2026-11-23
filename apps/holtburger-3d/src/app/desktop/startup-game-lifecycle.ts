@@ -12,6 +12,11 @@ export class StartupGameLifecycle {
 	#mount: Promise<void> | null = null;
 	#close: Promise<ClientClosePreparation> | null = null;
 
+	/** True once native close preparation has started sealing this document. */
+	get closing(): boolean {
+		return this.#cancellation.signal.aborted;
+	}
+
 	/** Starts at most once; a close arriving before admission prevents construction entirely. */
 	start(mount: (signal: AbortSignal) => Promise<boolean>): Promise<void> {
 		if (this.#mount !== null) return this.#mount;

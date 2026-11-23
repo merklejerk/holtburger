@@ -6,6 +6,11 @@ import { HostCommandError } from "../../host/host-command-result";
 import { onTestFinished, describe, expect, it, vi } from "vitest";
 import { PresentationAssetService } from "./presentation-asset-service";
 import { DynamicEntitySystem } from "../systems/dynamic-entity-system";
+import { ObjectVisualTemplateRepository } from "../systems/object-visual-template-repository";
+import { SkyScriptSystem } from "../systems/sky-script-system";
+import { TerrainSystem } from "../terrain/terrain-system";
+import { WorkerTerrainGenerator } from "../terrain/terrain-worker-client";
+import { ResidentTextureAtlas } from "../textures/atlas/resident-texture-atlas";
 import type { EntityOverlayPresentation } from "../renderer/overlays/entity-overlay-policy";
 import { EffectSystem } from "../systems/effect-system";
 import { nameplateIconId } from "../systems/dynamic-presentation-source";
@@ -340,6 +345,114 @@ describe("GamePresentationRuntime retirement", () => {
 			errors: [failure],
 		});
 		expect(renderer.destroy).toHaveBeenCalledOnce();
+	});
+
+	it("awaits async coordinator teardowns before releasing dependent resources and retains template failures", async () => {
+		const order: string[] = [];
+		const sky = controlledPromise<void>();
+		const dynamics = controlledPromise<void>();
+		const templates = controlledPromise<void>();
+		const terrain = controlledPromise<void>();
+		const terrainWorker = controlledPromise<void>();
+		const templateFailure = new AggregateError(
+			[new Error("atlas withdrawal failed")],
+			"One or more visual-template resources failed to release.",
+		);
+
+		const runtime = await buildSpawnRuntime({
+			setupVisualSource: { load: async () => spawnedVisual() },
+			autoDestroy: false,
+		});
+
+		const skySpy = vi
+			.spyOn(SkyScriptSystem.prototype, "destroy")
+			.mockImplementation(async () => {
+				order.push("sky-scripts:start");
+				await sky.promise;
+				order.push("sky-scripts:end");
+			});
+		const dynamicsSpy = vi
+			.spyOn(DynamicEntitySystem.prototype, "destroy")
+			.mockImplementation(async () => {
+				order.push("dynamic-entities:start");
+				await dynamics.promise;
+				order.push("dynamic-entities:end");
+			});
+		const templatesSpy = vi
+			.spyOn(ObjectVisualTemplateRepository.prototype, "destroy")
+			.mockImplementation(async () => {
+				order.push("visual-templates:start");
+				await templates.promise;
+				order.push("visual-templates:end");
+				throw templateFailure;
+			});
+		const terrainSpy = vi
+			.spyOn(TerrainSystem.prototype, "destroy")
+			.mockImplementation(async () => {
+				order.push("terrain:start");
+				await terrain.promise;
+				order.push("terrain:end");
+			});
+		const terrainWorkerSpy = vi
+			.spyOn(WorkerTerrainGenerator.prototype, "destroy")
+			.mockImplementation(async () => {
+				order.push("terrain-worker:start");
+				await terrainWorker.promise;
+				order.push("terrain-worker:end");
+			});
+		const atlasSpy = vi
+			.spyOn(ResidentTextureAtlas.prototype, "destroy")
+			.mockImplementation(() => {
+				order.push("resident-atlas");
+			});
+		onTestFinished(() => {
+			skySpy.mockRestore();
+			dynamicsSpy.mockRestore();
+			templatesSpy.mockRestore();
+			terrainSpy.mockRestore();
+			terrainWorkerSpy.mockRestore();
+			atlasSpy.mockRestore();
+		});
+
+		const retirement = runtime.destroy();
+		const rejection = expect(retirement).rejects.toMatchObject({
+			message: "Presentation teardown failed for: visual-templates.",
+			errors: [templateFailure],
+		});
+		await vi.waitFor(() => expect(order).toContain("sky-scripts:start"));
+		expect(order).not.toContain("dynamic-entities:start");
+		sky.resolve();
+
+		await vi.waitFor(() => expect(order).toContain("dynamic-entities:start"));
+		expect(order).not.toContain("visual-templates:start");
+		dynamics.resolve();
+
+		await vi.waitFor(() => expect(order).toContain("visual-templates:start"));
+		expect(order).not.toContain("resident-atlas");
+		templates.resolve();
+
+		await vi.waitFor(() => expect(order).toContain("terrain:start"));
+		expect(order).not.toContain("terrain-worker:start");
+		terrain.resolve();
+
+		await vi.waitFor(() => expect(order).toContain("terrain-worker:start"));
+		expect(order).not.toContain("resident-atlas");
+		terrainWorker.resolve();
+
+		await rejection;
+		expect(order).toEqual([
+			"sky-scripts:start",
+			"sky-scripts:end",
+			"dynamic-entities:start",
+			"dynamic-entities:end",
+			"visual-templates:start",
+			"visual-templates:end",
+			"terrain:start",
+			"terrain:end",
+			"terrain-worker:start",
+			"terrain-worker:end",
+			"resident-atlas",
+		]);
 	});
 });
 

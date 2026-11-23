@@ -8,6 +8,7 @@
 	import PortalLogo from "../../../../../assets/branding/portal.svg?component";
 	import AppUpdateIndicator from "./AppUpdateIndicator.svelte";
 	import { uiScale } from "../theme/ui-scale";
+	import { isElectronDocumentClosing } from "../../lib/host/electron-host-transport";
 	import { useAppInputPolicy } from "../../lib/input/app-input-policy-context";
 	import "./pregame.css";
 	import "../theme/holtburger-pregame.css";
@@ -19,6 +20,8 @@
 		readonly showPortalLogo: boolean;
 		/** Ready world scenery remains visible beneath the foreground composition. */
 		readonly backdrop: boolean;
+		/** Suppress native update registration on transient disconnect or close screens. */
+		readonly showUpdates?: boolean;
 		/** Optional centered header notice (for example launcher error preview). */
 		readonly headerCenter?: Snippet;
 		/** Page-owned controls or status placed opposite corner branding. */
@@ -36,6 +39,7 @@
 		branding,
 		showPortalLogo,
 		backdrop,
+		showUpdates = true,
 		headerCenter,
 		headerAside,
 		onDefaultKeydown,
@@ -126,7 +130,9 @@
 		<footer class="pregame-footer">
 			{@render footer()}
 			<div class="pregame-build">
-				<AppUpdateIndicator />
+				{#if showUpdates && !isElectronDocumentClosing()}
+					<AppUpdateIndicator />
+				{/if}
 				{#if footerAside}{@render footerAside()}{/if}
 			</div>
 		</footer>

@@ -15,7 +15,7 @@ Holtburger looks for your game data automatically. If it cannot find your DATs, 
 
 Choose the folder containing `client_portal.dat`, `client_cell_1.dat`, and `client_local_English.dat`. Keep `client_highres.dat` alongside them if you have it.
 
-Keep the folder somewhere permanent, outside the Holtburger application directory.
+Keep the folder somewhere permanent, outside the Holtburger application directory. You can change the default folder anytime in the launcher under **App settings → Content** without restarting. [World Explorer](/holtburger/3d/explorer/) uses the same default folder unless overridden in its **Advanced** options.
 
 ## Need the DATs?
 

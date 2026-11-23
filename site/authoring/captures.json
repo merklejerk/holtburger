@@ -19,6 +19,10 @@
 		"terminal": {
 			"title": "TUI gameplay and scripts",
 			"setup": "Use a real terminal session with a prepared character and the shipped scripts. Show pane focus and the footer; choose a large enough terminal font for the final website size. All interactive TUI capture belongs to the user."
+		},
+		"explorer": {
+			"title": "Offline World Explorer",
+			"setup": "Launch Explorer from the launcher's Explorer tab using retail DATs and the bundled weenie catalog. Set HUD window opacity to 100%, close unrelated windows, and choose a recognizable Dereth backdrop."
 		}
 	},
 	"captures": {
@@ -588,6 +592,22 @@
 			"setup": "Temporary browser fixture using real equipment artwork decoded from game assets and production item cells and theme, with one cell per ranked cantrip tier.",
 			"framing": "A compact row of six different equipment icons with labels Feeble through Legendary; no containing window frame or title.",
 			"expected": "All six ranked borders are readable, including the Legendary specular highlight.",
+			"priority": "first"
+		},
+		"explorer-showcase": {
+			"owner": "user",
+			"session": "explorer",
+			"setup": "A scenic outdoor Dereth location with a spawned creature selected and Explorer's Inspect and Navigation panels open.",
+			"framing": "Full viewport with the selected entity, Inspect panel, Navigation world map, minimap, and shortcut dock visible.",
+			"expected": "Shows Explorer's offline Dereth rendering, spawned content, transform gizmo, and floating HUD together.",
+			"priority": "first"
+		},
+		"explorer-gizmo": {
+			"owner": "user",
+			"session": "explorer",
+			"setup": "A spawned creature or prop selected so physics is paused and the 6-DOF transform gizmo is clearly visible.",
+			"framing": "Tight crop around the posed entity and its colored translate arrows and rotation rings.",
+			"expected": "Shows the 6-DOF transform gizmo clearly over a posed scene.",
 			"priority": "first"
 		}
 	}

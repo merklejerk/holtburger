@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { asset, resolve } from '$app/paths';
+	import Media from '#lib/components/Media.svelte';
 	import MediaCarousel from '#lib/components/MediaCarousel.svelte';
 	import DecorativeArt from '#lib/components/DecorativeArt.svelte';
 	import { downloads } from '#lib/downloads.svelte.ts';
@@ -134,5 +135,25 @@
 			>
 			<figcaption>The terminal client.</figcaption>
 		</figure>
+	</section>
+
+	<section class="explorer-spread">
+		<div>
+			<h2>Wander Dereth<br />offline</h2>
+			<p>
+				The 3D download also includes World Explorer, an offline mode opened
+				straight from the launcher with no server required. Fly across
+				landblocks and dungeons, jump straight to coordinates or the world map,
+				and dial in time of day, skies, and lighting.
+			</p>
+			<p>
+				With the bundled weenie catalog, you can spawn creatures and props, pose
+				them with a 3D transform gizmo, or possess a creature to run through the
+				world yourself—handy for sightseeing, screenshots, and inspecting game
+				assets.
+			</p>
+			<p><a href={guide('3d/explorer')}>See World Explorer →</a></p>
+		</div>
+		<Media id="explorer-showcase" />
 	</section>
 </main>

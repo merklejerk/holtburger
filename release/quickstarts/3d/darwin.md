@@ -57,9 +57,12 @@ one replaces the other. Nightlies do not check for updates.
 
 ## Optional: offline Explorer
 
+Switch to the **Explorer** tab in the launcher to fly across Dereth, spawn and pose entities, possess creatures, and inspect lighting without connecting to a server. Release builds bundle the weenie catalog automatically.
+
+You can also launch Explorer directly from a terminal:
+
 ```sh
 /Applications/holtburger-3d.app/Contents/MacOS/holtburger-3d explorer --content '/path/to/retail'
 ```
 
-Explorer lets you browse game content without connecting to a server. For a
-portable ZIP, use `./h3d/holtburger-3d.app/Contents/MacOS/holtburger-3d` instead.
+For a portable ZIP, use `./h3d/holtburger-3d.app/Contents/MacOS/holtburger-3d` instead.

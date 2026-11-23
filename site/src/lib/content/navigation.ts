@@ -147,6 +147,10 @@ export const navigation = [
 				label: 'Barber & appearance'
 			},
 			{
+				slug: '3d/explorer',
+				label: 'World Explorer'
+			},
+			{
 				slug: '3d/help',
 				label: 'Help'
 			}
@@ -202,7 +206,7 @@ export const navigation = [
 			},
 			{
 				slug: 'tools',
-				label: 'Explorer & tools'
+				label: 'Tools & development'
 			}
 		]
 	}

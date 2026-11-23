@@ -66,7 +66,9 @@ one replaces the other. Nightlies do not check for updates.
 
 ## Optional: offline Explorer
 
-For Flatpak:
+Switch to the **Explorer** tab in the launcher to fly across Dereth, spawn and pose entities, possess creatures, and inspect lighting without connecting to a server. Release builds bundle the weenie catalog automatically.
+
+You can also launch Explorer directly from a terminal. For Flatpak:
 
 ```sh
 flatpak run --filesystem='/absolute/path/to/retail:ro' io.github.merklejerk.holtburger-3d explorer --content '/absolute/path/to/retail'
@@ -77,5 +79,3 @@ For a portable archive:
 ```sh
 ./h3d/holtburger-3d explorer --content '/path/to/retail'
 ```
-
-Explorer lets you browse game content without connecting to a server.

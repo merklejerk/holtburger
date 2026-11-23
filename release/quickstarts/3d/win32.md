@@ -83,10 +83,10 @@ when reporting the problem. Use `/fps` in the game to compare frame rates.
 
 ## Optional: offline Explorer
 
-In PowerShell, from an extracted portable archive:
+Switch to the **Explorer** tab in the launcher to fly across Dereth, spawn and pose entities, possess creatures, and inspect lighting without connecting to a server. Release builds bundle the weenie catalog automatically.
+
+You can also launch Explorer directly from PowerShell in an extracted portable archive:
 
 ```powershell
 .\h3d\holtburger-3d.exe explorer --content 'C:\path\to\retail'
 ```
-
-Explorer lets you browse game content without connecting to a server.

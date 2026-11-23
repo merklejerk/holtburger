@@ -1,6 +1,6 @@
 ---
-title: 'Explorer & tools'
-description: 'Browse content offline or inspect data with the included utilities.'
+title: 'Tools & development'
+description: 'Inspect data with the included command-line utilities or build Holtburger from source.'
 section: 'Tools'
 ---
 
@@ -10,11 +10,11 @@ import IllustratedProse from '#lib/components/IllustratedProse.svelte';
 
 <IllustratedProse name="black-hills">
 
-## Offline Explorer
+## Offline World Explorer
 
-Explorer lets you browse game content without connecting to a server. It needs the same full game data used by the 3D client.
+Explorer is built into Holtburger 3D and opens straight from the launcher’s **Explorer** tab—no server required. See the [World Explorer guide](/holtburger/3d/explorer/) for flying, spawning and posing entities, creature possession, and lighting controls.
 
-The [Windows](/holtburger/start/3d/windows/#optional-offline-explorer), [macOS](/holtburger/start/3d/macos/#optional-offline-explorer), and [Linux](/holtburger/start/3d/linux/#optional-offline-explorer) quickstarts include the command for their installed or portable bundle.
+For launching Explorer directly from a terminal, see the [Windows](/holtburger/start/3d/windows/#optional-offline-explorer), [macOS](/holtburger/start/3d/macos/#optional-offline-explorer), and [Linux](/holtburger/start/3d/linux/#optional-offline-explorer) quickstarts.
 
 </IllustratedProse>
 

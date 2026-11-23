@@ -9,7 +9,7 @@ import IllustratedProse from '#lib/components/IllustratedProse.svelte';
 import Media from '#lib/components/Media.svelte';
 </script>
 
-The launcher keeps your servers, account profiles and game-data settings together. Select a server on the left, choose or enter your account on the right, then press **Play**.
+The launcher keeps your servers, account profiles, game-data settings, and offline [World Explorer](/holtburger/3d/explorer/) together. On the **Client** tab, select a server on the left, choose or enter your account on the right, then press **Play**. Switch to the **Explorer** tab when you want to browse Dereth offline without connecting to a server.
 
 <Media id="launcher" />
 
@@ -41,9 +41,13 @@ For failed connections, see [Help](/holtburger/3d/help/).
 
 ## Launch settings
 
-Open **App settings** in the launcher to choose a graphics backend and toggle **Synchronize frames with the display (VSync)** or **Use GPU compositing**. Apply changes with **Save and restart**. Windows defaults to Direct3D 11 with VSync off and GPU compositing on; **Use defaults** restores your platform's choices.
+Open **App settings** in the launcher to manage application-wide preferences:
 
-For explanations of each setting, see [graphics troubleshooting](/holtburger/3d/help/#before-the-game-opens). If pieces of the interface briefly disappear, see [Windows UI flickering](/holtburger/3d/help/#windows-ui-flickering).
+- **Graphics:** Choose a graphics backend and toggle **Synchronize frames with the display (VSync)** or **Use GPU compositing**. Apply changes with **Save and restart**; **Use defaults** restores your platform’s choices.
+- **Content:** Set or change the default [game-data folder](/holtburger/startup/game-data/) shared by the client and World Explorer without restarting.
+- **Diagnostics:** View current graphics details and **Copy hardware info** when reporting visual issues.
+
+For explanations of each graphics setting, see [graphics troubleshooting](/holtburger/3d/help/#before-the-game-opens). If pieces of the interface briefly disappear, see [Windows UI flickering](/holtburger/3d/help/#windows-ui-flickering).
 
 ## Switch characters
 

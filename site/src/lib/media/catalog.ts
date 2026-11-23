@@ -949,6 +949,28 @@ export const media = {
 		alt: 'Enchantments window with loaded spell icons, grouped effects, durations and an expanded armor description.',
 		width: 347,
 		height: 524
+	},
+	'explorer-showcase': {
+		kind: 'image',
+		title: 'World Explorer in Dereth',
+		source: {
+			kind: 'remote',
+			url: 'https://merklejerk.github.io/holtburger-media/3d/explorer-showcase-v1.webp'
+		},
+		alt: 'World Explorer overlooking the Singularity Caul with a spawned Tremendous Monouga selected on a platform, the Inspect window open on the left, the Navigation world map on the right, and the minimap and shortcut dock along the right edge.',
+		width: 1769,
+		height: 1024
+	},
+	'explorer-gizmo': {
+		kind: 'image',
+		title: 'Pose entities with the 3D gizmo',
+		source: {
+			kind: 'remote',
+			url: 'https://merklejerk.github.io/holtburger-media/3d/explorer-gizmo-v1.webp'
+		},
+		alt: 'A spawned Drudge posed reclining on a red tufted couch with the 6-DOF translate arrows and rotation rings centered over the selection.',
+		width: 521,
+		height: 473
 	}
 } satisfies Record<string, MediaAsset>;
 
@@ -965,6 +987,7 @@ export const galleryImages: MediaId[] = [
 	'jump',
 	'map',
 	'characters',
-	'terminal'
+	'terminal',
+	'explorer-showcase'
 ];
 export const galleryClips: MediaId[] = ['smart-tab', 'jump-demo', 'loadouts'];

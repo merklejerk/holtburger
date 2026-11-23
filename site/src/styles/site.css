@@ -377,7 +377,8 @@ figcaption {
 	width: 66%;
 }
 .foundation-spread h2,
-.terminal-spread h2 {
+.terminal-spread h2,
+.explorer-spread h2 {
 	color: var(--accent);
 }
 .editorial-vignette {
@@ -389,14 +390,16 @@ figcaption {
 	opacity: 0.2;
 	pointer-events: none;
 }
-.terminal-spread {
+.terminal-spread,
+.explorer-spread {
 	display: grid;
 	grid-template-columns: 0.8fr 1.2fr;
 	gap: 2.5rem;
 	align-items: start;
 	padding-block: 2.5rem 1rem;
 }
-.terminal-plate {
+.terminal-plate,
+.explorer-spread .media-figure {
 	margin: 0;
 }
 .site-footer {
@@ -993,7 +996,8 @@ figcaption {
 	.player-argument {
 		padding: 0.8rem 2rem 2.5rem;
 	}
-	.terminal-spread {
+	.terminal-spread,
+	.explorer-spread {
 		grid-template-columns: minmax(0, 1fr);
 		gap: 1rem;
 		padding-block: 1.5rem;

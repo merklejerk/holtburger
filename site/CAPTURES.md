@@ -665,3 +665,25 @@ Use a real terminal session with a prepared character and the shipped scripts. S
 - Action/purpose: Show the prompt with relevant item and footer actions.
 - Expected result: The reader recognizes how a multi-step inventory task is presented.
 - Used in: [tui/gameplay/#inventory-and-equipment](https://merklejerk.github.io/holtburger/tui/gameplay/#inventory-and-equipment)
+
+## Offline World Explorer
+
+Launch Explorer from the launcher's Explorer tab using retail DATs and the bundled weenie catalog. Set HUD window opacity to 100%, close unrelated windows, and choose a recognizable Dereth backdrop.
+
+### World Explorer in Dereth
+
+**First · user · available · still** — ID: `explorer-showcase`
+
+- Setup: A scenic outdoor Dereth location with a spawned creature selected and Explorer's Inspect and Navigation panels open.
+- Frame: Full viewport with the selected entity, Inspect panel, Navigation world map, minimap, and shortcut dock visible.
+- Expected result: Shows Explorer's offline Dereth rendering, spawned content, transform gizmo, and floating HUD together.
+- Used in: [3d/explorer/](https://merklejerk.github.io/holtburger/3d/explorer/), [gallery/#screenshots](https://merklejerk.github.io/holtburger/gallery/#screenshots)
+
+### Pose entities with the 3D gizmo
+
+**First · user · available · still** — ID: `explorer-gizmo`
+
+- Setup: A spawned creature or prop selected so physics is paused and the 6-DOF transform gizmo is clearly visible.
+- Frame: Tight crop around the posed entity and its colored translate arrows and rotation rings.
+- Expected result: Shows the 6-DOF transform gizmo clearly over a posed scene.
+- Used in: [3d/explorer/#spawn-pose-and-possess](https://merklejerk.github.io/holtburger/3d/explorer/#spawn-pose-and-possess)

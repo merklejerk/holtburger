@@ -53,6 +53,7 @@ import {
 	ExplorerCameraInputController,
 	type CharacterActionInput,
 	type FrontendControlScheme,
+	type PrimaryPointerOverlay,
 } from "./camera-input-controller";
 import {
 	formatExplorerCameraResidency,
@@ -101,6 +102,7 @@ export interface ExplorerCameraAuthorityDependencies {
 		clientX: number,
 		clientY: number,
 	) => void;
+	readonly primaryPointerOverlay?: PrimaryPointerOverlay;
 	readonly onReleasePossession: () => Promise<unknown>;
 	readonly onCameraFocusStatusChange: (
 		status: ExplorerCameraFocusStatus,
@@ -220,6 +222,7 @@ export class ExplorerCameraAuthorityController {
 			onViewportSecondaryClick: (clientX, clientY) => {
 				this.deps.onViewportSecondaryClick?.(clientX, clientY);
 			},
+			primaryPointerOverlay: this.deps.primaryPointerOverlay,
 			onPointerLockError: (message) => {
 				this.deps.onPhysicalCameraErrorChange(message);
 			},
@@ -369,6 +372,11 @@ export class ExplorerCameraAuthorityController {
 	/** Exact camera/extent pair most recently presented to the renderer. */
 	lastPrimaryView(): PrimaryCameraView | null {
 		return this.cameraCoordinator?.lastPrimaryView() ?? null;
+	}
+
+	/** Cancel any active overlay primary drag (Escape, HUD hide, selection switch). */
+	cancelPrimaryDrag(): boolean {
+		return this.cameraController?.cancelPrimaryDrag() ?? false;
 	}
 
 	sceneInterestSnapshot() {

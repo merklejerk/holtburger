@@ -150,6 +150,18 @@ pub struct ExplorerEntityRelocationRequest {
     pub kind: ExplorerEntityRelocationKind,
 }
 
+/// One exact-generation direct world-pose edit (used by Explorer transform gizmos).
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExplorerEntityTransformRequest {
+    /// Exact current entity identity.
+    pub guid: Guid,
+    /// Exact current instance generation.
+    pub generation: u64,
+    /// Explicit target world position and orientation; normalized and cell-resolved on the host.
+    pub pose: WorldPosition,
+}
+
 /// One exact live generation plus the complete catalog-backed facts for its successor.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ExplorerEntityReplaceRequest {
@@ -612,10 +624,12 @@ impl ExplorerEntityDriver {
             content.setup.movement_spheres.primary().center * content.object_scale,
             content.setup.movement_spheres.primary().radius * content.object_scale,
         )?;
+        let primary_movement_sphere = content.setup.movement_spheres.primary();
         let children = self.prepare_held_children(guid, resolved_appearance.wielded)?;
         Ok((
             ExplorerPreparedEntity {
                 presentation_class,
+                primary_movement_sphere: Some(primary_movement_sphere),
                 definition,
             },
             physical,
@@ -657,6 +671,7 @@ impl ExplorerEntityDriver {
             }
             children.push(ExplorerPreparedEntity {
                 presentation_class: DynamicEntityPresentationClass::Other,
+                primary_movement_sphere: None,
                 definition: DynamicEntityDefinition::prepare(template_definition_input(
                     &template,
                     weenie_type,
@@ -752,20 +767,87 @@ impl ExplorerEntityDriver {
             .lock()
             .expect("Explorer entity driver lock poisoned");
         let instance = self.entities.instance(request.guid, request.generation)?;
-        let setup = self.content.prepare_setup(
-            instance.definition.identity.wcid,
-            instance.definition.content.setup_did,
-        )?;
+        let sphere = match instance.primary_movement_sphere {
+            Some(sphere) => sphere,
+            None => self
+                .content
+                .prepare_setup(
+                    instance.definition.identity.wcid,
+                    instance.definition.content.setup_did,
+                )?
+                .movement_spheres
+                .primary(),
+        };
         let candidate = candidate_pose(request.camera_pose, request.candidate, request.rotation)?;
         let pose = resolve_spawn_placement(
             &self.simulation.snapshot(),
             request.camera_pose,
             candidate,
-            setup.movement_spheres.primary().center * instance.definition.object_scale,
-            setup.movement_spheres.primary().radius * instance.definition.object_scale,
+            sphere.center * instance.definition.object_scale,
+            sphere.radius * instance.definition.object_scale,
         )?;
         self.entities
             .relocate(request.guid, request.generation, pose, self.clock.now())
+            .map_err(ExplorerEntityDriverError::from)
+    }
+
+    /// Directly sets one exact live generation's pose and resolves cell/landblock containment
+    /// relative to the entity's previous cell (without camera-ray spawn framing).
+    pub fn set_transform(
+        &self,
+        request: ExplorerEntityTransformRequest,
+    ) -> Result<ExplorerEntityRelocationOutcome, ExplorerEntityDriverError> {
+        let _operation = self
+            .operation
+            .lock()
+            .expect("Explorer entity driver lock poisoned");
+        let instance = self.entities.instance(request.guid, request.generation)?;
+        let previous_pose = self
+            .entities
+            .current_pose(request.guid, request.generation)?;
+        let sphere = match instance.primary_movement_sphere {
+            Some(sphere) => sphere,
+            None => self
+                .content
+                .prepare_setup(
+                    instance.definition.identity.wcid,
+                    instance.definition.content.setup_did,
+                )?
+                .movement_spheres
+                .primary(),
+        };
+        let candidate = direct_candidate_pose(request.pose)?;
+        // Prefer the entity's live indoor cell for portal continuity, falling back to an explicit
+        // indoor candidate cell so Escape-cancel can always return an entity indoors cleanly.
+        let seed_cell = is_env_cell(previous_pose.landblock_id)
+            .then_some(previous_pose.landblock_id)
+            .or_else(|| is_env_cell(candidate.landblock_id).then_some(candidate.landblock_id));
+        let pose = resolve_placement(
+            &self.simulation.snapshot(),
+            seed_cell,
+            candidate,
+            sphere.center * instance.definition.object_scale,
+            sphere.radius * instance.definition.object_scale,
+        )?;
+        self.entities
+            .relocate(request.guid, request.generation, pose, self.clock.now())
+            .map_err(ExplorerEntityDriverError::from)
+    }
+
+    /// Updates the host's selected Explorer entity and reconciles selection-scoped physics suspension.
+    pub fn set_selected_entity(
+        &self,
+        selection: Option<crate::explorer_entity_runtime::ExplorerSelectionTarget>,
+    ) -> Result<
+        crate::explorer_entity_runtime::ExplorerSelectionChangeOutcome,
+        ExplorerEntityDriverError,
+    > {
+        let _operation = self
+            .operation
+            .lock()
+            .expect("Explorer entity driver lock poisoned");
+        self.entities
+            .set_selected_entity(selection, self.clock.now())
             .map_err(ExplorerEntityDriverError::from)
     }
 
@@ -1101,9 +1183,66 @@ fn template_weenie_type(
     )
 }
 
+fn direct_candidate_pose(pose: WorldPosition) -> Result<WorldPosition, ExplorerEntityDriverError> {
+    if pose.landblock_id == Guid::NULL {
+        return Err(ExplorerEntityDriverError::Placement(
+            "Explorer entity transform pose has no landblock".to_owned(),
+        ));
+    }
+    if !pose.coords.x.is_finite() || !pose.coords.y.is_finite() || !pose.coords.z.is_finite() {
+        return Err(ExplorerEntityDriverError::Placement(
+            "Explorer entity transform coordinates must be finite".to_owned(),
+        ));
+    }
+    let q = pose.rotation;
+    if !q.w.is_finite() || !q.x.is_finite() || !q.y.is_finite() || !q.z.is_finite() {
+        return Err(ExplorerEntityDriverError::Placement(
+            "Explorer entity transform rotation must be finite".to_owned(),
+        ));
+    }
+    let norm = (q.w * q.w + q.x * q.x + q.y * q.y + q.z * q.z).sqrt();
+    if !norm.is_finite() || norm <= f32::EPSILON {
+        return Err(ExplorerEntityDriverError::Placement(
+            "Explorer entity transform rotation must be nonzero".to_owned(),
+        ));
+    }
+    let rotation = Quaternion {
+        w: q.w / norm,
+        x: q.x / norm,
+        y: q.y / norm,
+        z: q.z / norm,
+    };
+    Ok(WorldPosition {
+        landblock_id: pose.landblock_id,
+        coords: pose.coords,
+        rotation,
+    })
+}
+
+fn is_env_cell(cell_id: Guid) -> bool {
+    let low = cell_id.0 & 0xffff;
+    low >= 0x0100 && low != 0xffff
+}
+
 fn resolve_spawn_placement(
     collision: &holtburger_world::CollisionScene,
     camera_pose: WorldPosition,
+    candidate_pose: WorldPosition,
+    local_sphere_center: Vector3,
+    sphere_radius: f32,
+) -> Result<WorldPosition, ExplorerEntityDriverError> {
+    resolve_placement(
+        collision,
+        is_env_cell(camera_pose.landblock_id).then_some(camera_pose.landblock_id),
+        candidate_pose,
+        local_sphere_center,
+        sphere_radius,
+    )
+}
+
+fn resolve_placement(
+    collision: &holtburger_world::CollisionScene,
+    previous_cell: Option<Guid>,
     mut candidate_pose: WorldPosition,
     local_sphere_center: Vector3,
     sphere_radius: f32,
@@ -1112,7 +1251,7 @@ fn resolve_spawn_placement(
     let center = candidate_pose.coords + candidate_pose.rotation.rotate_vector(local_sphere_center);
     let placement = collision
         .transit_cell(CellTransitRequest {
-            previous_cell: camera_pose.is_indoors().then_some(camera_pose.landblock_id),
+            previous_cell,
             anchor,
             center,
             radius: sphere_radius,
@@ -1123,6 +1262,17 @@ fn resolve_spawn_placement(
             .reanchor_to_landblock_owner(Guid((cell.0 & 0xffff_0000) | 0xffff))
             .map_err(|error| ExplorerEntityDriverError::Placement(error.to_string()))?;
         candidate_pose.landblock_id = cell;
+        return Ok(candidate_pose);
+    }
+    if let Some(prior_cell) = previous_cell
+        && !placement.reaches_outdoors()
+    {
+        // Never eject an indoor/dungeon entity into an outdoor landblock unless an outdoor portal
+        // was actually reached; retain the prior indoor cell frame so wall drags stay indoors.
+        candidate_pose = candidate_pose
+            .reanchor_to_landblock_owner(Guid((prior_cell.0 & 0xffff_0000) | 0xffff))
+            .map_err(|error| ExplorerEntityDriverError::Placement(error.to_string()))?;
+        candidate_pose.landblock_id = prior_cell;
         return Ok(candidate_pose);
     }
 
@@ -2401,6 +2551,287 @@ mod tests {
         assert!(
             entities.snapshot().unwrap().is_empty(),
             "an unavailable catalog must never produce a fallback entity"
+        );
+    }
+
+    #[test]
+    fn selection_suspends_physics_holds_launch_until_deselect_and_preserves_authored_participation()
+    {
+        use crate::explorer_entity_runtime::ExplorerSelectionTarget;
+
+        let mut ball = template(239);
+        ball.maximum_velocity = Some(12.0);
+        ball.physics.overrides.gravity = Some(true);
+        let (entities, driver) = driver(vec![ball], FixturePhysical::Prepares);
+        let spawned = driver
+            .spawn_by_wcid(request(239, ExplorerPhysicalMode::Integrated))
+            .unwrap();
+        let guid = spawned.instance.definition.identity.guid;
+        let generation = spawned.instance.generation;
+        let target = ExplorerSelectionTarget { guid, generation };
+
+        // Selecting suspends the physical body while keeping authored participation as Physical.
+        let selected = driver.set_selected_entity(Some(target)).unwrap();
+        assert!(selected.status.suspended);
+        assert!(!selected.status.launch_queued);
+        let projected = entities.project(guid).unwrap();
+        assert_eq!(
+            projected.input.placement.world().unwrap().participation,
+            holtburger_world::PhysicalBodyParticipation::Physical
+        );
+
+        // Direct transform moves and rotates arbitrarily without clamping.
+        let elevated_pose = WorldPosition {
+            landblock_id: spawned.body.body.runtime_pose.landblock_id,
+            coords: Vector3::new(14.0, 22.0, 8.5),
+            rotation: Quaternion {
+                w: 0.0,
+                x: 0.0,
+                y: 0.0,
+                z: 2.0,
+            },
+        };
+        let transformed = driver
+            .set_transform(ExplorerEntityTransformRequest {
+                guid,
+                generation,
+                pose: elevated_pose,
+            })
+            .unwrap();
+        assert_eq!(transformed.body.runtime_pose.coords, elevated_pose.coords);
+        assert!((transformed.body.runtime_pose.rotation.z - 1.0).abs() < 1e-5);
+
+        // Launching while selected queues the launch without imparting live velocity yet.
+        let launched = driver
+            .launch(ExplorerEntityLaunchRequest {
+                guid,
+                generation,
+                direction: Vector3::new(1.0, 0.0, 0.25),
+            })
+            .unwrap();
+        assert!(launched.queued);
+        assert_eq!(
+            driver
+                .simulation
+                .physical_body_snapshot(holtburger_world::SpatialBodyId::Entity(guid))
+                .unwrap()
+                .retained
+                .velocity,
+            Vector3::zero(),
+            "held launch must not impart velocity while selected"
+        );
+
+        // Deselecting restores the physical body and immediately fires the queued launch.
+        let deselected = driver.set_selected_entity(None).unwrap();
+        assert!(!deselected.status.suspended);
+        assert!(!deselected.status.launch_queued);
+        assert!(deselected.changed_guids.contains(&guid));
+        let live = entities.project(guid).unwrap();
+        let live_world = live.input.placement.world().unwrap();
+        assert_eq!(
+            live_world.participation,
+            holtburger_world::PhysicalBodyParticipation::Physical
+        );
+        let retained_velocity = driver
+            .simulation
+            .physical_body_snapshot(holtburger_world::SpatialBodyId::Entity(guid))
+            .unwrap()
+            .retained
+            .velocity;
+        assert!(
+            retained_velocity.x > 0.0,
+            "queued launch must execute upon deselect, got {retained_velocity:?}"
+        );
+    }
+
+    #[test]
+    fn selection_preserves_physics_mode_edits_and_rejects_invalid_direct_transforms() {
+        use crate::explorer_entity_runtime::ExplorerSelectionTarget;
+
+        let (entities, driver) = driver(vec![template(42)], FixturePhysical::Prepares);
+        let spawned = driver
+            .spawn_by_wcid(request(42, ExplorerPhysicalMode::PoseOnly))
+            .unwrap();
+        let guid = spawned.instance.definition.identity.guid;
+        let generation = spawned.instance.generation;
+        let target = ExplorerSelectionTarget { guid, generation };
+
+        // Selecting a PoseOnly entity does not falsely report physics as suspended or emit spurious upserts.
+        let selected = driver.set_selected_entity(Some(target)).unwrap();
+        assert!(!selected.status.suspended);
+        assert!(!selected.status.launch_queued);
+        assert!(selected.changed_guids.is_empty());
+
+        // Launching a PoseOnly entity while selected still fails loudly.
+        assert!(
+            driver
+                .launch(ExplorerEntityLaunchRequest {
+                    guid,
+                    generation,
+                    direction: Vector3::new(1.0, 0.0, 0.0),
+                })
+                .is_err()
+        );
+
+        // Switching PoseOnly -> Integrated while selected updates authored participation without
+        // installing live physics until deselect.
+        let gravity_only =
+            holtburger_core::DynamicEntityPhysicsFlags::from_physics_state(PhysicsState::GRAVITY);
+        let updated = driver
+            .replace_physics_flags(
+                guid,
+                generation,
+                gravity_only,
+                ExplorerPhysicalMode::Integrated,
+            )
+            .unwrap();
+        assert_eq!(
+            updated.body.participation,
+            holtburger_world::PhysicalBodyParticipation::Physical
+        );
+        assert_eq!(
+            entities
+                .project(guid)
+                .unwrap()
+                .input
+                .placement
+                .world()
+                .unwrap()
+                .participation,
+            holtburger_world::PhysicalBodyParticipation::Physical
+        );
+
+        // Invalid direct transforms fail loudly.
+        for bad_pose in [
+            WorldPosition {
+                landblock_id: Guid::NULL,
+                coords: Vector3::zero(),
+                rotation: Quaternion::identity(),
+            },
+            WorldPosition {
+                landblock_id: Guid(0x0001_ffff),
+                coords: Vector3::new(f32::NAN, 0.0, 0.0),
+                rotation: Quaternion::identity(),
+            },
+            WorldPosition {
+                landblock_id: Guid(0x0001_ffff),
+                coords: Vector3::zero(),
+                rotation: Quaternion {
+                    w: 0.0,
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+            },
+        ] {
+            assert!(
+                driver
+                    .set_transform(ExplorerEntityTransformRequest {
+                        guid,
+                        generation,
+                        pose: bad_pose,
+                    })
+                    .is_err()
+            );
+        }
+
+        // Deselecting installs the prepared Integrated physical body cleanly.
+        let deselected = driver.set_selected_entity(None).unwrap();
+        assert!(deselected.changed_guids.contains(&guid));
+        assert_eq!(
+            entities
+                .project(guid)
+                .unwrap()
+                .input
+                .placement
+                .world()
+                .unwrap()
+                .participation,
+            holtburger_world::PhysicalBodyParticipation::Physical
+        );
+    }
+
+    #[test]
+    fn selection_switch_fires_prior_queued_launch_and_direct_transform_rolls_across_landblock() {
+        use crate::explorer_entity_runtime::ExplorerSelectionTarget;
+
+        let mut ball = template(42);
+        ball.maximum_velocity = Some(12.0);
+        ball.physics.overrides.gravity = Some(true);
+        let (_entities, driver) = driver(vec![ball], FixturePhysical::Prepares);
+        let first = driver
+            .spawn_by_wcid(request(42, ExplorerPhysicalMode::Integrated))
+            .unwrap();
+        let second = driver
+            .spawn_by_wcid(request(42, ExplorerPhysicalMode::Integrated))
+            .unwrap();
+        let first_target = ExplorerSelectionTarget {
+            guid: first.instance.definition.identity.guid,
+            generation: first.instance.generation,
+        };
+        let second_target = ExplorerSelectionTarget {
+            guid: second.instance.definition.identity.guid,
+            generation: second.instance.generation,
+        };
+
+        // Select first, drag it west across an outdoor landblock seam (coords.x < 0 into loaded 0xda55ffff), and arm a launch.
+        let selected_first = driver.set_selected_entity(Some(first_target)).unwrap();
+        assert!(selected_first.status.suspended);
+
+        let initial_pose = first.body.body.runtime_pose;
+        let rolled = driver
+            .set_transform(ExplorerEntityTransformRequest {
+                guid: first_target.guid,
+                generation: first_target.generation,
+                pose: WorldPosition {
+                    landblock_id: initial_pose.landblock_id,
+                    coords: Vector3::new(-13.0, 12.0, 4.0),
+                    rotation: Quaternion::identity(),
+                },
+            })
+            .unwrap();
+        assert_ne!(
+            rolled.body.runtime_pose.landblock_id.0 >> 16,
+            initial_pose.landblock_id.0 >> 16,
+            "dragging west past 0m must roll over to the adjacent outdoor landblock"
+        );
+        assert!(
+            (rolled.body.runtime_pose.coords.x - 179.0).abs() < 1e-3,
+            "rolled-over local x should wrap cleanly to 192 - 13 = 179, got {}",
+            rolled.body.runtime_pose.coords.x
+        );
+
+        let queued = driver
+            .launch(ExplorerEntityLaunchRequest {
+                guid: first_target.guid,
+                generation: first_target.generation,
+                direction: Vector3::new(0.0, 1.0, 0.0),
+            })
+            .unwrap();
+        assert!(queued.queued);
+
+        // Switching selection directly to second fires first's launch and suspends second.
+        let switched = driver.set_selected_entity(Some(second_target)).unwrap();
+        assert!(switched.status.suspended);
+        assert!(!switched.status.launch_queued);
+        assert!(switched.changed_guids.contains(&first_target.guid));
+        assert!(switched.changed_guids.contains(&second_target.guid));
+
+        let first_snapshot = driver
+            .simulation
+            .physical_body_snapshot(holtburger_world::SpatialBodyId::Entity(first_target.guid))
+            .unwrap();
+        assert!(
+            first_snapshot.physical.is_some() && first_snapshot.retained.velocity.y > 0.0,
+            "first entity must restore physics and launch when selection switches to second"
+        );
+        let second_snapshot = driver
+            .simulation
+            .physical_body_snapshot(holtburger_world::SpatialBodyId::Entity(second_target.guid))
+            .unwrap();
+        assert!(
+            second_snapshot.physical.is_none(),
+            "second entity must have physics suspended upon selection switch"
         );
     }
 }

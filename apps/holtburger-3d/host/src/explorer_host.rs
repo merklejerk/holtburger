@@ -11,6 +11,7 @@ use crate::explorer_entity_driver::{
 };
 use crate::explorer_entity_driver::{
     ExplorerEntityLaunchRequest, ExplorerEntityRelocationRequest, ExplorerEntitySpawnRequest,
+    ExplorerEntityTransformRequest,
 };
 use crate::explorer_entity_runtime::ExplorerEntityRuntime;
 use crate::explorer_possession_control::ExplorerPossessionControlProfile;
@@ -33,10 +34,10 @@ use crate::host_simulation_runtime::{CollisionSource, HostSimulationRuntime};
 use crate::protocol::{HostResponse, ProtocolError, application_error, encode_json};
 use crate::shared_host_content::SharedHostContent;
 use crate::{
-    ApplyExplorerPossessionYawRequest, ExplorerEntityMutationReceipt,
+    ApplyExplorerPossessionYawRequest, ExplorerEntityLaunchReceipt, ExplorerEntityMutationReceipt,
     ExplorerPossessionEventWireRequest, ExplorerPossessionIntentWireRequest,
     ExplorerPossessionReceipt, HostStatus, PossessExplorerEntityRequest,
-    ReplaceExplorerEntityPhysicsStateRequest,
+    ReplaceExplorerEntityPhysicsStateRequest, SetExplorerSelectedEntityRequest,
 };
 
 /// Commands accepted only by the Explorer authority.
@@ -64,6 +65,12 @@ pub enum ExplorerHostCommand {
     },
     RelocateExplorerEntity {
         request: ExplorerEntityRelocationRequest,
+    },
+    SetExplorerEntityTransform {
+        request: ExplorerEntityTransformRequest,
+    },
+    SetExplorerSelectedEntity {
+        request: SetExplorerSelectedEntityRequest,
     },
     ResetExplorerEntities,
     PossessExplorerEntity {
@@ -116,6 +123,8 @@ pub const EXPLORER_COMMAND_NAMES: &[&str] = &[
     "replace_explorer_entity_physics_state",
     "launch_explorer_entity",
     "relocate_explorer_entity",
+    "set_explorer_entity_transform",
+    "set_explorer_selected_entity",
     "reset_explorer_entities",
     "possess_explorer_entity",
     "set_explorer_possession_intent",
@@ -387,9 +396,10 @@ pub async fn dispatch_explorer(
             let receipt = tokio::task::spawn_blocking(move || {
                 delivery.with_ordered_publication(|| {
                     let outcome = driver.launch(request)?;
-                    let receipt = ExplorerEntityMutationReceipt {
+                    let receipt = ExplorerEntityLaunchReceipt {
                         guid,
                         generation: outcome.instance.generation,
+                        queued: outcome.queued,
                     };
                     sink.publish_dynamic_entity(delivery.upserted(receipt.guid)?)?;
                     Ok::<_, anyhow::Error>(receipt)
@@ -421,6 +431,48 @@ pub async fn dispatch_explorer(
             .map_err(application_error)?
             .map_err(application_error)?;
             encode_json(receipt)
+        }
+        SetExplorerEntityTransform { request } => {
+            let guid = request.guid;
+            let driver = Arc::clone(&runtime.explorer_entity_driver);
+            let delivery = Arc::clone(&runtime.explorer_entity_delivery);
+            let sink = Arc::clone(&runtime.event_sink);
+            let receipt = tokio::task::spawn_blocking(move || {
+                delivery.with_ordered_publication(|| {
+                    let outcome = driver.set_transform(request)?;
+                    let receipt = ExplorerEntityMutationReceipt {
+                        guid,
+                        generation: outcome.instance.generation,
+                    };
+                    sink.publish_dynamic_entity(delivery.corrected(
+                        receipt.guid,
+                        holtburger_core::DynamicEntityPlacementAdvanceKind::Teleport,
+                    )?)?;
+                    Ok::<_, anyhow::Error>(receipt)
+                })
+            })
+            .await
+            .map_err(application_error)?
+            .map_err(application_error)?;
+            encode_json(receipt)
+        }
+        SetExplorerSelectedEntity { request } => {
+            let driver = Arc::clone(&runtime.explorer_entity_driver);
+            let delivery = Arc::clone(&runtime.explorer_entity_delivery);
+            let sink = Arc::clone(&runtime.event_sink);
+            let status = tokio::task::spawn_blocking(move || {
+                delivery.with_ordered_publication(|| {
+                    let outcome = driver.set_selected_entity(request.selection)?;
+                    for changed_guid in outcome.changed_guids {
+                        sink.publish_dynamic_entity(delivery.upserted(changed_guid)?)?;
+                    }
+                    Ok::<_, anyhow::Error>(outcome.status)
+                })
+            })
+            .await
+            .map_err(application_error)?
+            .map_err(application_error)?;
+            encode_json(status)
         }
         ResetExplorerEntities => {
             let driver = Arc::clone(&runtime.explorer_entity_driver);

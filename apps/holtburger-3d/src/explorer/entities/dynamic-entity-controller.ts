@@ -29,7 +29,11 @@ import {
 	createExplorerLaunchRequest,
 	createExplorerRelocationRequest,
 	createExplorerSpawnRequest,
+	createExplorerTransformRequest,
+	EMPTY_EXPLORER_SELECTION_STATUS,
 	EXPLORER_SPAWN_DISTANCE,
+	type ExplorerEntityTransformRequest,
+	type ExplorerSelectionStatus,
 	type ExplorerWeenieSearchRequest,
 	type ExplorerWeenieSearchResult,
 } from "./entity-commands";
@@ -98,6 +102,7 @@ export interface ExplorerDynamicEntityControllerDependencies {
 	) => void;
 	readonly readSelectedEntity: () => ExplorerEntitySelection | null;
 	readonly onClearSelectedEntity: () => void;
+	readonly onSelectionStatusChange?: (status: ExplorerSelectionStatus) => void;
 	readonly onJumpChargeActiveChange?: (active: boolean) => void;
 	readonly onAutoRunChange?: (enabled: boolean) => void;
 }
@@ -127,6 +132,10 @@ export class ExplorerDynamicEntityController {
 	private spawnedEntities: readonly DynamicEntityView[] = [];
 	private explorerPossession: ExplorerPossession | null = null;
 	private possessedControls: ExplorerPossessionControls | null = null;
+	private selectionSyncSerial = 0;
+	private pendingTransform: ExplorerEntityTransformRequest | null = null;
+	private transformInFlight: Promise<void> | null = null;
+	private transformEpoch = 0;
 
 	constructor(
 		private readonly deps: ExplorerDynamicEntityControllerDependencies,
@@ -204,6 +213,11 @@ export class ExplorerDynamicEntityController {
 		this.setExplorerPossession(null);
 		this.setPossessedControls(null);
 		this.spawnedEntities = [];
+		this.transformEpoch += 1;
+		this.pendingTransform = null;
+		this.transformInFlight = null;
+		this.selectionSyncSerial += 1;
+		this.deps.onSelectionStatusChange?.(EMPTY_EXPLORER_SELECTION_STATUS);
 		this.deps.onEntityCatalogChange(null);
 		this.deps.onSpawnedEntitiesChange([]);
 		this.deps.onClearSelectedEntity();
@@ -449,7 +463,10 @@ export class ExplorerDynamicEntityController {
 		}
 	}
 
-	async spawnExplorerEntity(wcid: number, distance: number): Promise<void> {
+	async spawnExplorerEntity(
+		wcid: number,
+		distance: number,
+	): Promise<ExplorerEntitySelection> {
 		const session = this.dynamicEntitySession;
 		if (!session) {
 			throw new Error("Explorer entity spawning requires an active runtime.");
@@ -462,8 +479,122 @@ export class ExplorerDynamicEntityController {
 			distance,
 			"integrated",
 		);
-		await session.spawn(request);
+		const receipt = await session.spawn(request);
 		await this.dynamicEntityPresentationCompletion;
+		return { guid: receipt.guid, generation: receipt.generation };
+	}
+
+	/** Synchronize the selected Explorer entity with host physics-suspension policy. */
+	async setSelectedExplorerEntity(
+		selection: ExplorerEntitySelection | null,
+	): Promise<void> {
+		this.pendingTransform = null;
+		const session = this.dynamicEntitySession;
+		if (!session) {
+			this.selectionSyncSerial += 1;
+			this.deps.onSelectionStatusChange?.(EMPTY_EXPLORER_SELECTION_STATUS);
+			return;
+		}
+		const serial = ++this.selectionSyncSerial;
+		// Drain any in-flight drag transform before switching or clearing selection so a late
+		// transform cannot arrive after deselect resumes physics or executes a queued launch.
+		await this.transformInFlight;
+		if (
+			serial !== this.selectionSyncSerial ||
+			this.dynamicEntitySession !== session
+		) {
+			return;
+		}
+		try {
+			const status = await session.setSelectedEntity(selection);
+			if (serial === this.selectionSyncSerial) {
+				this.deps.onSelectionStatusChange?.(status);
+			}
+		} catch (error) {
+			if (serial === this.selectionSyncSerial) {
+				this.deps.onSelectionStatusChange?.(EMPTY_EXPLORER_SELECTION_STATUS);
+				this.deps.onSpawnedEntityPresentationErrorChange(errorMessage(error));
+			}
+		}
+	}
+
+	/** Coalesce high-frequency gizmo pose updates into single-flight host IPC calls. */
+	scheduleEntityTransform(
+		guid: number,
+		generation: number,
+		pose: ExplorerEntityTransformRequest["pose"],
+	): void {
+		if (!this.dynamicEntitySession) return;
+		this.pendingTransform = createExplorerTransformRequest(
+			guid,
+			generation,
+			pose,
+		);
+		this.kickPendingTransformDrain();
+	}
+
+	/** Discard queued (unsent) gizmo transforms without wedging an in-flight IPC drain. */
+	cancelPendingTransform(): void {
+		this.pendingTransform = null;
+	}
+
+	private kickPendingTransformDrain(): void {
+		if (
+			this.transformInFlight !== null ||
+			this.pendingTransform === null ||
+			this.dynamicEntitySession === undefined
+		) {
+			return;
+		}
+		const epoch = this.transformEpoch;
+		const flight = this.drainPendingTransforms(epoch).finally(() => {
+			if (this.transformInFlight === flight) {
+				this.transformInFlight = null;
+			}
+			if (
+				this.transformEpoch === epoch &&
+				this.pendingTransform !== null &&
+				this.dynamicEntitySession !== undefined
+			) {
+				this.kickPendingTransformDrain();
+			}
+		});
+		this.transformInFlight = flight;
+	}
+
+	private async drainPendingTransforms(epoch: number): Promise<void> {
+		while (
+			this.transformEpoch === epoch &&
+			this.pendingTransform !== null &&
+			this.dynamicEntitySession !== undefined
+		) {
+			const next = this.pendingTransform;
+			this.pendingTransform = null;
+			try {
+				await this.dynamicEntitySession.setTransform(next);
+			} catch (error) {
+				if (this.transformEpoch === epoch) {
+					this.pendingTransform = null;
+					this.deps.onSpawnedEntityPresentationErrorChange(errorMessage(error));
+				}
+				return;
+			}
+		}
+	}
+
+	private async refreshSelectionStatus(): Promise<void> {
+		const session = this.dynamicEntitySession;
+		if (!session) return;
+		const selected = this.deps.readSelectedEntity();
+		const serial = ++this.selectionSyncSerial;
+		try {
+			const status = await session.setSelectedEntity(selected);
+			if (serial === this.selectionSyncSerial) {
+				this.deps.onSelectionStatusChange?.(status);
+			}
+		} catch {
+			// A concurrent selection change or despawn supersedes this status read.
+		}
 	}
 
 	async searchExplorerWeenies(
@@ -481,6 +612,8 @@ export class ExplorerDynamicEntityController {
 		if (!session) {
 			throw new Error("Explorer entity despawn requires an active runtime.");
 		}
+		this.pendingTransform = null;
+		await this.transformInFlight;
 		await session.despawn(entity.identity.guid, entity.generation);
 		await this.dynamicEntityPresentationCompletion;
 	}
@@ -631,6 +764,7 @@ export class ExplorerDynamicEntityController {
 		void this.deps.onEndPossessionCamera().catch((error: unknown) => {
 			this.deps.onPhysicalCameraError(errorMessage(error));
 		});
+		void this.refreshSelectionStatus();
 	}
 
 	async possessExplorerEntity(
@@ -645,7 +779,13 @@ export class ExplorerDynamicEntityController {
 				"Explorer possession requires a currently presented camera placement.",
 			);
 		}
-		const possession = await session.possess(guid);
+		let possession: ExplorerPossession;
+		try {
+			possession = await session.possess(guid);
+		} catch (error) {
+			await this.refreshSelectionStatus();
+			throw error;
+		}
 		if (possession.guid === null) {
 			// Installing the next scheme first asks the outgoing character owner for its one reset.
 			this.facingDispatch.cancel();
@@ -658,6 +798,7 @@ export class ExplorerDynamicEntityController {
 			this.deps.onJumpChargeActiveChange?.(false);
 			this.possessionIntentRevision = 0;
 			await this.deps.onEndPossessionCamera();
+			await this.refreshSelectionStatus();
 			return possession;
 		}
 		this.setExplorerPossession(possession);
@@ -707,6 +848,7 @@ export class ExplorerDynamicEntityController {
 			}
 			throw error;
 		}
+		await this.refreshSelectionStatus();
 		return possession;
 	}
 
@@ -803,10 +945,16 @@ export class ExplorerDynamicEntityController {
 		const session = this.dynamicEntitySession;
 		if (!session)
 			throw new Error("Explorer entity reset requires an active runtime.");
+		this.transformEpoch += 1;
+		this.pendingTransform = null;
+		await this.transformInFlight;
+		this.transformInFlight = null;
 		if (this.explorerPossession !== null) {
 			await this.possessExplorerEntity(null);
 		}
 		await session.resetAll();
+		this.selectionSyncSerial += 1;
+		this.deps.onSelectionStatusChange?.(EMPTY_EXPLORER_SELECTION_STATUS);
 		this.deps.onClearSelectedEntity();
 	}
 
@@ -820,6 +968,8 @@ export class ExplorerDynamicEntityController {
 		const session = this.dynamicEntitySession;
 		if (!session)
 			throw new Error("Explorer relocation requires an active runtime.");
+		this.pendingTransform = null;
+		await this.transformInFlight;
 		const { placement, viewDirection } =
 			await this.deps.resolveSpawnAuthority();
 		await session.relocate(
@@ -839,18 +989,34 @@ export class ExplorerDynamicEntityController {
 		entity: Pick<DynamicEntityView, "generation"> & {
 			readonly identity: { readonly guid: number };
 		},
-	): Promise<void> {
+	): Promise<{ readonly queued: boolean }> {
 		const session = this.dynamicEntitySession;
 		if (!session)
 			throw new Error("Explorer launch requires an active runtime.");
 		const { viewDirection } = await this.deps.resolveSpawnAuthority();
-		await session.launch(
+		const receipt = await session.launch(
 			createExplorerLaunchRequest(
 				entity.identity.guid,
 				entity.generation,
 				viewDirection,
 			),
 		);
+		const selected = this.deps.readSelectedEntity();
+		if (
+			receipt.queued &&
+			selected !== null &&
+			selected.guid === entity.identity.guid &&
+			selected.generation === entity.generation
+		) {
+			// Advance selectionSyncSerial so an older in-flight selection status read cannot
+			// clobber `launchQueued: true` back to false.
+			this.selectionSyncSerial += 1;
+			this.deps.onSelectionStatusChange?.({
+				suspended: true,
+				launchQueued: true,
+			});
+		}
+		return { queued: receipt.queued };
 	}
 
 	/** Replace an entity's typed simulation physics flags and realization mode. */
@@ -872,6 +1038,7 @@ export class ExplorerDynamicEntityController {
 			flags,
 			physicalMode,
 		});
+		await this.refreshSelectionStatus();
 	}
 
 	/** Pull one exact current generation for disclosure-scoped volatile diagnostics. */

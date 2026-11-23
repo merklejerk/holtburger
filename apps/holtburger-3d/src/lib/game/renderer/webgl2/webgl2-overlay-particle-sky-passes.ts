@@ -22,6 +22,8 @@ import { WebGL2CombatEffects } from "../overlays/webgl2-combat-effects";
 import type { RendererCombatEffectsCapability } from "../../systems/combat-effects-system";
 import { WebGL2WorldMarkerPass } from "../overlays/webgl2-world-marker-pass";
 import { WebGL2WorldTrajectoryPass } from "../overlays/webgl2-world-trajectory-pass";
+import { WebGL2TransformGizmoPass } from "../overlays/webgl2-transform-gizmo-pass";
+import type { TransformGizmoVisual } from "../overlays/transform-gizmo-contract";
 import {
 	WebGL2EntitySelectionPass,
 	type PreparedEntitySelection,
@@ -139,6 +141,9 @@ export class SkyParticleOverlayAndSelectionPasses {
 	readonly #worldTrajectoryPass: WebGL2WorldTrajectoryPass;
 	readonly #desiredTrajectoryPass: WebGL2WorldTrajectoryPass;
 	#frameWorldIndicator: WorldIndicatorInput | null = null;
+	/** Lazily initialized on the first non-null transform gizmo frame so Client mode pays zero GPU cost. */
+	#transformGizmoPass: WebGL2TransformGizmoPass | null = null;
+	#frameTransformGizmo: TransformGizmoVisual | null = null;
 	/** Current realized selected root, resolved by the runtime rather than retained by the renderer. */
 	#frameSelectionTarget: EntitySelectionTarget | null = null;
 	/** Frame-global mask geometry prepared before any camera draws. */
@@ -307,12 +312,14 @@ export class SkyParticleOverlayAndSelectionPasses {
 
 	setFrameInputs(
 		worldIndicator: WorldIndicatorInput | null,
+		transformGizmo: TransformGizmoVisual | null,
 		summonLeashes: readonly SummonLeashInput[],
 		selectionTarget: EntitySelectionTarget | null,
 		entityOverlays: EntityOverlayLookup,
 		viewerEntityIdentity: string | null,
 	): void {
 		this.#frameWorldIndicator = worldIndicator;
+		this.#frameTransformGizmo = transformGizmo;
 		this.#frameSummonLeashes = summonLeashes;
 		this.#frameSelectionTarget = selectionTarget;
 		this.#frameEntityOverlays = entityOverlays;
@@ -919,6 +926,20 @@ export class SkyParticleOverlayAndSelectionPasses {
 		}
 	}
 
+	/** Draw the Explorer 6-DOF transform gizmo above scene geometry, lazily allocating on first use. */
+	drawTransformGizmo(view: PreparedViewGeometry): void {
+		const gizmo = this.#frameTransformGizmo;
+		if (gizmo === null) return;
+		const pass = (this.#transformGizmoPass ??= new WebGL2TransformGizmoPass(
+			this.#deviceTargets.gl,
+		));
+		const origin = anchorRelativePosition(
+			gizmo.position,
+			view.anchorLandblockId,
+		);
+		pass.draw(gizmo, origin, view.cameraPosition, view.clipFromAnchor);
+	}
+
 	drawWorldMarker(
 		view: PreparedViewGeometry,
 		marker: WorldMarkerInput,
@@ -1048,6 +1069,8 @@ export class SkyParticleOverlayAndSelectionPasses {
 		this.#worldMarkerPass.destroy();
 		this.#worldTrajectoryPass.destroy();
 		this.#desiredTrajectoryPass.destroy();
+		this.#transformGizmoPass?.destroy();
+		this.#transformGizmoPass = null;
 		this.#entityOverlayPass.destroy();
 		this.#entityBeaconPass?.destroy();
 		this.#entityBeaconPass = null;

@@ -114,6 +114,15 @@ const EXPLORER_TUNING_OVERRIDES = {
 	entities: {
 		tabTargetMaxDistanceMeters: 96,
 	},
+	gizmo: {
+		screenHeightFraction: 0.22,
+		minScaleMeters: 0.35,
+		maxScaleMeters: 12,
+		hitTolerancePixels: 12,
+		translateSnapMeters: 0.25,
+		rotateSnapDegrees: 15,
+		maxTranslateDistanceMeters: 256,
+	},
 } as const satisfies ExplorerTuningOverrides;
 
 const EXPLORER_FRAME_SETTINGS = {

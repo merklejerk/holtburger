@@ -24,7 +24,7 @@ use holtburger_world::{
 };
 
 use self::possession::propose_possession_tick;
-use self::registry::ExplorerEntityRegistry;
+use self::registry::{ExplorerEntityRegistry, ExplorerSelectionState, SuspendedSelectionPhysics};
 pub use self::types::*;
 use crate::ExplorerPhysicalMode;
 use crate::explorer_entity_driver::explorer_physical_demand;
@@ -220,6 +220,7 @@ impl ExplorerEntityRuntime {
             self.simulation
                 .replace_dynamic_entity(&prepared.definition, initial, physical)?;
         registry.motion.retire_target(guid, expected_generation);
+        registry.retire_selection(guid, expected_generation);
         registry.motion.playback.clear_locomotion(guid);
         if let Some(playback) = initial_playback {
             registry.motion.playback.replace_body(guid, playback);
@@ -262,6 +263,7 @@ impl ExplorerEntityRuntime {
             .simulation
             .remove_dynamic_entity(SpatialBodyId::Entity(guid))?;
         registry.motion.retire_target(guid, expected_generation);
+        registry.retire_selection(guid, expected_generation);
         let children = children
             .into_iter()
             .map(|child| registry.remove(child))
@@ -289,6 +291,75 @@ impl ExplorerEntityRuntime {
             .expect("Explorer entity registry lock poisoned");
         let instance = registry.require_generation(guid, expected_generation)?;
         require_world_initial(&instance.definition, "physics-state replacement")?;
+        if registry.is_selected_unpossessed(guid, expected_generation) {
+            let body_id = SpatialBodyId::Entity(guid);
+            let body = self.simulation.physical_body_view(body_id).ok_or(
+                holtburger_core::DynamicEntityBodyOperationError::NotRegistered { body_id },
+            )?;
+            let before = authored_participation(instance.physical_demand);
+            let after = authored_participation(next_demand);
+            let selection = registry
+                .selection
+                .as_mut()
+                .expect("prevalidated selected entity vanished while registry lock was held");
+            if next_demand.requires_physical_body() {
+                match (&mut selection.suspended_physics, replacement) {
+                    (Some(suspended), Some(prepared)) => {
+                        suspended.stashed_body_definition = prepared;
+                    }
+                    (Some(_), None) => {}
+                    (None, Some(prepared)) => {
+                        selection.suspended_physics = Some(SuspendedSelectionPhysics {
+                            stashed_body_definition: prepared,
+                            pending_launch: None,
+                        });
+                    }
+                    (None, None) => {
+                        return Err(ExplorerEntityRuntimeError::MissingPreparedPhysics);
+                    }
+                }
+            } else {
+                selection.suspended_physics = None;
+            }
+            let current = registry
+                .entities
+                .get_mut(&guid)
+                .expect("prevalidated entity vanished while registry lock was held");
+            current.definition.physics = next;
+            current.physical_demand = next_demand;
+            let change = match (before, after) {
+                (
+                    holtburger_world::PhysicalBodyParticipation::PoseOnly,
+                    holtburger_world::PhysicalBodyParticipation::Physical,
+                ) => holtburger_world::PhysicalBodyReconfiguration::Installed,
+                (
+                    holtburger_world::PhysicalBodyParticipation::Physical,
+                    holtburger_world::PhysicalBodyParticipation::PoseOnly,
+                ) => holtburger_world::PhysicalBodyReconfiguration::Removed,
+                (
+                    holtburger_world::PhysicalBodyParticipation::Physical,
+                    holtburger_world::PhysicalBodyParticipation::Physical,
+                ) => holtburger_world::PhysicalBodyReconfiguration::Reconfigured,
+                (
+                    holtburger_world::PhysicalBodyParticipation::PoseOnly,
+                    holtburger_world::PhysicalBodyParticipation::PoseOnly,
+                ) => holtburger_world::PhysicalBodyReconfiguration::Unchanged,
+            };
+            return Ok(ExplorerEntityPhysicsStateOutcome {
+                instance: current.clone(),
+                body: holtburger_core::DynamicEntityBodyCommitOutcome {
+                    body,
+                    participation: after,
+                    physical_change: holtburger_world::PhysicalBodyReconfigurationOutcome {
+                        before,
+                        after,
+                        change,
+                        response_memory_preserved: false,
+                        collision_reports: Vec::new(),
+                    },
+                },
+            });
+        }
         let outcome = self.simulation.reconfigure_dynamic_entity_physics(
             SpatialBodyId::Entity(guid),
             next,
@@ -309,6 +380,9 @@ impl ExplorerEntityRuntime {
     }
 
     /// Applies one resolved launch while the exact semantic generation remains stable.
+    ///
+    /// When the target entity is currently selection-suspended, the launch is armed and held
+    /// until selection suspension clears (deselect or selection switch).
     pub fn launch(
         &self,
         guid: Guid,
@@ -322,6 +396,34 @@ impl ExplorerEntityRuntime {
             .expect("Explorer entity registry lock poisoned");
         let instance = registry.require_generation(guid, expected_generation)?;
         require_world_initial(&instance.definition, "launch")?;
+        if registry.is_selected_unpossessed(guid, expected_generation) {
+            if !instance.physical_demand.requires_physical_body() {
+                return Err(
+                    holtburger_core::DynamicEntityBodyOperationError::NotPhysical {
+                        body_id: SpatialBodyId::Entity(guid),
+                    }
+                    .into(),
+                );
+            }
+            let body_id = SpatialBodyId::Entity(guid);
+            let body = self.simulation.physical_body_view(body_id).ok_or(
+                holtburger_core::DynamicEntityBodyOperationError::NotRegistered { body_id },
+            )?;
+            let instance_snapshot = instance.clone();
+            let suspended = registry
+                .selection
+                .as_mut()
+                .and_then(|selection| selection.suspended_physics.as_mut())
+                .ok_or(holtburger_core::DynamicEntityBodyOperationError::NotPhysical { body_id })?;
+            // Store the complete launch plan without mutating `instance.definition.physics` yet;
+            // launch physics (e.g. stripping ALIGN_PATH) commits only if the launch actually fires.
+            suspended.pending_launch = Some(launch);
+            return Ok(ExplorerEntityLaunchOutcome {
+                instance: instance_snapshot,
+                body,
+                queued: true,
+            });
+        }
         let body = self.simulation.apply_dynamic_entity_kinematics(
             SpatialBodyId::Entity(guid),
             launch.kinematics,
@@ -335,7 +437,214 @@ impl ExplorerEntityRuntime {
         Ok(ExplorerEntityLaunchOutcome {
             instance: current.clone(),
             body,
+            queued: false,
         })
+    }
+
+    /// Updates the host's Explorer selection target and reconciles selection-scoped physics suspension.
+    pub fn set_selected_entity(
+        &self,
+        selection: Option<ExplorerSelectionTarget>,
+        now: std::time::Instant,
+    ) -> Result<ExplorerSelectionChangeOutcome, ExplorerEntityRuntimeError> {
+        let mut registry = self
+            .registry
+            .lock()
+            .expect("Explorer entity registry lock poisoned");
+        // Pre-validate the incoming selection target before resuming or firing any prior launch.
+        if let Some(target) = selection {
+            let instance = registry.require_generation(target.guid, target.generation)?;
+            if !registry.is_possessed(target.guid, target.generation)
+                && instance.definition.placement.world().is_some()
+                && instance.physical_demand.requires_physical_body()
+                && !registry.is_selection_suspended(target.guid, target.generation)
+                && self
+                    .simulation
+                    .dynamic_entity_physical_definition(
+                        SpatialBodyId::Entity(target.guid),
+                        instance.definition.physics,
+                        instance.physical_demand,
+                    )
+                    .is_none()
+            {
+                return Err(
+                    holtburger_core::DynamicEntityBodyOperationError::NotPhysical {
+                        body_id: SpatialBodyId::Entity(target.guid),
+                    }
+                    .into(),
+                );
+            }
+        }
+        if registry.selected_target() == selection {
+            return Ok(ExplorerSelectionChangeOutcome {
+                status: registry.selection_status(),
+                changed_guids: Vec::new(),
+            });
+        }
+        let mut changed_guids = Vec::new();
+        if let Some(resumed) = self.resume_selection_suspension(&mut registry, true, now)? {
+            changed_guids.push(resumed);
+        }
+        registry.selection = selection.map(|target| ExplorerSelectionState {
+            target,
+            suspended_physics: None,
+        });
+        match self.suspend_selected_if_eligible(&mut registry) {
+            Ok(Some(suspended)) => {
+                if !changed_guids.contains(&suspended) {
+                    changed_guids.push(suspended);
+                }
+            }
+            Ok(None) => {}
+            Err(error) => {
+                // Prior entity is already resumed; leave selection empty rather than stuck on
+                // an unsuspended target that would short-circuit retries.
+                registry.selection = None;
+                return Err(error);
+            }
+        }
+        Ok(ExplorerSelectionChangeOutcome {
+            status: registry.selection_status(),
+            changed_guids,
+        })
+    }
+
+    /// Returns the current world pose of one exact live generation.
+    pub fn current_pose(
+        &self,
+        guid: Guid,
+        expected_generation: u64,
+    ) -> Result<holtburger_common::position::WorldPosition, ExplorerEntityRuntimeError> {
+        let registry = self
+            .registry
+            .lock()
+            .expect("Explorer entity registry lock poisoned");
+        let instance = registry.require_generation(guid, expected_generation)?;
+        require_world_initial(&instance.definition, "transform")?;
+        self.simulation
+            .dynamic_entity_pose(SpatialBodyId::Entity(guid))
+            .ok_or(ExplorerEntityRuntimeError::NotRegistered { guid })
+    }
+
+    /// Suspends the currently selected world entity's physical body when it is unpossessed and physical.
+    ///
+    /// Returns `Ok(Some(guid))` only when simulation state actually changed (not for `PoseOnly`
+    /// or attached entities), avoiding spurious publication traffic.
+    pub(super) fn suspend_selected_if_eligible(
+        &self,
+        registry: &mut ExplorerEntityRegistry,
+    ) -> Result<Option<Guid>, ExplorerEntityRuntimeError> {
+        let Some(target) = registry.selected_target() else {
+            return Ok(None);
+        };
+        if registry.is_selection_suspended(target.guid, target.generation)
+            || registry.is_possessed(target.guid, target.generation)
+        {
+            return Ok(None);
+        }
+        let Some(instance) = registry
+            .entities
+            .get(&target.guid)
+            .filter(|instance| instance.generation == target.generation)
+            .cloned()
+        else {
+            registry.selection = None;
+            return Ok(None);
+        };
+        if instance.definition.placement.world().is_none()
+            || !instance.physical_demand.requires_physical_body()
+        {
+            return Ok(None);
+        }
+        let body_id = SpatialBodyId::Entity(target.guid);
+        let captured = self
+            .simulation
+            .dynamic_entity_physical_definition(
+                body_id,
+                instance.definition.physics,
+                instance.physical_demand,
+            )
+            .ok_or(holtburger_core::DynamicEntityBodyOperationError::NotPhysical { body_id })?;
+        self.simulation.reconfigure_dynamic_entity_physics(
+            body_id,
+            instance.definition.physics,
+            LocalPhysicalDemand::NONE,
+            instance.definition.object_scale,
+            None,
+        )?;
+        registry.motion.playback.clear_locomotion(target.guid);
+        if let Some(selection) = registry.selection.as_mut() {
+            selection.suspended_physics = Some(SuspendedSelectionPhysics {
+                stashed_body_definition: captured,
+                pending_launch: None,
+            });
+        }
+        Ok(Some(target.guid))
+    }
+
+    /// Restores the suspended entity's physical body atomically and optionally fires any armed launch.
+    pub(super) fn resume_selection_suspension(
+        &self,
+        registry: &mut ExplorerEntityRegistry,
+        execute_pending_launch: bool,
+        now: std::time::Instant,
+    ) -> Result<Option<Guid>, ExplorerEntityRuntimeError> {
+        let Some((target, stashed, pending_launch)) = registry.selection.as_ref().and_then(|s| {
+            let suspended = s.suspended_physics.as_ref()?;
+            Some((
+                s.target,
+                suspended.stashed_body_definition.clone(),
+                suspended.pending_launch,
+            ))
+        }) else {
+            return Ok(None);
+        };
+        let Some(instance) = registry
+            .entities
+            .get(&target.guid)
+            .filter(|instance| instance.generation == target.generation)
+            .cloned()
+        else {
+            if let Some(selection) = registry.selection.as_mut() {
+                selection.suspended_physics = None;
+            }
+            return Ok(None);
+        };
+        if !instance.physical_demand.requires_physical_body() {
+            if let Some(selection) = registry.selection.as_mut() {
+                selection.suspended_physics = None;
+            }
+            return Ok(None);
+        }
+        let launch_to_execute = if execute_pending_launch {
+            pending_launch
+        } else {
+            None
+        };
+        let effective_physics = launch_to_execute
+            .map(|launch| launch.physics)
+            .unwrap_or(instance.definition.physics);
+        let body_id = SpatialBodyId::Entity(target.guid);
+        // Single atomic simulation reconfiguration applying current/launch physics flags onto
+        // the stashed body definition; if this fails, `suspended_physics` stays intact.
+        self.simulation.reconfigure_dynamic_entity_physics(
+            body_id,
+            effective_physics,
+            instance.physical_demand,
+            instance.definition.object_scale,
+            Some(stashed),
+        )?;
+        if let Some(selection) = registry.selection.as_mut() {
+            selection.suspended_physics = None;
+        }
+        if let Some(current) = registry.entities.get_mut(&target.guid) {
+            current.definition.physics = effective_physics;
+        }
+        if let Some(launch) = launch_to_execute {
+            self.simulation
+                .apply_dynamic_entity_kinematics(body_id, launch.kinematics, now)?;
+        }
+        Ok(Some(target.guid))
     }
 
     /// Relocates one exact semantic generation without replacing its identity.
@@ -375,6 +684,10 @@ impl ExplorerEntityRuntime {
             .expect("Explorer entity registry lock poisoned");
         let instance = registry.require_generation(guid, expected_generation)?;
         require_world_initial(&instance.definition, "physics-state planning")?;
+        if registry.is_selected_unpossessed(guid, expected_generation) {
+            return Ok(next_demand.requires_physical_body()
+                && !registry.is_selection_suspended(guid, expected_generation));
+        }
         let projection = self
             .simulation
             .project_dynamic_entity(&instance.definition)?;
@@ -426,15 +739,7 @@ impl ExplorerEntityRuntime {
             .entities
             .get(&guid)
             .ok_or(ExplorerEntityRuntimeError::NotRegistered { guid })?;
-        let input = self
-            .simulation
-            .project_dynamic_entity(&instance.definition)?;
-        Ok(ExplorerEntityProjection {
-            generation: instance.generation,
-            presentation_class: instance.presentation_class,
-            input,
-            motion: registry.motion.playback.motion_playback(guid),
-        })
+        self.project_instance(&registry, instance)
     }
 
     /// Builds a deterministic current snapshot without retaining solver state in the registry.
@@ -446,20 +751,33 @@ impl ExplorerEntityRuntime {
         registry
             .entities
             .values()
-            .map(|instance| {
-                Ok(ExplorerEntityProjection {
-                    generation: instance.generation,
-                    presentation_class: instance.presentation_class,
-                    input: self
-                        .simulation
-                        .project_dynamic_entity(&instance.definition)?,
-                    motion: registry
-                        .motion
-                        .playback
-                        .motion_playback(instance.definition.identity.guid),
-                })
-            })
+            .map(|instance| self.project_instance(&registry, instance))
             .collect()
+    }
+
+    fn project_instance(
+        &self,
+        registry: &ExplorerEntityRegistry,
+        instance: &ExplorerEntityInstance,
+    ) -> Result<ExplorerEntityProjection, ExplorerEntityRuntimeError> {
+        let guid = instance.definition.identity.guid;
+        let mut input = self
+            .simulation
+            .project_dynamic_entity(&instance.definition)?;
+        // Preserve the authored participation while selection-suspended so inspector controls
+        // stay bound to the user's authored mode rather than flipping to Pose-only on select.
+        if registry.is_selection_suspended(guid, instance.generation)
+            && instance.physical_demand.requires_physical_body()
+            && let EntityPlacement::World(world) = &mut input.placement
+        {
+            world.participation = authored_participation(instance.physical_demand);
+        }
+        Ok(ExplorerEntityProjection {
+            generation: instance.generation,
+            presentation_class: instance.presentation_class,
+            input,
+            motion: registry.motion.playback.motion_playback(guid),
+        })
     }
 
     /// Samples one initial cursor for both collision preparation and installed playback.
@@ -563,12 +881,18 @@ impl ExplorerEntityRuntime {
             registry.motion.release();
         }
         let entities = &registry.entities;
+        let suspended_guid = registry
+            .selection
+            .as_ref()
+            .filter(|selection| selection.suspended_physics.is_some())
+            .map(|selection| selection.target.guid);
         registry.motion.playback.retain_locomotion(|guid| {
-            entities.get(&guid).is_some_and(|instance| {
-                instance.physical_demand.integration
-                    == holtburger_world::LocalIntegrationDemand::Eligible
-                    && !instance.definition.physics.dynamic_collision.missile
-            })
+            suspended_guid != Some(guid)
+                && entities.get(&guid).is_some_and(|instance| {
+                    instance.physical_demand.integration
+                        == holtburger_world::LocalIntegrationDemand::Eligible
+                        && !instance.definition.physics.dynamic_collision.missile
+                })
         });
         let possessed = registry.motion.active.as_ref().map(|active| active.guid);
         let driving: Vec<(Guid, u32)> = registry
@@ -945,6 +1269,16 @@ fn validate_attached_children(
         }
     }
     Ok(())
+}
+
+fn authored_participation(
+    demand: LocalPhysicalDemand,
+) -> holtburger_world::PhysicalBodyParticipation {
+    if demand.requires_physical_body() {
+        holtburger_world::PhysicalBodyParticipation::Physical
+    } else {
+        holtburger_world::PhysicalBodyParticipation::PoseOnly
+    }
 }
 
 fn require_world_initial(

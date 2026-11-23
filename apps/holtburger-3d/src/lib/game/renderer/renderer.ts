@@ -40,6 +40,7 @@ import type {
 	EntityOverlaySettings,
 	HealthBarSettings,
 } from "./overlays/entity-overlay-policy";
+import type { TransformGizmoVisual } from "./overlays/transform-gizmo-contract";
 
 /** Environment-cell visibility scheduler selected without rebuilding resident content. */
 export type EnvCellRenderMode = "flat" | "portal";
@@ -210,6 +211,8 @@ export interface FrameInput {
 	readonly entityOverlays: EntityOverlayLookup;
 	/** Optional frontend-resolved precise-jump indicator; absent frames draw no marker or curve. */
 	readonly worldIndicator?: WorldIndicatorInput | null;
+	/** Optional Explorer 6-DOF transform gizmo; absent/null frames draw nothing and allocate no GPU resources. */
+	readonly transformGizmo?: TransformGizmoVisual | null;
 	/** App-owned relationships prepared from current posed scene endpoints. */
 	readonly summonLeashes?: readonly SummonLeashInput[];
 }

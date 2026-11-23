@@ -111,6 +111,23 @@ export interface ExplorerTuningOverrides {
 		/** Maximum distance in meters from the camera for Tab-targeting nearby entities. */
 		readonly tabTargetMaxDistanceMeters: number;
 	};
+	/** Explorer 3D transform gizmo sizing, picking, and snapping bounds. */
+	readonly gizmo: {
+		/** Fraction of the vertical viewport half-extent used to maintain constant screen size. */
+		readonly screenHeightFraction: number;
+		/** Minimum uniform world scale in metres. */
+		readonly minScaleMeters: number;
+		/** Maximum uniform world scale in metres. */
+		readonly maxScaleMeters: number;
+		/** Screen-space hit radius in CSS pixels for gizmo shafts, cones, and rings. */
+		readonly hitTolerancePixels: number;
+		/** Translation snap increment in metres while holding Shift. */
+		readonly translateSnapMeters: number;
+		/** Rotation snap increment in degrees while holding Shift. */
+		readonly rotateSnapDegrees: number;
+		/** Maximum translation offset per drag to prevent grazing-angle explosion. */
+		readonly maxTranslateDistanceMeters: number;
+	};
 }
 
 /** Complete exported Explorer tuning after initial frame-policy composition. */

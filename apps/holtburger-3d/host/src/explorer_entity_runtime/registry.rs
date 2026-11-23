@@ -4,16 +4,18 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use holtburger_common::Guid;
 use holtburger_content::MotionSequenceCatalog;
-use holtburger_core::DynamicEntityDefinition;
+use holtburger_core::{DynamicEntityDefinition, DynamicEntityLaunchPlan};
 use holtburger_world::motion::{
     CharacterMotionPresentation, MotionPlayback, MotionRuntimeRegistry, ObservedCharacterMotion,
 };
-use holtburger_world::{LocalPhysicalDemand, PhysicalBodyDefinition};
+use holtburger_world::{
+    DynamicPhysicalBodyDefinition, LocalPhysicalDemand, PhysicalBodyDefinition,
+};
 
 use super::possession::possession_character_presentation;
 use super::types::{
     ExplorerEntityInstance, ExplorerEntityRuntimeError, ExplorerPossessionPhysicalStatus,
-    ExplorerPreparedEntity,
+    ExplorerPreparedEntity, ExplorerSelectionTarget,
 };
 use crate::explorer_possession_control::ActivePossession;
 use crate::host_simulation_runtime::HostDynamicBodyTick;
@@ -69,6 +71,26 @@ pub struct ExplorerEntityRegistry {
     /// semantic state — and it is what keeps the Explorer and the client separate authorities over
     /// the same shared contract.
     pub(super) motion: ExplorerMotionState,
+    /// Currently selected Explorer entity and its optional active physical-body suspension.
+    pub(super) selection: Option<ExplorerSelectionState>,
+}
+
+/// Single composite owner for the currently selected entity and its suspension state so target
+/// identity and stashed physics can never drift out of sync.
+#[derive(Debug, Clone)]
+pub(super) struct ExplorerSelectionState {
+    pub(super) target: ExplorerSelectionTarget,
+    /// Present iff this entity's physical body is currently stashed and disabled in simulation.
+    pub(super) suspended_physics: Option<SuspendedSelectionPhysics>,
+}
+
+/// Retained physical configuration and optional armed launch for one selection-suspended entity.
+#[derive(Debug, Clone)]
+pub(super) struct SuspendedSelectionPhysics {
+    /// Captured physical body definition restored without DAT re-decoding on resume.
+    pub(super) stashed_body_definition: DynamicPhysicalBodyDefinition,
+    /// Launch requested while suspended; its physics and kinematics apply only on execution.
+    pub(super) pending_launch: Option<DynamicEntityLaunchPlan>,
 }
 
 /// Which entity is being driven, what it has been told to do, and where its playback is.
@@ -199,6 +221,54 @@ impl ExplorerEntityRegistry {
             allocator: ExplorerGuidAllocator::new(start, end),
             next_generation: Some(1),
             motion: ExplorerMotionState::default(),
+            selection: None,
+        }
+    }
+
+    pub(super) fn selected_target(&self) -> Option<ExplorerSelectionTarget> {
+        self.selection.as_ref().map(|selection| selection.target)
+    }
+
+    pub(super) fn is_selected_unpossessed(&self, guid: Guid, generation: u64) -> bool {
+        self.selection.as_ref().is_some_and(|selection| {
+            selection.target.guid == guid && selection.target.generation == generation
+        }) && !self.is_possessed(guid, generation)
+    }
+
+    pub(super) fn is_selection_suspended(&self, guid: Guid, generation: u64) -> bool {
+        self.selection.as_ref().is_some_and(|selection| {
+            selection.target.guid == guid
+                && selection.target.generation == generation
+                && selection.suspended_physics.is_some()
+        })
+    }
+
+    pub(super) fn is_possessed(&self, guid: Guid, generation: u64) -> bool {
+        self.motion
+            .active
+            .as_ref()
+            .is_some_and(|active| active.guid == guid && active.entity_generation == generation)
+    }
+
+    pub(super) fn selection_status(&self) -> super::types::ExplorerSelectionSuspensionStatus {
+        let Some(suspended) = self
+            .selection
+            .as_ref()
+            .and_then(|selection| selection.suspended_physics.as_ref())
+        else {
+            return super::types::ExplorerSelectionSuspensionStatus::default();
+        };
+        super::types::ExplorerSelectionSuspensionStatus {
+            suspended: true,
+            launch_queued: suspended.pending_launch.is_some(),
+        }
+    }
+
+    pub(super) fn retire_selection(&mut self, guid: Guid, generation: u64) {
+        if self.selection.as_ref().is_some_and(|selection| {
+            selection.target.guid == guid && selection.target.generation == generation
+        }) {
+            self.selection = None;
         }
     }
 
@@ -248,12 +318,14 @@ impl ExplorerEntityRegistry {
     ) -> ExplorerEntityInstance {
         let ExplorerPreparedEntity {
             presentation_class,
+            primary_movement_sphere,
             definition,
         } = prepared;
         let instance = ExplorerEntityInstance {
             generation,
             physical_demand,
             presentation_class,
+            primary_movement_sphere,
             definition,
         };
         let displaced = self
@@ -274,6 +346,7 @@ impl ExplorerEntityRegistry {
     ) -> (ExplorerEntityInstance, ExplorerEntityInstance) {
         let ExplorerPreparedEntity {
             presentation_class,
+            primary_movement_sphere,
             definition,
         } = prepared;
         let guid = definition.identity.guid;
@@ -281,6 +354,7 @@ impl ExplorerEntityRegistry {
             generation,
             physical_demand,
             presentation_class,
+            primary_movement_sphere,
             definition,
         };
         let removed = self
@@ -291,6 +365,13 @@ impl ExplorerEntityRegistry {
     }
 
     pub(super) fn remove(&mut self, guid: Guid) -> ExplorerEntityInstance {
+        if self
+            .selection
+            .as_ref()
+            .is_some_and(|selection| selection.target.guid == guid)
+        {
+            self.selection = None;
+        }
         self.entities
             .remove(&guid)
             .expect("prevalidated entity vanished while registry lock was held")
@@ -301,6 +382,7 @@ impl ExplorerEntityRegistry {
         self.allocator.reset();
         self.motion.release();
         self.motion = ExplorerMotionState::default();
+        self.selection = None;
         removed
     }
 }

@@ -437,27 +437,8 @@ impl ExplorerEntityRuntime {
                 motion_table_id,
             },
         )?;
-        if let Some(target) = self
-            .simulation
-            .physical_body_scene_snapshot(SpatialBodyId::Entity(guid))
-        {
-            match target.scene_residency {
-                holtburger_world::PhysicalBodySceneResidency::Resident => {}
-                holtburger_world::PhysicalBodySceneResidency::MissingOwner { owner } => {
-                    return Err(
-                        ExplorerEntityRuntimeError::PossessionTargetMissingCollisionOwner {
-                            guid,
-                            owner,
-                        },
-                    );
-                }
-                holtburger_world::PhysicalBodySceneResidency::OutsideLandscape => {
-                    return Err(
-                        ExplorerEntityRuntimeError::PossessionTargetOutsideLandscape { guid },
-                    );
-                }
-            }
-        }
+        // Validate possession controller setup and reserve generation before touching physics or
+        // selection suspension so invalid capabilities never disturb stashed physics or launches.
         let possession_generation = registry.reserve_generation()?;
         let active = ActivePossession::new(
             guid,
@@ -467,11 +448,57 @@ impl ExplorerEntityRuntime {
             table,
             self.possession_profile,
         )?;
+        // Possessed entities are exempt from selection suspension. Restore the physical body
+        // before residency checks, retaining the prior queued launch so a residency rejection
+        // rolls back cleanly without discarding it.
+        let was_selection_suspended = registry.is_selection_suspended(guid, instance.generation);
+        let saved_pending_launch = if was_selection_suspended {
+            registry
+                .selection
+                .as_ref()
+                .and_then(|s| s.suspended_physics.as_ref())
+                .and_then(|p| p.pending_launch)
+        } else {
+            None
+        };
+        if was_selection_suspended {
+            self.resume_selection_suspension(&mut registry, false, std::time::Instant::now())?;
+        }
+        let residency_error = self
+            .simulation
+            .physical_body_scene_snapshot(SpatialBodyId::Entity(guid))
+            .and_then(|target| match target.scene_residency {
+                holtburger_world::PhysicalBodySceneResidency::Resident => None,
+                holtburger_world::PhysicalBodySceneResidency::MissingOwner { owner } => Some(
+                    ExplorerEntityRuntimeError::PossessionTargetMissingCollisionOwner {
+                        guid,
+                        owner,
+                    },
+                ),
+                holtburger_world::PhysicalBodySceneResidency::OutsideLandscape => {
+                    Some(ExplorerEntityRuntimeError::PossessionTargetOutsideLandscape { guid })
+                }
+            });
+        if let Some(error) = residency_error {
+            if was_selection_suspended {
+                self.suspend_selected_if_eligible(&mut registry)?;
+                if let Some(suspended) = registry
+                    .selection
+                    .as_mut()
+                    .and_then(|s| s.suspended_physics.as_mut())
+                {
+                    suspended.pending_launch = saved_pending_launch;
+                }
+            }
+            return Err(error);
+        }
         let accepted_stance = active.latest_intent.stance;
         let stances = active.capabilities.values().collect();
 
         registry.motion.release();
         registry.motion.active = Some(active);
+        // Reconcile suspension in case a previously possessed entity is still selected.
+        self.suspend_selected_if_eligible(&mut registry)?;
         self.simulation
             .wake_dynamic_body(SpatialBodyId::Entity(guid));
 
@@ -506,6 +533,9 @@ impl ExplorerEntityRuntime {
         if let Some(guid) = released_guid {
             self.clear_authored_momentum(SpatialBodyId::Entity(guid), now);
         }
+        // Strict `selected && !possessed` invariant: if the released entity remains selected,
+        // re-suspend its physical body at its release pose so the gizmo can reposition it.
+        self.suspend_selected_if_eligible(&mut registry)?;
         Ok(ExplorerPossessionRelease {
             released_guid,
             possession_generation,

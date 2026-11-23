@@ -4,6 +4,7 @@
 		DynamicEntityView,
 	} from "../../lib/game/runtime/dynamic-entity-feed";
 	import type { HostKinematicBoomStatus } from "../../lib/game/camera/host-kinematic-boom-session";
+	import type { ExplorerSelectionStatus } from "./entity-commands";
 	import {
 		explorerEntityOperationTargets,
 		explorerEntitySelection,
@@ -30,6 +31,7 @@
 		readonly selected: DynamicEntityView;
 		readonly wearer: DynamicEntityView | null;
 		readonly pending: ExplorerEntityOperation | null;
+		readonly selectionStatus: ExplorerSelectionStatus;
 		readonly possession: ExplorerPossession | null;
 		readonly readExplorerEntity: (
 			selection: ExplorerEntitySelection,
@@ -63,6 +65,7 @@
 		selected,
 		wearer,
 		pending,
+		selectionStatus,
 		possession,
 		readExplorerEntity,
 		readBoomCameraStatus,
@@ -222,6 +225,16 @@
 		{formatGuid(selected.identity.guid)} · gen {selected.generation} · {selected
 			.physics.participation} · {selected.placement.kind}
 	</p>
+	{#if selected.placement.kind === "world" && !selectedIsPossessed && selectionStatus.suspended}
+		<p class="selection-status-note">
+			{#if selectionStatus.launchQueued}
+				Physics paused while selected · Launch queued (deselect to fire)
+			{:else}
+				Physics paused while selected · Drag gizmo to move or rotate (hold Shift
+				to snap)
+			{/if}
+		</p>
+	{/if}
 
 	{#if selected.placement.kind === "world"}
 		<div class="selected-actions">
@@ -261,7 +274,9 @@
 			>
 				{pending?.kind === "launch" && selectedOperationPending
 					? "Launching…"
-					: "Launch"}
+					: !selectedIsPossessed && selectionStatus.launchQueued
+						? "Launch queued"
+						: "Launch"}
 			</button>
 			<button
 				type="button"
@@ -470,6 +485,12 @@
 
 		.selected-identity {
 			margin: 0;
+		}
+
+		.selection-status-note {
+			margin: 0;
+			color: var(--ui-color-accent, var(--ui-color-muted));
+			font-size: calc(var(--ui-font-size-caption) * var(--ui-text-scale));
 		}
 
 		.selected-heading {

@@ -383,6 +383,7 @@ export class WebGL2Renderer implements Renderer {
 		this.#deviceTargets.setFrameClockSeconds(input.timeSeconds);
 		this.#overlayPasses.setFrameInputs(
 			input.worldIndicator ?? null,
+			input.transformGizmo ?? null,
 			input.summonLeashes ?? [],
 			input.selectionTarget,
 			input.entityOverlays,
@@ -767,6 +768,7 @@ export class WebGL2Renderer implements Renderer {
 			visibility: frame.atlas.visibility,
 			routing: pipeline,
 		});
+		this.#overlayPasses.drawTransformGizmo(view);
 		this.#diagnostics.profiler?.setCpuPhase("postAndPresentation");
 		this.#deviceTargets.drawPortalTransitionTunnel(
 			target,
@@ -863,6 +865,7 @@ export class WebGL2Renderer implements Renderer {
 		this.#overlayPasses.drawSummonLeashes(view);
 		this.#overlayPasses.drawCombatEffects(view, null, null);
 		this.#overlayPasses.drawWorldIndicator(view, null);
+		this.#overlayPasses.drawTransformGizmo(view);
 		this.#gl.bindVertexArray(null);
 		this.#diagnostics.profiler?.setCpuPhase("postAndPresentation");
 		this.#deviceTargets.drawPortalTransitionTunnel(

@@ -17,6 +17,17 @@ const explorerEntityMutationReceiptSchema = z.object({
 	generation,
 });
 
+const explorerEntityLaunchReceiptSchema = z.object({
+	guid: unsigned32,
+	generation,
+	queued: z.boolean(),
+});
+
+const explorerSelectionStatusSchema = z.object({
+	suspended: z.boolean(),
+	launchQueued: z.boolean(),
+});
+
 const explorerWeenieSearchResultSchema = z.object({
 	wcid: unsigned32,
 	name: z.string().min(1),
@@ -49,6 +60,19 @@ export type ExplorerEntityMutationReceipt = z.infer<
 	typeof explorerEntityMutationReceiptSchema
 >;
 
+export type ExplorerEntityLaunchReceipt = z.infer<
+	typeof explorerEntityLaunchReceiptSchema
+>;
+
+export type ExplorerSelectionStatus = z.infer<
+	typeof explorerSelectionStatusSchema
+>;
+
+export const EMPTY_EXPLORER_SELECTION_STATUS: ExplorerSelectionStatus = {
+	suspended: false,
+	launchQueued: false,
+};
+
 /** One validated host search request; the host remains authoritative for hard bounds and ordering. */
 export type ExplorerWeenieSearchRequest = z.infer<
 	typeof explorerWeenieSearchRequestSchema
@@ -59,24 +83,10 @@ export type ExplorerWeenieSearchResult = z.infer<
 	typeof explorerWeenieSearchResultSchema
 >;
 
-/** Complete explicit host request for one Explorer-local catalog spawn. */
-export interface ExplorerEntitySpawnRequest {
-	readonly wcid: number;
-	readonly cameraPose: {
-		readonly landblockId: number;
-		readonly coords: {
-			readonly x: number;
-			readonly y: number;
-			readonly z: number;
-		};
-		readonly rotation: {
-			readonly w: number;
-			readonly x: number;
-			readonly y: number;
-			readonly z: number;
-		};
-	};
-	readonly candidate: {
+/** AC-authored world position and quaternion orientation shared across Explorer commands and gizmos. */
+export interface ExplorerWorldPose {
+	readonly landblockId: number;
+	readonly coords: {
 		readonly x: number;
 		readonly y: number;
 		readonly z: number;
@@ -87,6 +97,18 @@ export interface ExplorerEntitySpawnRequest {
 		readonly y: number;
 		readonly z: number;
 	};
+}
+
+/** Complete explicit host request for one Explorer-local catalog spawn. */
+export interface ExplorerEntitySpawnRequest {
+	readonly wcid: number;
+	readonly cameraPose: ExplorerWorldPose;
+	readonly candidate: {
+		readonly x: number;
+		readonly y: number;
+		readonly z: number;
+	};
+	readonly rotation: ExplorerWorldPose["rotation"];
 	readonly physicalMode: "pose-only" | "integrated";
 }
 
@@ -111,6 +133,13 @@ export interface ExplorerEntityRelocationRequest {
 	readonly kind: "teleport" | "reset";
 }
 
+/** Explicit direct world-pose edit issued by the Explorer transform gizmo. */
+export interface ExplorerEntityTransformRequest {
+	readonly guid: number;
+	readonly generation: number;
+	readonly pose: ExplorerWorldPose;
+}
+
 type CameraRelativeEntityCandidate = Pick<
 	ExplorerEntitySpawnRequest,
 	"cameraPose" | "candidate" | "rotation"
@@ -121,6 +150,20 @@ export function decodeExplorerEntityMutationReceipt(
 	value: unknown,
 ): ExplorerEntityMutationReceipt {
 	return explorerEntityMutationReceiptSchema.parse(value);
+}
+
+/** Validate the launch receipt including whether launch was queued until deselect. */
+export function decodeExplorerEntityLaunchReceipt(
+	value: unknown,
+): ExplorerEntityLaunchReceipt {
+	return explorerEntityLaunchReceiptSchema.parse(value);
+}
+
+/** Validate the host-owned selection-suspension status receipt. */
+export function decodeExplorerSelectionStatus(
+	value: unknown,
+): ExplorerSelectionStatus {
+	return explorerSelectionStatusSchema.parse(value);
 }
 
 /** Validate a bounded ordered host result before it reaches picker state. */
@@ -269,6 +312,50 @@ export function createExplorerLaunchRequest(
 		guid,
 		generation: generationValue,
 		direction: { x: direction[0], y: direction[1], z: direction[2] },
+	};
+}
+
+/** Validate one direct world-pose transform request before crossing host IPC. */
+export function createExplorerTransformRequest(
+	guid: number,
+	generationValue: number,
+	pose: ExplorerEntityTransformRequest["pose"],
+): ExplorerEntityTransformRequest {
+	validateEntityIdentity(guid, generationValue);
+	if (
+		!Number.isInteger(pose.landblockId) ||
+		pose.landblockId < 0 ||
+		pose.landblockId > 0xffff_ffff
+	) {
+		throw new Error(
+			"Transform landblockId must fit an unsigned 32-bit integer.",
+		);
+	}
+	const { x, y, z } = pose.coords;
+	if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
+		throw new Error("Transform coordinates must be finite.");
+	}
+	const { w, x: rx, y: ry, z: rz } = pose.rotation;
+	if (
+		!Number.isFinite(w) ||
+		!Number.isFinite(rx) ||
+		!Number.isFinite(ry) ||
+		!Number.isFinite(rz)
+	) {
+		throw new Error("Transform rotation must be finite.");
+	}
+	const norm = Math.hypot(w, rx, ry, rz);
+	if (!Number.isFinite(norm) || norm <= Number.EPSILON) {
+		throw new Error("Transform rotation must be nonzero.");
+	}
+	return {
+		guid,
+		generation: generationValue,
+		pose: {
+			landblockId: pose.landblockId,
+			coords: { x, y, z },
+			rotation: { w: w / norm, x: rx / norm, y: ry / norm, z: rz / norm },
+		},
 	};
 }
 

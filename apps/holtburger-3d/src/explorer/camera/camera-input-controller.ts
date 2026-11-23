@@ -77,6 +77,22 @@ const DEFAULT_FLY_MOUSE_CONFIG: ExplorerFlyMouseConfiguration = {
 	invertFlyVertical: false,
 };
 
+/**
+ * Optional unlocked primary-pointer overlay consumer (used by the Explorer 3D transform gizmo).
+ * Claiming `tryBeginDrag` preempts pointer lock, camera gestures, and click-to-select until release.
+ */
+export interface PrimaryPointerOverlay {
+	readonly onHover: (clientX: number, clientY: number) => void;
+	readonly onHoverLeave: () => void;
+	readonly tryBeginDrag: (clientX: number, clientY: number) => boolean;
+	readonly onDragMove: (
+		clientX: number,
+		clientY: number,
+		shiftKey: boolean,
+	) => void;
+	readonly onDragEnd: (commit: boolean) => void;
+}
+
 export interface ExplorerCameraInputControllerOptions {
 	readonly canvas: HTMLCanvasElement;
 	/** Resolved app input policy supplied by the composition root. */
@@ -120,6 +136,8 @@ export interface ExplorerCameraInputControllerOptions {
 		clientX: number,
 		clientY: number,
 	) => void;
+	/** Optional unlocked primary-pointer overlay (Explorer transform gizmo hover & drag). */
+	readonly primaryPointerOverlay?: PrimaryPointerOverlay;
 	/** Surface pointer-lock errors without swallowing them. */
 	readonly onPointerLockError?: (message: string) => void;
 	/** Resolves the app regime's complete keyboard-yaw rate without teaching this controller its modes. */
@@ -180,6 +198,7 @@ export class ExplorerCameraInputController {
 		((clientX: number, clientY: number) => void) | undefined;
 	readonly #onViewportSecondaryClick:
 		((clientX: number, clientY: number) => void) | undefined;
+	readonly #primaryPointerOverlay: PrimaryPointerOverlay | undefined;
 	readonly #keyboardYawRadiansPerSecond: (precisionActive: boolean) => number;
 	readonly #requestAnimationFrame: (callback: FrameRequestCallback) => number;
 	readonly #cancelAnimationFrame: (handle: number) => void;
@@ -195,6 +214,7 @@ export class ExplorerCameraInputController {
 	#gestureMode: "orbit" | "steer" | "fly-look" | "fly-pan" | null = null;
 	#motion: ViewportPointerGesture | null = null;
 	#clickCandidate: "primary" | "secondary" | null = null;
+	#primaryDragActive = false;
 	#lastMovementAt: number | null = null;
 	#linearMovementStartedAt: number | null = null;
 	#movementFrame: number | null = null;
@@ -271,6 +291,7 @@ export class ExplorerCameraInputController {
 		this.#onCharacterInput = options.onCharacterInput;
 		this.#onViewportClick = options.onViewportClick;
 		this.#onViewportSecondaryClick = options.onViewportSecondaryClick;
+		this.#primaryPointerOverlay = options.primaryPointerOverlay;
 		this.#keyboardYawRadiansPerSecond =
 			options.keyboardYawRadiansPerSecond ??
 			((precisionActive) =>
@@ -291,6 +312,7 @@ export class ExplorerCameraInputController {
 		this.#window.addEventListener("mousemove", this.#handleMouseMove);
 		this.#window.addEventListener("mouseup", this.#handleMouseUp);
 		this.#canvas.addEventListener("pointercancel", this.#cancelPointer);
+		this.#canvas.addEventListener("mouseleave", this.#handleCanvasLeave);
 		this.#canvas.addEventListener("auxclick", this.#preventMiddleDefault);
 		this.#canvas.addEventListener("contextmenu", this.#preventContextMenu);
 		this.#canvas.addEventListener("wheel", this.#handleWheel, {
@@ -398,6 +420,14 @@ export class ExplorerCameraInputController {
 		};
 	}
 
+	/** Cancel an active overlay primary drag cleanly (e.g. on Escape, HUD hide, or selection switch). */
+	cancelPrimaryDrag(): boolean {
+		if (!this.#primaryDragActive) return false;
+		this.#primaryDragActive = false;
+		this.#primaryPointerOverlay?.onDragEnd(false);
+		return true;
+	}
+
 	dispose(): void {
 		this.#detachKeyboard();
 		this.#detachGestures();
@@ -406,6 +436,7 @@ export class ExplorerCameraInputController {
 		this.#window.removeEventListener("mousemove", this.#handleMouseMove);
 		this.#window.removeEventListener("mouseup", this.#handleMouseUp);
 		this.#canvas.removeEventListener("pointercancel", this.#cancelPointer);
+		this.#canvas.removeEventListener("mouseleave", this.#handleCanvasLeave);
 		this.#canvas.removeEventListener("auxclick", this.#preventMiddleDefault);
 		this.#canvas.removeEventListener("contextmenu", this.#preventContextMenu);
 		this.#canvas.removeEventListener("wheel", this.#handleWheel);
@@ -419,14 +450,33 @@ export class ExplorerCameraInputController {
 		event.preventDefault();
 	};
 
+	readonly #handleCanvasLeave = (): void => {
+		if (!this.#primaryDragActive) {
+			this.#primaryPointerOverlay?.onHoverLeave();
+		}
+	};
+
 	readonly #handleMouseDown = (event: MouseEvent): void => {
 		if (!this.#inputGate.allowed) return;
+		if (this.#primaryDragActive) return;
 		const active = this.#buttons !== 0;
 		if (!active && event.target !== this.#canvas) return;
 		if (event.button < 0 || event.button > 2) return;
 		const mask =
 			event.button === 0 ? LEFT : event.button === 1 ? MIDDLE : RIGHT;
 		if ((this.#buttons & mask) !== 0) return;
+		if (
+			!active &&
+			event.button === 0 &&
+			this.#primaryPointerOverlay?.tryBeginDrag(
+				event.clientX,
+				event.clientY,
+			) === true
+		) {
+			this.#primaryDragActive = true;
+			event.preventDefault();
+			return;
+		}
 		if (!active) this.#motion = beginViewportPointerGesture();
 		this.#buttons |= mask;
 		event.preventDefault();
@@ -507,7 +557,27 @@ export class ExplorerCameraInputController {
 
 	readonly #handleMouseMove = (event: MouseEvent): void => {
 		if (!this.#inputGate.allowed) return;
-		if (this.#buttons === 0) return;
+		if (this.#primaryDragActive) {
+			if ((event.buttons & LEFT) === 0) {
+				this.#primaryDragActive = false;
+				this.#primaryPointerOverlay?.onDragEnd(true);
+				return;
+			}
+			this.#primaryPointerOverlay?.onDragMove(
+				event.clientX,
+				event.clientY,
+				event.shiftKey,
+			);
+			return;
+		}
+		if (this.#buttons === 0) {
+			if (event.buttons === 0 && event.target === this.#canvas) {
+				this.#primaryPointerOverlay?.onHover(event.clientX, event.clientY);
+			} else if (event.target !== this.#canvas) {
+				this.#primaryPointerOverlay?.onHoverLeave();
+			}
+			return;
+		}
 		if ((this.#buttons & event.buttons) !== this.#buttons) {
 			this.#buttons &= event.buttons;
 			this.#clickCandidate = null;
@@ -599,6 +669,13 @@ export class ExplorerCameraInputController {
 	}
 
 	readonly #handleMouseUp = (event: MouseEvent): void => {
+		if (this.#primaryDragActive) {
+			if (event.button === 0 || (event.buttons & LEFT) === 0) {
+				this.#primaryDragActive = false;
+				this.#primaryPointerOverlay?.onDragEnd(this.#inputGate.allowed);
+			}
+			return;
+		}
 		if (this.#buttons === 0) return;
 		const candidate = this.#clickCandidate;
 		this.#buttons &= event.buttons;
@@ -688,6 +765,11 @@ export class ExplorerCameraInputController {
 	}
 
 	readonly #cancelPointer = (): void => {
+		if (this.#primaryDragActive) {
+			this.#primaryDragActive = false;
+			this.#primaryPointerOverlay?.onDragEnd(false);
+		}
+		this.#primaryPointerOverlay?.onHoverLeave();
 		this.#buttons = 0;
 		this.#canvas.removeAttribute("data-mouse-active");
 		this.#gestureMode = null;

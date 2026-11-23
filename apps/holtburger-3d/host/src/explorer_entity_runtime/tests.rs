@@ -144,6 +144,7 @@ fn attached_definition(guid: Guid, wcid: u32, parent: Guid) -> DynamicEntityDefi
 fn prepared(definition: DynamicEntityDefinition) -> ExplorerPreparedEntity {
     ExplorerPreparedEntity {
         presentation_class: DynamicEntityPresentationClass::Other,
+        primary_movement_sphere: None,
         definition,
     }
 }
@@ -3225,5 +3226,155 @@ fn possession_manual_yaw_accumulates_rotates_once_and_rejects_stale_or_non_finit
     assert!(
         (heading_after_reset - heading_after_tick3).abs() < 0.01,
         "Reset must clear pending manual yaw: {heading_after_tick3} vs {heading_after_reset}"
+    );
+}
+
+#[test]
+fn selection_suspension_exempts_possessed_entities_and_re_suspends_on_release() {
+    let (simulation, runtime, guid) = walking_runtime();
+    let now = settle(&simulation, Instant::now());
+    let generation = runtime.project(guid).unwrap().generation;
+    let target = ExplorerSelectionTarget { guid, generation };
+
+    // Selecting disables the live physical body in simulation while keeping authored participation.
+    let selected = runtime.set_selected_entity(Some(target), now).unwrap();
+    assert!(selected.status.suspended);
+    assert!(
+        simulation
+            .physical_body_snapshot(SpatialBodyId::Entity(guid))
+            .unwrap()
+            .physical
+            .is_none(),
+        "selection suspension must disable the physical body in simulation"
+    );
+
+    // Possessing the selected entity immediately restores its physical body.
+    let _possession = runtime.possess(guid).unwrap();
+    assert!(
+        simulation
+            .physical_body_snapshot(SpatialBodyId::Entity(guid))
+            .unwrap()
+            .physical
+            .is_some(),
+        "possessing a selected entity must restore its physical body"
+    );
+
+    // Releasing possession while still selected re-suspends the physical body cleanly.
+    runtime
+        .release_possession(now + Duration::from_millis(50))
+        .unwrap();
+    assert!(
+        simulation
+            .physical_body_snapshot(SpatialBodyId::Entity(guid))
+            .unwrap()
+            .physical
+            .is_none(),
+        "releasing possession while still selected must re-suspend the physical body"
+    );
+
+    // Deselecting restores the physical body cleanly.
+    let deselected = runtime
+        .set_selected_entity(None, now + Duration::from_millis(100))
+        .unwrap();
+    assert!(!deselected.status.suspended);
+    assert!(
+        simulation
+            .physical_body_snapshot(SpatialBodyId::Entity(guid))
+            .unwrap()
+            .physical
+            .is_some()
+    );
+}
+
+#[test]
+fn selection_suspension_rejects_missing_prepared_physics_and_preserves_launch_on_failed_possess() {
+    let (simulation, runtime, guid) = walking_runtime();
+    let now = settle(&simulation, Instant::now());
+    let generation = runtime.project(guid).unwrap().generation;
+    let target = ExplorerSelectionTarget { guid, generation };
+
+    // Select & queue a launch, then switch to PoseOnly -> Integrated without a prepared body -> Err.
+    runtime.set_selected_entity(Some(target), now).unwrap();
+    let current_physics = runtime
+        .instance(guid, generation)
+        .unwrap()
+        .definition
+        .physics;
+    runtime
+        .replace_physics_state(
+            guid,
+            generation,
+            current_physics,
+            LocalPhysicalDemand::NONE,
+            None,
+        )
+        .unwrap();
+    let physical_demand = LocalPhysicalDemand {
+        target: holtburger_world::LocalTargetDemand::Retained,
+        integration: holtburger_world::LocalIntegrationDemand::Eligible,
+    };
+    let missing_err =
+        runtime.replace_physics_state(guid, generation, current_physics, physical_demand, None);
+    assert!(
+        matches!(
+            missing_err,
+            Err(ExplorerEntityRuntimeError::MissingPreparedPhysics)
+        ),
+        "promoting PoseOnly -> Integrated while selected without prepared physics must fail loudly"
+    );
+
+    // Restore physical body via prepared replacement, arm a launch, then fail possess via
+    // moving the entity outside simulation interest so residency rejects possess.
+    runtime
+        .replace_physics_state(
+            guid,
+            generation,
+            current_physics,
+            physical_demand,
+            Some(physical()),
+        )
+        .unwrap();
+    let mut launch_physics = current_physics;
+    launch_physics.response.align_path = false;
+    let launch_plan = holtburger_core::DynamicEntityLaunchPlan {
+        physics: launch_physics,
+        kinematics: holtburger_world::DynamicBodyKinematics::new(
+            Vector3::new(5.0, 0.0, 0.0),
+            Vector3::zero(),
+            Vector3::new(0.0, 0.0, 2.0),
+            false,
+        )
+        .unwrap(),
+    };
+    let queued = runtime.launch(guid, generation, launch_plan, now).unwrap();
+    assert!(queued.queued);
+    // Queued launch must not prematurely strip align_path from authored physics before firing.
+    assert_eq!(
+        runtime
+            .instance(guid, generation)
+            .unwrap()
+            .definition
+            .physics,
+        current_physics
+    );
+
+    // Relocate into an unloaded landblock so possess fails residency and must roll back with
+    // both suspension AND queued launch preserved.
+    let unloaded = WorldPosition {
+        landblock_id: Guid(0x0101_0001),
+        coords: Vector3::new(10.0, 10.0, 1.0),
+        rotation: Quaternion::identity(),
+    };
+    runtime.relocate(guid, generation, unloaded, now).unwrap();
+    assert!(runtime.possess(guid).is_err());
+
+    let status = runtime
+        .set_selected_entity(Some(target), now)
+        .unwrap()
+        .status;
+    assert!(status.suspended, "failed possess must roll back suspension");
+    assert!(
+        status.launch_queued,
+        "failed possess must preserve queued launch"
     );
 }

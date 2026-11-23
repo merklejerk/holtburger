@@ -181,7 +181,7 @@ describe("ExplorerDynamicEntitySession", () => {
 
 		transport.invoke = async (command: string): Promise<unknown> => {
 			transport.calls.push(`invoke:${command}`);
-			return { guid: 2, generation: 1 };
+			return { guid: 2, generation: 1, queued: false };
 		};
 		let completed = false;
 		const launch = session
@@ -200,6 +200,66 @@ describe("ExplorerDynamicEntitySession", () => {
 		transport.emit({ kind: "upserted", entity: entity(2) });
 		await launch;
 		expect(completed).toBe(true);
+	});
+
+	it("decodes selection-suspension status and awaits transform corrections", async () => {
+		const transport = new RecordingTransport();
+		transport.responses.set("set_explorer_selected_entity", {
+			suspended: true,
+			launchQueued: false,
+		});
+		const session = new ExplorerDynamicEntitySession(transport);
+		await expect(
+			session.setSelectedEntity({ guid: 2, generation: 1 }),
+		).resolves.toEqual({ suspended: true, launchQueued: false });
+		expect(transport.invocations).toContainEqual([
+			"set_explorer_selected_entity",
+			{ request: { selection: { guid: 2, generation: 1 } } },
+		]);
+
+		const fake = new FakeTransport();
+		const live = new ExplorerDynamicEntitySession(fake);
+		await live.start();
+		fake.invoke = async (command: string): Promise<unknown> => {
+			fake.calls.push(`invoke:${command}`);
+			return { guid: 2, generation: 1 };
+		};
+		const moved = entity(2);
+		moved.placement.pose.coords.x = 12;
+		const transformPromise = live.setTransform({
+			guid: 2,
+			generation: 1,
+			pose: moved.placement.pose,
+		});
+		await Promise.resolve();
+		// Matches real host publication (`delivery.corrected(guid, Teleport)` -> ticked batch).
+		const teleportEndpoint = {
+			pose: moved.placement.pose,
+			spatialMembership: moved.placement.spatialMembership,
+		};
+		fake.emit({
+			kind: "ticked",
+			batch: {
+				hostTime: { seconds: 2 },
+				durationMs: 0,
+				advances: [
+					{
+						kind: "teleport",
+						entity: moved,
+						path: {
+							initial: teleportEndpoint,
+							legs: [{ endFraction: 1, end: teleportEndpoint }],
+						},
+					},
+				],
+				updates: [],
+			},
+		});
+		await expect(transformPromise).resolves.toEqual({
+			guid: 2,
+			generation: 1,
+		});
+		expect(fake.calls).toContain("invoke:set_explorer_entity_transform");
 	});
 
 	it("listens before requesting state and reconstructs again after listener restart", async () => {

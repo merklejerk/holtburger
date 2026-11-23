@@ -18,6 +18,7 @@ import {
 	type WorldIndicatorInput,
 } from "../renderer/renderer";
 import type { EntityOverlayFrame } from "../renderer/overlays/entity-overlay-policy";
+import type { TransformGizmoVisual } from "../renderer/overlays/transform-gizmo-contract";
 import type { RenderExtent } from "../renderer/render-extent";
 import type { RenderWorld } from "../renderer/render-world";
 import type { RendererResourceManager } from "../renderer/resource-manager";
@@ -665,6 +666,10 @@ export class GamePresentationRuntime {
 
 	setWorldIndicator(indicator: WorldIndicatorInput | null): void {
 		this.#framePresentation.setWorldIndicator(indicator);
+	}
+
+	setTransformGizmo(gizmo: TransformGizmoVisual | null): void {
+		this.#framePresentation.setTransformGizmo(gizmo);
 	}
 
 	setSceneEnvironment(environment: ResolvedSceneEnvironment): void {

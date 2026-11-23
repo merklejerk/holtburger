@@ -149,6 +149,8 @@ const EXPLORER_HOST_COMMAND_NAMES = [
 	"replace_explorer_entity_physics_state",
 	"launch_explorer_entity",
 	"relocate_explorer_entity",
+	"set_explorer_entity_transform",
+	"set_explorer_selected_entity",
 	"possess_explorer_entity",
 	"set_explorer_possession_intent",
 	"queue_explorer_possession_event",

@@ -14,6 +14,26 @@ pub struct ExplorerEntityMutationReceipt {
     pub generation: u64,
 }
 
+/// Launch mutation receipt additionally reporting whether launch is held until deselect.
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExplorerEntityLaunchReceipt {
+    /// App-local live identity.
+    pub guid: holtburger_common::Guid,
+    /// Monotonic instance generation guarding late frontend realization.
+    pub generation: u64,
+    /// True when the entity is selection-suspended and launch will execute upon deselect.
+    pub queued: bool,
+}
+
+/// Frontend notification naming the currently selected Explorer entity (or clearing selection).
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetExplorerSelectedEntityRequest {
+    /// Selected entity generation, or `None` when nothing is selected.
+    pub selection: Option<explorer_entity_runtime::ExplorerSelectionTarget>,
+}
+
 /// Explorer-local choice for whether an entity is presentation-only or physically integrated.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]

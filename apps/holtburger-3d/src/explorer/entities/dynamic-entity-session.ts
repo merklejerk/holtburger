@@ -9,12 +9,17 @@ import {
 } from "../../lib/game/runtime/dynamic-entity-feed";
 import { DynamicEntitySession } from "../../lib/game/runtime/dynamic-entity-session";
 import {
+	decodeExplorerEntityLaunchReceipt,
 	decodeExplorerEntityMutationReceipt,
+	decodeExplorerSelectionStatus,
 	decodeExplorerWeenieSearchRequest,
 	decodeExplorerWeenieSearchResults,
+	type ExplorerEntityLaunchReceipt,
 	type ExplorerEntityMutationReceipt,
 	type ExplorerEntityRelocationRequest,
 	type ExplorerEntitySpawnRequest,
+	type ExplorerEntityTransformRequest,
+	type ExplorerSelectionStatus,
 	type LaunchExplorerEntityRequest,
 	type ExplorerWeenieSearchRequest,
 	type ExplorerWeenieSearchResult,
@@ -216,9 +221,9 @@ export class ExplorerDynamicEntitySession {
 	/** Launch one exact physical generation and await its complete upsert. */
 	async launch(
 		request: LaunchExplorerEntityRequest,
-	): Promise<ExplorerEntityMutationReceipt> {
+	): Promise<ExplorerEntityLaunchReceipt> {
 		const afterRevision = this.#acceptedRevision;
-		const receipt = decodeExplorerEntityMutationReceipt(
+		const receipt = decodeExplorerEntityLaunchReceipt(
 			await this.#transport.invoke("launch_explorer_entity", { request }),
 		);
 		await this.#waitForCurrent(receipt, true, afterRevision);
@@ -235,6 +240,31 @@ export class ExplorerDynamicEntitySession {
 		);
 		await this.#waitForCurrent(receipt, true, afterRevision);
 		return receipt;
+	}
+
+	/** Apply one exact direct world-pose edit (gizmo drag) and await its correction batch. */
+	async setTransform(
+		request: ExplorerEntityTransformRequest,
+	): Promise<ExplorerEntityMutationReceipt> {
+		const afterRevision = this.#acceptedRevision;
+		const receipt = decodeExplorerEntityMutationReceipt(
+			await this.#transport.invoke("set_explorer_entity_transform", {
+				request,
+			}),
+		);
+		await this.#waitForCurrent(receipt, true, afterRevision);
+		return receipt;
+	}
+
+	/** Synchronize the currently selected entity with the host's selection-suspension policy. */
+	async setSelectedEntity(
+		selection: { readonly guid: number; readonly generation: number } | null,
+	): Promise<ExplorerSelectionStatus> {
+		return decodeExplorerSelectionStatus(
+			await this.#transport.invoke("set_explorer_selected_entity", {
+				request: { selection },
+			}),
+		);
 	}
 
 	/** Despawn all Explorer-local entities in one ordered host reset. */

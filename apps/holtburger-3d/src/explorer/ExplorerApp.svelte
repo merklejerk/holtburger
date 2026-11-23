@@ -89,8 +89,17 @@
 	} from "./camera/camera-authority";
 	import { parseResidenceInput } from "./camera/world-input";
 	import { ExplorerDynamicEntityController } from "./entities/dynamic-entity-controller";
+	import {
+		EMPTY_EXPLORER_SELECTION_STATUS,
+		type ExplorerSelectionStatus,
+	} from "./entities/entity-commands";
 	import ExplorerEntitiesPanel from "./entities/ExplorerEntitiesPanel.svelte";
 	import ExplorerEntityInspector from "./entities/ExplorerEntityInspector.svelte";
+	import {
+		ExplorerTransformGizmoController,
+		type TransformGizmoCursor,
+		type TransformGizmoTarget,
+	} from "./gizmo/transform-gizmo-controller";
 	import {
 		cycleNearbyExplorerEntity,
 		findExplorerEntityWearer,
@@ -407,7 +416,9 @@
 
 	function setHudHidden(hidden: boolean): void {
 		if (hudHidden === hidden) return;
+		if (hidden) cameraAuthority.cancelPrimaryDrag();
 		hudHidden = hidden;
+		gizmoController.syncVisual();
 		if (hidden) {
 			toastCenter.publish({
 				message: `Press ${toggleHudHint} (or Esc) to reveal the UI.`,
@@ -508,6 +519,10 @@
 	let explorerPossession = $state<ExplorerPossession | null>(null);
 	let possessedControls = $state<ExplorerPossessionControls | null>(null);
 	let selectedExplorerEntity = $state<ExplorerEntitySelection | null>(null);
+	let selectionStatus = $state<ExplorerSelectionStatus>(
+		EMPTY_EXPLORER_SELECTION_STATUS,
+	);
+	let gizmoCursor = $state<TransformGizmoCursor>(null);
 	let entityPending = $state<ExplorerEntityOperation | null>(null);
 	let runRateRequestSerial = 0;
 	let jumpChargeActive = $state(false);
@@ -576,9 +591,13 @@
 	}
 
 	function runEntitySpawn(wcid: number, distance: number): Promise<void> {
-		return performEntityOperation({ kind: "spawn" }, () =>
-			entityController.spawnExplorerEntity(wcid, distance),
-		);
+		return performEntityOperation({ kind: "spawn" }, async () => {
+			const spawned = await entityController.spawnExplorerEntity(
+				wcid,
+				distance,
+			);
+			selectExplorerEntity(spawned);
+		});
 	}
 
 	function runEntityDespawn(entity: DynamicEntityView): Promise<void> {
@@ -613,7 +632,15 @@
 				kind: "launch",
 				target: { guid: entity.identity.guid, generation: entity.generation },
 			},
-			() => entityController.launchExplorerEntity(entity),
+			async () => {
+				const result = await entityController.launchExplorerEntity(entity);
+				if (result.queued) {
+					toastCenter.publish({
+						message: "Launch queued — deselect to fire.",
+						tone: "status",
+					});
+				}
+			},
 		);
 	}
 
@@ -720,7 +747,10 @@
 				},
 				{
 					action: "launch",
-					label: "Launch",
+					label:
+						!isPossessed && selectionStatus.launchQueued
+							? "Launch queued"
+							: "Launch",
 					disabled: busy,
 					activate: () => void runEntityLaunch(entity),
 				},
@@ -800,9 +830,20 @@
 	function selectExplorerEntity(
 		selection: ExplorerEntitySelection | null,
 	): void {
+		const changed =
+			selectedExplorerEntity?.guid !== selection?.guid ||
+			selectedExplorerEntity?.generation !== selection?.generation;
+		if (changed) {
+			cameraAuthority.cancelPrimaryDrag();
+			selectionStatus = EMPTY_EXPLORER_SELECTION_STATUS;
+		}
 		selectedExplorerEntity = selection;
 		if (selection === null) inspectOpen = false;
 		gameRuntime?.setSelectedEntityGuid(selection?.guid ?? null);
+		if (changed) {
+			void entityController.setSelectedExplorerEntity(selection);
+		}
+		gizmoController.syncVisual();
 	}
 
 	function selectMinimapEntity(guid: number | null): void {
@@ -861,6 +902,39 @@
 		openInspectWindow();
 	}
 
+	const gizmoController = new ExplorerTransformGizmoController({
+		readTarget: (): TransformGizmoTarget | null => {
+			if (hudHidden || selectedExplorerEntity === null) return null;
+			if (
+				explorerPossession !== null &&
+				explorerPossession.guid === selectedExplorerEntity.guid &&
+				explorerPossession.entityGeneration ===
+					selectedExplorerEntity.generation
+			) {
+				return null;
+			}
+			const live = entityController.readExplorerEntity(selectedExplorerEntity);
+			if (live === null || live.placement.kind !== "world") return null;
+			return {
+				guid: live.identity.guid,
+				generation: live.generation,
+				pose: live.placement.pose,
+			};
+		},
+		readPrimaryView: () => cameraAuthority.lastPrimaryView(),
+		readCanvas: () => canvasElement,
+		setVisual: (visual) => gameRuntime?.setTransformGizmo(visual),
+		onTransformPose: (guid, generation, pose) => {
+			entityController.scheduleEntityTransform(guid, generation, pose);
+		},
+		onCancelTransform: (guid, generation, revertPose) => {
+			entityController.scheduleEntityTransform(guid, generation, revertPose);
+		},
+		onCursorChange: (cursor) => {
+			gizmoCursor = cursor;
+		},
+	});
+
 	const cameraAuthority: ExplorerCameraAuthorityController =
 		new ExplorerCameraAuthorityController({
 			hostTransport,
@@ -882,6 +956,22 @@
 			onFlyAutoRunChange: notifyAutoRunChanged,
 			onViewportClick: handleViewportClick,
 			onViewportSecondaryClick: handleViewportSecondaryClick,
+			primaryPointerOverlay: {
+				onHover: (clientX, clientY) => {
+					gizmoController.handlePointerHover(clientX, clientY);
+				},
+				onHoverLeave: () => {
+					gizmoController.clearHover();
+				},
+				tryBeginDrag: (clientX, clientY) =>
+					gizmoController.tryBeginDrag(clientX, clientY),
+				onDragMove: (clientX, clientY, shiftKey) => {
+					gizmoController.updateDrag(clientX, clientY, shiftKey);
+				},
+				onDragEnd: (commit) => {
+					gizmoController.endDrag(commit);
+				},
+			},
 			onReleasePossession: () => entityController.possessExplorerEntity(null),
 			onCameraFocusStatusChange: (status) => {
 				if (
@@ -945,6 +1035,9 @@
 			},
 			readSelectedEntity: () => selectedExplorerEntity,
 			onClearSelectedEntity: () => selectExplorerEntity(null),
+			onSelectionStatusChange: (status) => {
+				selectionStatus = status;
+			},
 			onJumpChargeActiveChange: (active) => {
 				jumpChargeActive = active;
 			},
@@ -1035,7 +1128,9 @@
 				return;
 			}
 			if (event.key === "Escape" && !event.defaultPrevented) {
-				if (hudHidden) {
+				if (cameraAuthority.cancelPrimaryDrag()) {
+					event.preventDefault();
+				} else if (hudHidden) {
 					event.preventDefault();
 					setHudHidden(false);
 				} else if (hudEditMode) {
@@ -1067,6 +1162,7 @@
 			textureFilteringCapabilities = null;
 			activeRegion = undefined;
 			displayDiagnostics.detach();
+			gizmoController.reset();
 			entityController.detach();
 			teardown = (async () => {
 				stopFrameLoop?.();
@@ -1166,6 +1262,7 @@
 						residencySync.requiresFlatEnvCellRenderMode,
 					);
 					entityController.syncPossessedPlacement(gameRuntime);
+					gizmoController.syncVisual();
 					const updateAndDrawStartedAt = performance.now();
 					const activationReady =
 						staticActivationReady &&
@@ -1268,6 +1365,7 @@
 	<canvas
 		bind:this={canvasElement}
 		class="explorer-canvas"
+		style:cursor={gizmoCursor ?? undefined}
 		aria-label="Explorer render viewport"
 		tabindex="-1"
 		data-game-viewport
@@ -1640,6 +1738,7 @@
 						selected={selectedEntity}
 						wearer={selectedEntityWearer}
 						pending={entityPending}
+						{selectionStatus}
 						possession={explorerPossession}
 						possessionControls={possessedControls}
 						readPossessionMotionProbe={() =>

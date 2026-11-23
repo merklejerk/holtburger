@@ -197,6 +197,9 @@ pub struct ExplorerEntityInstance {
     pub physical_demand: LocalPhysicalDemand,
     /// Explorer-resolved presentation class retained outside the source-neutral definition.
     pub presentation_class: DynamicEntityPresentationClass,
+    /// Unit primary placement sphere cached once at prepare time so `set_transform` / `relocate`
+    /// resolve cell containment without per-call DAT setup unpacking.
+    pub primary_movement_sphere: Option<holtburger_world::GroundedSphere>,
     /// Current complete source-neutral semantic definition.
     pub definition: DynamicEntityDefinition,
 }
@@ -206,6 +209,8 @@ pub struct ExplorerEntityInstance {
 pub struct ExplorerPreparedEntity {
     /// Explorer-resolved presentation class computed while complete template facts are available.
     pub presentation_class: DynamicEntityPresentationClass,
+    /// Optional unit primary placement sphere cached from setup preparation.
+    pub primary_movement_sphere: Option<holtburger_world::GroundedSphere>,
     /// Validated definition consumed unchanged by shared simulation behavior.
     pub definition: DynamicEntityDefinition,
 }
@@ -310,13 +315,44 @@ pub struct ExplorerEntityPhysicsStateOutcome {
     pub body: DynamicEntityBodyCommitOutcome,
 }
 
-/// Current semantic/body facts after one exact-generation launch commits.
+/// Current semantic/body facts after one exact-generation launch commits or queues.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ExplorerEntityLaunchOutcome {
     /// Updated current semantic instance; launch does not replace its generation.
     pub instance: ExplorerEntityInstance,
-    /// Canonical body view after live kinematics and response memory were replaced.
+    /// Canonical body view after live kinematics were replaced (or retained while selection-suspended).
     pub body: RuntimeSpatialBodyView,
+    /// True when the entity is selection-suspended and launch will fire automatically on deselect.
+    pub queued: bool,
+}
+
+/// Exact live Explorer entity selected by the frontend for transform gizmo editing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExplorerSelectionTarget {
+    /// App-local entity identity.
+    pub guid: Guid,
+    /// Exact semantic generation guarding stale selection notifications.
+    pub generation: u64,
+}
+
+/// Host-owned selection-suspension status reported back to Explorer UI surfaces.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExplorerSelectionSuspensionStatus {
+    /// Whether the currently selected entity's physical body is suspended for gizmo editing.
+    pub suspended: bool,
+    /// Whether a launch is armed on the suspended entity and will execute upon deselect.
+    pub launch_queued: bool,
+}
+
+/// Committed result of changing the host's Explorer selection target.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExplorerSelectionChangeOutcome {
+    /// Current suspension and queued-launch status for the newly selected entity.
+    pub status: ExplorerSelectionSuspensionStatus,
+    /// Live entities whose physical body or kinematics changed and require ordered publication.
+    pub changed_guids: Vec<Guid>,
 }
 
 /// Current semantic/body facts after one discontinuous exact-generation relocation.

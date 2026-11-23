@@ -21,9 +21,10 @@ use holtburger_world::{
     CollisionReportOutcome, CollisionScene, DynamicBodyKinematics, DynamicBodyRelocationOutcome,
     DynamicPhysicalBodyConfiguration, DynamicPhysicalBodyDefinition, EffectiveEntityPhysicsState,
     GroundedBodyActuation, LocalPhysicalDemand, PhysicalBodyActuation, PhysicalBodyDefinition,
-    PhysicalBodyResponsePolicy, PhysicalBodySceneResidency, PhysicalBodyTickResult,
-    PhysicalCollisionFilter, PlacedMotionPath, PlacementRecovery, RuntimeSpatialBodyView,
-    SpatialBody, SpatialBodyId, SpatialScene, physical_body_scene_residency,
+    PhysicalBodyResponsePolicy, PhysicalBodySceneResidency, PhysicalBodyState,
+    PhysicalBodyTickResult, PhysicalCollisionFilter, PlacedMotionPath, PlacementRecovery,
+    RuntimeSpatialBodyView, SpatialBody, SpatialBodyId, SpatialScene,
+    physical_body_scene_residency,
 };
 use serde::{Deserialize, Serialize};
 
@@ -300,6 +301,26 @@ impl HostSimulationRuntime {
         dynamic_entity_projection_input(definition, &state.bodies)
     }
 
+    /// Reads the current canonical world pose of one registered dynamic body.
+    pub fn dynamic_entity_pose(&self, body_id: SpatialBodyId) -> Option<WorldPosition> {
+        let state = self.state.lock().expect("host simulation lock poisoned");
+        state.bodies.body(body_id).map(|body| body.pose)
+    }
+
+    /// Captures one registered physical body's current definition for lossless temporary suspension.
+    pub fn dynamic_entity_physical_definition(
+        &self,
+        body_id: SpatialBodyId,
+        physics: EffectiveEntityPhysicsState,
+        demand: LocalPhysicalDemand,
+    ) -> Option<DynamicPhysicalBodyDefinition> {
+        let state = self.state.lock().expect("host simulation lock poisoned");
+        let physical = state.bodies.body(body_id)?.physical.as_ref()?;
+        physical
+            .dynamic_configuration_for_state(physics, demand)
+            .map(|configuration| configuration.definition().clone())
+    }
+
     /// Resolves and commits one complete state/demand replacement under the scene lock.
     pub fn reconfigure_dynamic_entity_physics(
         &self,
@@ -312,13 +333,18 @@ impl HostSimulationRuntime {
         let mut state = self.state.lock().expect("host simulation lock poisoned");
         let replacement = if demand.requires_physical_body() {
             if let Some(prepared) = prepared {
+                let base = DynamicPhysicalBodyConfiguration::with_object_scale(
+                    prepared,
+                    demand,
+                    object_scale,
+                )
+                .expect("non-empty Explorer demand must produce a configuration");
+                let staged =
+                    PhysicalBodyState::new_dynamic(base, PhysicalCollisionFilter::ALL, None);
                 Some(
-                    DynamicPhysicalBodyConfiguration::with_object_scale(
-                        prepared,
-                        demand,
-                        object_scale,
-                    )
-                    .expect("non-empty Explorer demand must produce a configuration"),
+                    staged
+                        .dynamic_configuration_for_state(next, demand)
+                        .ok_or(DynamicEntityBodyOperationError::NotPhysical { body_id })?,
                 )
             } else {
                 let body = state

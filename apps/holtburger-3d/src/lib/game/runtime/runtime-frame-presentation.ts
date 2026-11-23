@@ -44,6 +44,7 @@ import {
 } from "../renderer/overlays/entity-overlay-policy";
 import { validateEntityBeaconSettings } from "../renderer/overlays/entity-beacon-policy";
 import { validateEntitySelectionOutlineSettings } from "../renderer/overlays/entity-selection-outline-policy";
+import type { TransformGizmoVisual } from "../renderer/overlays/transform-gizmo-contract";
 import {
 	resolveNameplateCategory,
 	validateNameplateSettings,
@@ -265,6 +266,8 @@ export class FramePresentationCoordinator {
 	#presentationLights: readonly RuntimeLight[] = [];
 	/** Atomic frontend-resolved precise-jump marker and optional trajectory. */
 	#worldIndicator: WorldIndicatorInput | null = null;
+	/** Optional Explorer 6-DOF transform gizmo visual; Client always leaves this null. */
+	#transformGizmo: TransformGizmoVisual | null = null;
 	/**
 	 * Spawned entity driven by the viewer, or null while the camera is unbound.
 	 *
@@ -527,6 +530,11 @@ export class FramePresentationCoordinator {
 	/** Replace the complete presentation-only world indicator without touching scene authority. */
 	setWorldIndicator(indicator: WorldIndicatorInput | null): void {
 		this.#worldIndicator = indicator;
+	}
+
+	/** Replace the presentation-only Explorer transform gizmo without touching scene authority. */
+	setTransformGizmo(gizmo: TransformGizmoVisual | null): void {
+		this.#transformGizmo = gizmo;
 	}
 
 	/** Replace the frontend-resolved environment without changing scene residency or interest. */
@@ -879,6 +887,7 @@ export class FramePresentationCoordinator {
 				},
 			],
 			worldIndicator: this.#worldIndicator,
+			transformGizmo: this.#transformGizmo,
 			summonLeashes,
 		});
 	}
@@ -888,6 +897,7 @@ export class FramePresentationCoordinator {
 		this.#resolvedNodeOverlays.clear();
 		this.#entityOverlayFrame = { kind: "ambient" };
 		this.#presentationLights = [];
+		this.#transformGizmo = null;
 	}
 
 	clearPortalState(): void {

@@ -336,6 +336,7 @@ mod tests {
     fn prepared(definition: DynamicEntityDefinition) -> ExplorerPreparedEntity {
         ExplorerPreparedEntity {
             presentation_class: DynamicEntityPresentationClass::Other,
+            primary_movement_sphere: None,
             definition,
         }
     }

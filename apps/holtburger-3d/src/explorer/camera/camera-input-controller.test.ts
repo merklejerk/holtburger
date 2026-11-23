@@ -6,7 +6,10 @@ import { KeyboardInputPolicy } from "../../lib/input/keyboard-input-policy";
 import { ViewportInputGate } from "../../lib/input/viewport-input-gate";
 import { VIEWPORT_DRAG_THRESHOLD_PIXELS } from "../../lib/input/viewport-pointer-gesture";
 import { EXPLORER_TUNING } from "../explorer-tuning";
-import { ExplorerCameraInputController } from "./camera-input-controller";
+import {
+	ExplorerCameraInputController,
+	type PrimaryPointerOverlay,
+} from "./camera-input-controller";
 
 const WHEEL_DELTA = 100;
 const WHEEL_DISTANCE =
@@ -15,6 +18,7 @@ const WHEEL_DISTANCE =
 
 function controllerHarness(
 	keyboardYawRadiansPerSecond?: (precisionActive: boolean) => number,
+	primaryPointerOverlay?: PrimaryPointerOverlay,
 ) {
 	const canvasListeners = new Map<string, EventListener>();
 	const windowListeners = new Map<string, EventListener>();
@@ -111,6 +115,7 @@ function controllerHarness(
 		onPossessionWheel: possessionWheel,
 		onViewportClick: viewportClick,
 		onViewportSecondaryClick: viewportSecondaryClick,
+		primaryPointerOverlay,
 		requestAnimationFrame: (callback) => {
 			animationFrame = callback;
 			return 1;
@@ -149,6 +154,7 @@ function controllerHarness(
 	};
 
 	return {
+		canvas,
 		inputGate,
 		changes,
 		physicalWheel,
@@ -549,5 +555,103 @@ describe("ExplorerCameraInputController scheme routing", () => {
 
 		expect(test.characterInput).toHaveBeenCalledOnce();
 		expect(test.characterInput).toHaveBeenCalledWith({ kind: "reset" });
+	});
+
+	it("preempts pointer lock, camera look, and click selection when a primary gizmo drag claims mousedown", () => {
+		const overlay = {
+			onHover: vi.fn(),
+			onHoverLeave: vi.fn(),
+			tryBeginDrag: vi.fn(() => true),
+			onDragMove: vi.fn(),
+			onDragEnd: vi.fn(),
+		};
+		const test = controllerHarness(undefined, overlay);
+
+		// Unlocked hover reaches gizmo hover callback.
+		test.dispatch("mousemove", { buttons: 0, clientX: 120, clientY: 240 });
+		expect(overlay.onHover).toHaveBeenCalledWith(120, 240);
+
+		// Claimed left-mousedown starts primary drag without pointer lock or camera rotation.
+		test.dispatch("mousedown", {
+			button: 0,
+			buttons: 1,
+			clientX: 120,
+			clientY: 240,
+		});
+		expect(overlay.tryBeginDrag).toHaveBeenCalledWith(120, 240);
+		expect(test.canvas.requestPointerLock).not.toHaveBeenCalled();
+
+		test.dispatch("mousemove", {
+			buttons: 1,
+			clientX: 180,
+			clientY: 250,
+			movementX: 60,
+			movementY: 10,
+			shiftKey: true,
+		});
+		expect(overlay.onDragMove).toHaveBeenCalledWith(180, 250, true);
+		expect(test.changes).not.toHaveBeenCalled();
+
+		// Release commits primary drag and never fires click-to-select.
+		test.dispatch("mouseup", {
+			button: 0,
+			buttons: 0,
+			clientX: 180,
+			clientY: 250,
+		});
+		expect(overlay.onDragEnd).toHaveBeenCalledWith(true);
+		expect(test.viewportClick).not.toHaveBeenCalled();
+	});
+
+	it("cancels an active primary drag cleanly via cancelPrimaryDrag or input gate block without leaking mouseup", () => {
+		const overlay = {
+			onHover: vi.fn(),
+			onHoverLeave: vi.fn(),
+			tryBeginDrag: vi.fn(() => true),
+			onDragMove: vi.fn(),
+			onDragEnd: vi.fn(),
+		};
+		const test = controllerHarness(undefined, overlay);
+
+		// Cancel mid-drag (e.g. Escape) while LMB is still held.
+		test.dispatch("mousedown", { button: 0, buttons: 1 });
+		expect(test.controller.cancelPrimaryDrag()).toBe(true);
+		expect(overlay.onDragEnd).toHaveBeenCalledWith(false);
+		expect(test.controller.cancelPrimaryDrag()).toBe(false);
+
+		// Further mousemove/mouseup from that cancelled press never re-trigger drag or click.
+		test.dispatch("mousemove", { buttons: 1, clientX: 200, clientY: 200 });
+		test.dispatch("mouseup", { button: 0, buttons: 0 });
+		expect(overlay.onDragMove).not.toHaveBeenCalled();
+		expect(overlay.onDragEnd).toHaveBeenCalledTimes(1);
+		expect(test.viewportClick).not.toHaveBeenCalled();
+
+		// Gate block also cancels an active primary drag.
+		test.dispatch("mousedown", { button: 0, buttons: 1 });
+		const release = test.inputGate.block();
+		expect(overlay.onDragEnd).toHaveBeenLastCalledWith(false);
+		release();
+
+		// Miss falls back cleanly to normal viewport click.
+		const missHarness = controllerHarness(undefined, {
+			onHover: vi.fn(),
+			onHoverLeave: vi.fn(),
+			tryBeginDrag: () => false,
+			onDragMove: vi.fn(),
+			onDragEnd: vi.fn(),
+		});
+		missHarness.dispatch("mousedown", {
+			button: 0,
+			buttons: 1,
+			clientX: 50,
+			clientY: 60,
+		});
+		missHarness.dispatch("mouseup", {
+			button: 0,
+			buttons: 0,
+			clientX: 50,
+			clientY: 60,
+		});
+		expect(missHarness.viewportClick).toHaveBeenCalledWith(50, 60);
 	});
 });

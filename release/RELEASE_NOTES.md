@@ -2,8 +2,10 @@ Holtburger beta includes the 3D client and the terminal client (CLI).
 
 ## In this beta
 
-- **3D client, camera:** The idle camera orbit now starts after 60 seconds of inactivity by default; you can adjust or turn it off with the Idle orbit timeout setting under Camera.
-- **3D client, themes:** The Berry Pop Neko theme's paw and bell decorations now appear only on HUD windows, and HUD buttons gain cat-ear styling.
+- **3D client, World Explorer:** The World Explorer is substantially expanded with a new launcher entry, navigation, scene, visuals and diagnostics windows, a world map, and a settings panel.
+- **3D client, Explorer entities:** You can spawn entities from the bundled weenie catalog, inspect them with right-click, move them with a transform gizmo, and take possession of them.
+- **3D client, launcher:** The launcher is unified with the Explorer and shares app settings and HUD behavior with the game client.
+- **3D client, loading:** A new loading screen is used during startup and game entry.
 
 ## Known issues
 

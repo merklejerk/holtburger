@@ -87,6 +87,7 @@ function controllerHarness(
 	const possessionToggleAutoRun = vi.fn();
 	const possessionWheel = vi.fn();
 	const viewportClick = vi.fn();
+	const viewportSecondaryClick = vi.fn();
 
 	const inputGate = new ViewportInputGate();
 	const keyboard = new KeyboardInputPolicy(inputGate);
@@ -109,6 +110,7 @@ function controllerHarness(
 		onPossessionToggleAutoRun: possessionToggleAutoRun,
 		onPossessionWheel: possessionWheel,
 		onViewportClick: viewportClick,
+		onViewportSecondaryClick: viewportSecondaryClick,
 		requestAnimationFrame: (callback) => {
 			animationFrame = callback;
 			return 1;
@@ -164,6 +166,7 @@ function controllerHarness(
 		possessionToggleAutoRun,
 		possessionWheel,
 		viewportClick,
+		viewportSecondaryClick,
 		tick(frameAt: number) {
 			const callback = animationFrame;
 			animationFrame = null;
@@ -228,6 +231,83 @@ describe("ExplorerCameraInputController scheme routing", () => {
 			clientY: 80,
 		});
 		expect(test.viewportClick).not.toHaveBeenCalled();
+	});
+
+	it("fires onViewportSecondaryClick for an undragged right click and suppresses it after drag or chord", () => {
+		const test = controllerHarness();
+		test.dispatch("mousedown", {
+			button: 2,
+			buttons: 2,
+			clientX: 210,
+			clientY: 145,
+		});
+		test.dispatch("mouseup", {
+			button: 2,
+			buttons: 0,
+			clientX: 210,
+			clientY: 145,
+		});
+		expect(test.viewportSecondaryClick).toHaveBeenCalledWith(210, 145);
+		expect(test.viewportClick).not.toHaveBeenCalled();
+
+		// Right-drag suppresses secondary click.
+		test.viewportSecondaryClick.mockClear();
+		test.dispatch("mousedown", { button: 2, buttons: 2 });
+		test.dispatch("mousemove", {
+			buttons: 2,
+			movementX: VIEWPORT_DRAG_THRESHOLD_PIXELS + 5,
+			movementY: 0,
+		});
+		test.dispatch("mouseup", {
+			button: 2,
+			buttons: 0,
+			clientX: 230,
+			clientY: 145,
+		});
+		expect(test.viewportSecondaryClick).not.toHaveBeenCalled();
+
+		// Left+right chord suppresses secondary click.
+		test.dispatch("mousedown", { button: 2, buttons: 2 });
+		test.dispatch("mousedown", { button: 0, buttons: 3 });
+		test.dispatch("mouseup", { button: 0, buttons: 2 });
+		test.dispatch("mouseup", { button: 2, buttons: 0 });
+		expect(test.viewportSecondaryClick).not.toHaveBeenCalled();
+		expect(test.viewportClick).not.toHaveBeenCalled();
+	});
+
+	it("defers possession followRear on a lone right press until dragging begins", () => {
+		const test = controllerHarness();
+		test.controller.setControlScheme({ kind: "possessed-character" });
+
+		// Undragged right-click inspects without snapping the camera behind the character.
+		test.dispatch("mousedown", {
+			button: 2,
+			buttons: 2,
+			clientX: 90,
+			clientY: 60,
+		});
+		expect(test.possessionFollowRear).not.toHaveBeenCalled();
+		test.dispatch("mouseup", {
+			button: 2,
+			buttons: 0,
+			clientX: 90,
+			clientY: 60,
+		});
+		expect(test.possessionFollowRear).not.toHaveBeenCalled();
+		expect(test.viewportSecondaryClick).toHaveBeenCalledWith(90, 60);
+
+		// Crossing the drag threshold commits followRear and cancels the secondary click.
+		test.viewportSecondaryClick.mockClear();
+		test.dispatch("mousedown", { button: 2, buttons: 2 });
+		expect(test.possessionFollowRear).not.toHaveBeenCalled();
+		test.dispatch("mousemove", {
+			buttons: 2,
+			movementX: VIEWPORT_DRAG_THRESHOLD_PIXELS + 4,
+			movementY: 0,
+		});
+		expect(test.possessionFollowRear).toHaveBeenCalledTimes(1);
+		test.dispatch("mouseup", { button: 2, buttons: 0 });
+		expect(test.viewportSecondaryClick).not.toHaveBeenCalled();
 	});
 
 	it("raises and lowers the camera on scroll wheel in free-fly and routes to onPhysicalWheel in physical-fly", () => {
@@ -402,10 +482,10 @@ describe("ExplorerCameraInputController scheme routing", () => {
 			expect.any(Number),
 		);
 
-		// Right-drag steers facing yaw and pitches camera, entering rear follow.
+		// Right-drag steers facing yaw and pitches camera, entering rear follow once dragging begins.
 		test.dispatch("mousedown", { button: 2, buttons: 2 });
-		expect(test.possessionFollowRear).toHaveBeenCalled();
 		test.dispatch("mousemove", { buttons: 2, movementX: 8, movementY: 5 });
+		expect(test.possessionFollowRear).toHaveBeenCalled();
 		expect(test.possessionTurn).toHaveBeenCalledWith(
 			8 * EXPLORER_TUNING.camera.controls.pointerYawRadiansPerPixel,
 		);

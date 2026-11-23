@@ -97,6 +97,10 @@ export interface ExplorerCameraAuthorityDependencies {
 	readonly onPossessionCancelTurn?: () => void;
 	readonly onFlyAutoRunChange?: (enabled: boolean) => void;
 	readonly onViewportClick?: (clientX: number, clientY: number) => void;
+	readonly onViewportSecondaryClick?: (
+		clientX: number,
+		clientY: number,
+	) => void;
 	readonly onReleasePossession: () => Promise<unknown>;
 	readonly onCameraFocusStatusChange: (
 		status: ExplorerCameraFocusStatus,
@@ -212,6 +216,9 @@ export class ExplorerCameraAuthorityController {
 			onPossessionWheel: (distance) => this.routeCameraWheel(distance),
 			onViewportClick: (clientX, clientY) => {
 				this.deps.onViewportClick?.(clientX, clientY);
+			},
+			onViewportSecondaryClick: (clientX, clientY) => {
+				this.deps.onViewportSecondaryClick?.(clientX, clientY);
 			},
 			onPointerLockError: (message) => {
 				this.deps.onPhysicalCameraErrorChange(message);

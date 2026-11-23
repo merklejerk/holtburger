@@ -817,27 +817,48 @@
 		);
 	}
 
-	function handleViewportClick(clientX: number, clientY: number): void {
+	function pickViewportEntity(
+		clientX: number,
+		clientY: number,
+	):
+		| { readonly kind: "unavailable" }
+		| { readonly kind: "empty" }
+		| { readonly kind: "entity"; readonly guid: number } {
 		const runtime = gameRuntime;
 		const canvas = canvasElement;
 		const view = cameraAuthority.lastPrimaryView();
-		if (runtime === undefined || canvas === null || view === null) return;
-		if (spawnedEntities.length === 0) {
-			selectExplorerEntity(null);
-			return;
+		if (runtime === undefined || canvas === null || view === null) {
+			return { kind: "unavailable" };
 		}
+		if (spawnedEntities.length === 0) return { kind: "empty" };
 		const sampled = samplePresentedCameraRay(view, canvas, clientX, clientY);
-		if (sampled === null) return;
+		if (sampled === null) return { kind: "unavailable" };
 		const candidateGuids = spawnedEntities.map(
 			(entity) => entity.identity.guid,
 		);
-		const refined = refineEntitySelectionCandidates(
+		const guid = refineEntitySelectionCandidates(
 			runtime,
 			sampled.refinement,
 			candidateGuids,
 			view.camera.far,
-		);
-		selectMinimapEntity(refined.selectedGuid);
+		).selectedGuid;
+		return guid === null ? { kind: "empty" } : { kind: "entity", guid };
+	}
+
+	function handleViewportClick(clientX: number, clientY: number): void {
+		const picked = pickViewportEntity(clientX, clientY);
+		if (picked.kind === "unavailable") return;
+		selectMinimapEntity(picked.kind === "entity" ? picked.guid : null);
+	}
+
+	function handleViewportSecondaryClick(
+		clientX: number,
+		clientY: number,
+	): void {
+		const picked = pickViewportEntity(clientX, clientY);
+		if (picked.kind !== "entity") return;
+		selectMinimapEntity(picked.guid);
+		openInspectWindow();
 	}
 
 	const cameraAuthority: ExplorerCameraAuthorityController =
@@ -860,6 +881,7 @@
 			onPossessionCancelTurn: () => entityController.cancelPossessionTurn(),
 			onFlyAutoRunChange: notifyAutoRunChanged,
 			onViewportClick: handleViewportClick,
+			onViewportSecondaryClick: handleViewportSecondaryClick,
 			onReleasePossession: () => entityController.possessExplorerEntity(null),
 			onCameraFocusStatusChange: (status) => {
 				if (

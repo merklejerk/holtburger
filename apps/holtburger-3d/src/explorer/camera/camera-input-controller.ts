@@ -115,6 +115,11 @@ export interface ExplorerCameraInputControllerOptions {
 	readonly onCharacterInput: (input: CharacterActionInput) => void;
 	/** Fires on an undragged left-click on the viewport canvas (used for 3D entity selection). */
 	readonly onViewportClick?: (clientX: number, clientY: number) => void;
+	/** Fires on an undragged right-click on the viewport canvas (used for 3D entity inspection). */
+	readonly onViewportSecondaryClick?: (
+		clientX: number,
+		clientY: number,
+	) => void;
 	/** Surface pointer-lock errors without swallowing them. */
 	readonly onPointerLockError?: (message: string) => void;
 	/** Resolves the app regime's complete keyboard-yaw rate without teaching this controller its modes. */
@@ -173,6 +178,8 @@ export class ExplorerCameraInputController {
 	readonly #onCharacterInput: (input: CharacterActionInput) => void;
 	readonly #onViewportClick:
 		((clientX: number, clientY: number) => void) | undefined;
+	readonly #onViewportSecondaryClick:
+		((clientX: number, clientY: number) => void) | undefined;
 	readonly #keyboardYawRadiansPerSecond: (precisionActive: boolean) => number;
 	readonly #requestAnimationFrame: (callback: FrameRequestCallback) => number;
 	readonly #cancelAnimationFrame: (handle: number) => void;
@@ -187,7 +194,7 @@ export class ExplorerCameraInputController {
 	#bothForward = false;
 	#gestureMode: "orbit" | "steer" | "fly-look" | "fly-pan" | null = null;
 	#motion: ViewportPointerGesture | null = null;
-	#clickCandidate = false;
+	#clickCandidate: "primary" | "secondary" | null = null;
 	#lastMovementAt: number | null = null;
 	#linearMovementStartedAt: number | null = null;
 	#movementFrame: number | null = null;
@@ -263,6 +270,7 @@ export class ExplorerCameraInputController {
 		this.#onPossessionWheel = options.onPossessionWheel;
 		this.#onCharacterInput = options.onCharacterInput;
 		this.#onViewportClick = options.onViewportClick;
+		this.#onViewportSecondaryClick = options.onViewportSecondaryClick;
 		this.#keyboardYawRadiansPerSecond =
 			options.keyboardYawRadiansPerSecond ??
 			((precisionActive) =>
@@ -422,7 +430,12 @@ export class ExplorerCameraInputController {
 		if (!active) this.#motion = beginViewportPointerGesture();
 		this.#buttons |= mask;
 		event.preventDefault();
-		this.#clickCandidate = !active && event.button === 0;
+		this.#clickCandidate =
+			active || event.button === 1
+				? null
+				: event.button === 0
+					? "primary"
+					: "secondary";
 		this.#updatePointerMode();
 	};
 
@@ -435,7 +448,7 @@ export class ExplorerCameraInputController {
 				movementEnabled && (this.#buttons & (LEFT | RIGHT)) === (LEFT | RIGHT);
 			const startedForward =
 				(middle && !this.#middleForward) || (both && !this.#bothForward);
-			if (middle || both) this.#clickCandidate = false;
+			if (middle || both) this.#clickCandidate = null;
 			if (middle !== this.#middleForward) {
 				this.#middleForward = middle;
 				this.#onPossessionForward?.("middle-button", middle);
@@ -453,9 +466,11 @@ export class ExplorerCameraInputController {
 			if (nextMode !== this.#gestureMode) {
 				this.#onPossessionOrbitHeld?.(nextMode === "orbit", performance.now());
 			}
+			// A lone right press retains secondary-click inspection until dragging; movement chords commit immediately.
 			if (
 				nextMode === "steer" &&
-				(startedForward || nextMode !== this.#gestureMode)
+				(startedForward ||
+					(nextMode !== this.#gestureMode && this.#clickCandidate === null))
 			) {
 				this.#onPossessionFollowRear?.(performance.now());
 			}
@@ -495,7 +510,7 @@ export class ExplorerCameraInputController {
 		if (this.#buttons === 0) return;
 		if ((this.#buttons & event.buttons) !== this.#buttons) {
 			this.#buttons &= event.buttons;
-			this.#clickCandidate = false;
+			this.#clickCandidate = null;
 			this.#updatePointerMode();
 		}
 		if (this.#gestureMode !== null && !this.#pointerLock.locked) {
@@ -515,7 +530,10 @@ export class ExplorerCameraInputController {
 		);
 		this.#motion = advance.gesture;
 		if (advance.dragDelta === null) return;
-		this.#clickCandidate = false;
+		if (this.#gestureMode === "steer" && this.#clickCandidate === "secondary") {
+			this.#onPossessionFollowRear?.(performance.now());
+		}
+		this.#clickCandidate = null;
 		const { x: deltaX, y: deltaY } = advance.dragDelta;
 
 		if (this.#gestureMode === "steer") {
@@ -582,12 +600,15 @@ export class ExplorerCameraInputController {
 
 	readonly #handleMouseUp = (event: MouseEvent): void => {
 		if (this.#buttons === 0) return;
-		const shouldClick = this.#clickCandidate && event.button === 0;
+		const candidate = this.#clickCandidate;
 		this.#buttons &= event.buttons;
-		this.#clickCandidate = false;
+		this.#clickCandidate = null;
 		this.#updatePointerMode();
-		if (shouldClick && this.#inputGate.allowed) {
+		if (!this.#inputGate.allowed) return;
+		if (candidate === "primary" && event.button === 0) {
 			this.#onViewportClick?.(event.clientX, event.clientY);
+		} else if (candidate === "secondary" && event.button === 2) {
+			this.#onViewportSecondaryClick?.(event.clientX, event.clientY);
 		}
 	};
 
@@ -661,7 +682,7 @@ export class ExplorerCameraInputController {
 	#endCapture(): void {
 		this.#onPossessionOrbitHeld?.(false, performance.now());
 		this.#motion = null;
-		this.#clickCandidate = false;
+		this.#clickCandidate = null;
 		this.#pointerLock.unlock();
 		this.#onPossessionCancelTurn?.();
 	}

@@ -16,6 +16,24 @@ const DEFAULT_TOGGLE_HUD_BINDING = {
 	meta: false,
 } as const satisfies KeyBinding;
 
+/** Default shortcut to despawn the currently selected Explorer entity. */
+const DEFAULT_DESPAWN_SELECTED_BINDING = {
+	key: "Delete",
+	ctrl: false,
+	shift: false,
+	alt: false,
+	meta: false,
+} as const satisfies KeyBinding;
+
+/** Default shortcut to possess or release the currently selected Explorer entity. */
+const DEFAULT_TOGGLE_POSSESSION_BINDING = {
+	key: "f",
+	ctrl: false,
+	shift: false,
+	alt: false,
+	meta: false,
+} as const satisfies KeyBinding;
+
 /** AC-aligned fly keybindings used for first-run and reset Explorer settings. */
 const EXPLORER_FLY_DEFAULTS: InputBindings<FlyAction> = {
 	forward: [{ key: "w" }],
@@ -50,12 +68,17 @@ export const EXPLORER_WORLD_DEFAULTS = {
 	audioFollowsCamera: true,
 	flySpeed: EXPLORER_TUNING.camera.controls.moveSpeed,
 	minimapViewDiameters: { ...MAP_DEFAULT_VIEW_DIAMETERS },
+	showNameplates: true,
 } as const;
 
-/** Explorer-scoped input defaults (fly bindings, fly look inversion, HUD hide shortcut). */
+/** Explorer-scoped input defaults (fly bindings, fly look inversion, and Explorer shortcuts). */
 export const EXPLORER_INPUT_DEFAULTS = {
 	fly: EXPLORER_FLY_DEFAULTS,
 	toggleHud: [DEFAULT_TOGGLE_HUD_BINDING] as readonly KeyBinding[],
+	despawnSelected: [DEFAULT_DESPAWN_SELECTED_BINDING] as readonly KeyBinding[],
+	togglePossession: [
+		DEFAULT_TOGGLE_POSSESSION_BINDING,
+	] as readonly KeyBinding[],
 	invertFlyHorizontal: false,
 	invertFlyVertical: false,
 } as const;

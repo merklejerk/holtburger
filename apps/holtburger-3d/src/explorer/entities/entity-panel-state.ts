@@ -111,6 +111,31 @@ export function explorerEntitySelection(
 	return { guid: entity.identity.guid, generation: entity.generation };
 }
 
+/** Whether a live entity matches a captured `(guid, generation)` identity. */
+export function explorerEntityMatchesSelection(
+	entity: DynamicEntityView,
+	selection: ExplorerEntitySelection | null,
+): boolean {
+	return (
+		selection !== null &&
+		selection.guid === entity.identity.guid &&
+		selection.generation === entity.generation
+	);
+}
+
+/** World-placed entities can be independently despawned; held children follow their wearer. */
+export function canDespawnExplorerEntity(entity: DynamicEntityView): boolean {
+	return entity.placement.kind === "world";
+}
+
+/** Only world-placed entities with an authored motion table can be possessed. */
+export function canPossessExplorerEntity(entity: DynamicEntityView): boolean {
+	return (
+		entity.placement.kind === "world" &&
+		entity.presentation.content.motionTableDid !== null
+	);
+}
+
 function entityOwnerLandblockId(cellId: number): LandblockOwnerId {
 	const ownerHex = `0x${((cellId >>> 16) & 0xffff).toString(16).padStart(4, "0")}ffff`;
 	return normalizeLandblockOwner(ownerHex);

@@ -12,13 +12,13 @@ export const EXPLORER_HUD_MINIMUMS: Readonly<
 		{ readonly width: number; readonly height: number }
 	>
 > = {
-	navigation: { width: 420, height: 360 },
-	scene: { width: 300, height: 320 },
-	visuals: { width: 320, height: 360 },
-	entities: { width: 340, height: 380 },
-	inspection: { width: 320, height: 340 },
-	diagnostics: { width: 360, height: 320 },
-	settings: { width: 480, height: 400 },
+	navigation: { width: 360, height: 300 },
+	scene: { width: 300, height: 240 },
+	visuals: { width: 300, height: 240 },
+	entities: { width: 320, height: 260 },
+	inspection: { width: 300, height: 240 },
+	diagnostics: { width: 280, height: 220 },
+	settings: { width: 340, height: 300 },
 	minimap: { width: 140, height: 140 },
 	selectedEntity: { width: 240, height: 64 },
 	shortcuts: { width: 252, height: 42 },

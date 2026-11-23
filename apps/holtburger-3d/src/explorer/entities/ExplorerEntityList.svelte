@@ -1,7 +1,12 @@
 <script lang="ts">
+	import DeleteIcon from "../../assets/icons/character-delete.svg?component";
+	import PlayerIcon from "../../assets/icons/entity-category-player.svg?component";
 	import ExamineIcon from "../../assets/icons/hud-examine.svg?component";
 	import type { DynamicEntityView } from "../../lib/game/runtime/dynamic-entity-feed";
 	import {
+		canDespawnExplorerEntity,
+		canPossessExplorerEntity,
+		explorerEntityMatchesSelection,
 		explorerEntitySelection,
 		type ExplorerEntitySelection,
 	} from "./entity-panel-state";
@@ -11,26 +16,27 @@
 		readonly entities: readonly DynamicEntityView[];
 		readonly selected: ExplorerEntitySelection | null;
 		readonly possessed: ExplorerEntitySelection | null;
+		readonly actionsDisabled?: boolean;
 		readonly select: (selection: ExplorerEntitySelection) => void;
 		readonly onInspect?: (selection: ExplorerEntitySelection) => void;
+		readonly onPossess?: (
+			entity: DynamicEntityView,
+			guid: number | null,
+		) => void;
+		readonly onDespawn?: (entity: DynamicEntityView) => void;
 	}
 
-	let { entities, selected, possessed, select, onInspect }: Props = $props();
+	let {
+		entities,
+		selected,
+		possessed,
+		actionsDisabled = false,
+		select,
+		onInspect,
+		onPossess,
+		onDespawn,
+	}: Props = $props();
 	const tree = $derived(buildExplorerEntityTree(entities));
-
-	function isSelected(entity: DynamicEntityView): boolean {
-		return (
-			selected?.guid === entity.identity.guid &&
-			selected.generation === entity.generation
-		);
-	}
-
-	function isPossessed(entity: DynamicEntityView): boolean {
-		return (
-			possessed?.guid === entity.identity.guid &&
-			possessed.generation === entity.generation
-		);
-	}
 
 	function formatGuid(guid: number): string {
 		return `0x${guid.toString(16).padStart(8, "0")}`;
@@ -39,15 +45,21 @@
 
 {#snippet entityRow(entity: DynamicEntityView, detail: string)}
 	{@const rowSelection = explorerEntitySelection(entity)}
+	{@const rowSelected = explorerEntityMatchesSelection(entity, selected)}
+	{@const rowPossessed = explorerEntityMatchesSelection(entity, possessed)}
+	{@const canPossess =
+		onPossess !== undefined && canPossessExplorerEntity(entity)}
+	{@const canDespawn =
+		onDespawn !== undefined && canDespawnExplorerEntity(entity)}
 	<div
 		class="entity-row"
-		class:selected={isSelected(entity)}
-		class:possessed={isPossessed(entity)}
+		class:selected={rowSelected}
+		class:possessed={rowPossessed}
 	>
 		<button
 			type="button"
 			class="ui-catalog-trigger entity-trigger"
-			aria-pressed={isSelected(entity)}
+			aria-pressed={rowSelected}
 			onclick={() => select(rowSelection)}
 			ondblclick={() => {
 				select(rowSelection);
@@ -66,25 +78,60 @@
 			</span>
 			<span class="entity-detail">
 				{formatGuid(entity.identity.guid)}
-				{#if isPossessed(entity)}
+				{#if rowPossessed}
 					<span class="possession-label"> · possessed</span>
 				{/if}
 				· {detail}
 			</span>
 		</button>
-		{#if onInspect !== undefined}
-			<button
-				type="button"
-				class="ui-catalog-trigger entity-inspect-button"
-				title={`Inspect ${entity.display.name}`}
-				aria-label={`Inspect ${entity.display.name}`}
-				onclick={() => {
-					select(rowSelection);
-					onInspect(rowSelection);
-				}}
-			>
-				<ExamineIcon />
-			</button>
+		{#if onInspect !== undefined || canPossess || canDespawn}
+			<div class="entity-actions">
+				{#if canPossess}
+					<button
+						type="button"
+						class="ui-catalog-trigger entity-action-button"
+						class:active={rowPossessed}
+						disabled={actionsDisabled}
+						aria-pressed={rowPossessed}
+						title={rowPossessed
+							? `Release possession of ${entity.display.name}`
+							: `Possess ${entity.display.name}`}
+						aria-label={rowPossessed
+							? `Release possession of ${entity.display.name}`
+							: `Possess ${entity.display.name}`}
+						onclick={() =>
+							onPossess(entity, rowPossessed ? null : entity.identity.guid)}
+					>
+						<PlayerIcon />
+					</button>
+				{/if}
+				{#if onInspect !== undefined}
+					<button
+						type="button"
+						class="ui-catalog-trigger entity-action-button"
+						title={`Inspect ${entity.display.name}`}
+						aria-label={`Inspect ${entity.display.name}`}
+						onclick={() => {
+							select(rowSelection);
+							onInspect(rowSelection);
+						}}
+					>
+						<ExamineIcon />
+					</button>
+				{/if}
+				{#if canDespawn}
+					<button
+						type="button"
+						class="ui-catalog-trigger entity-action-button danger"
+						disabled={actionsDisabled}
+						title={`Despawn ${entity.display.name}`}
+						aria-label={`Despawn ${entity.display.name}`}
+						onclick={() => onDespawn(entity)}
+					>
+						<DeleteIcon />
+					</button>
+				{/if}
+			</div>
 		{/if}
 	</div>
 {/snippet}
@@ -214,7 +261,13 @@
 			text-align: left;
 		}
 
-		.entity-inspect-button {
+		.entity-actions {
+			display: inline-flex;
+			align-items: center;
+			gap: 2px;
+		}
+
+		.entity-action-button {
 			display: grid;
 			place-items: center;
 			width: 28px;
@@ -223,11 +276,24 @@
 			color: var(--ui-color-muted);
 		}
 
-		.entity-inspect-button:hover {
+		.entity-action-button:hover:not(:disabled) {
 			color: var(--ui-color-text);
 		}
 
-		.entity-inspect-button :global(svg) {
+		.entity-action-button.active {
+			color: var(--ui-color-success);
+		}
+
+		.entity-action-button.danger:hover:not(:disabled) {
+			color: var(--ui-color-danger);
+		}
+
+		.entity-action-button:disabled {
+			opacity: 0.45;
+			cursor: default;
+		}
+
+		.entity-action-button :global(svg) {
 			width: 16px;
 			height: 16px;
 		}

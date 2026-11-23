@@ -3378,3 +3378,59 @@ fn selection_suspension_rejects_missing_prepared_physics_and_preserves_launch_on
         "failed possess must preserve queued launch"
     );
 }
+
+#[test]
+fn possessed_pitched_entity_drives_horizontally_without_vertical_drive_error() {
+    let (simulation, runtime, guid) = walking_runtime();
+    let settled_at = settle(&simulation, Instant::now());
+    let generation = runtime.project(guid).unwrap().generation;
+
+    // Tilt the entity with a non-zero pitch (as when rotated via the Explorer transform gizmo)
+    // before possessing and driving it forward.
+    let current = simulation
+        .physical_body_snapshot(SpatialBodyId::Entity(guid))
+        .unwrap()
+        .pose;
+    let pitched_pose = WorldPosition {
+        rotation: Quaternion::from_axis_angle(Vector3::new(1.0, 0.0, 0.0), 0.5)
+            .expect("unit X axis produces a valid pitch quaternion"),
+        ..current
+    };
+    runtime
+        .relocate(guid, generation, pitched_pose, settled_at)
+        .unwrap();
+    let settled_at = settle(&simulation, settled_at + Duration::from_millis(34));
+
+    let possession = runtime.possess(guid).unwrap();
+    assert_eq!(
+        runtime
+            .replace_possession_intent(ExplorerPossessionIntentRequest {
+                possession_generation: possession.possession_generation,
+                revision: 1,
+                stance: possession.accepted_stance,
+                run_rate_scalar: possession.run_rate_capability.initial,
+                drive: CharacterDrive::builder().walk().forward().build(),
+            })
+            .unwrap(),
+        PossessionIntentReplaceResult::Accepted
+    );
+
+    let before = simulation
+        .physical_body_snapshot(SpatialBodyId::Entity(guid))
+        .unwrap()
+        .pose;
+    let tick = runtime
+        .tick_physical_collection(1.0 / 30.0, settled_at + Duration::from_millis(34))
+        .expect("pitched possessed entity must not fail grounded horizontal drive validation");
+    assert!(!tick.ticks.is_empty());
+    let after = simulation
+        .physical_body_snapshot(SpatialBodyId::Entity(guid))
+        .unwrap()
+        .pose;
+    assert!(
+        after.coords.y > before.coords.y,
+        "pitched possessed entity should still advance horizontally along its heading: before={:?}, after={:?}",
+        before.coords,
+        after.coords,
+    );
+}

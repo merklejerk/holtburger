@@ -29,6 +29,11 @@
 			request: ExplorerWeenieSearchRequest,
 		) => Promise<readonly ExplorerWeenieSearchResult[]>;
 		readonly spawn: (wcid: number, distance: number) => Promise<void>;
+		readonly despawn: (entity: DynamicEntityView) => Promise<void>;
+		readonly possess: (
+			entity: DynamicEntityView,
+			guid: number | null,
+		) => Promise<void>;
 		readonly clearAll: () => Promise<void>;
 	}
 
@@ -43,6 +48,8 @@
 		pending,
 		search,
 		spawn,
+		despawn,
+		possess,
 		clearAll,
 	}: Props = $props();
 
@@ -125,8 +132,11 @@
 					{entities}
 					selected={selection}
 					{possessed}
+					actionsDisabled={!runtimeReady || pending !== null}
 					{select}
 					{onInspect}
+					onPossess={(entity, guid) => void possess(entity, guid)}
+					onDespawn={(entity) => void despawn(entity)}
 				/>
 			</div>
 		</div>

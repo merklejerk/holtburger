@@ -383,7 +383,11 @@ pub(super) fn possession_grounded_actuation(
         }
     };
     let local_planar = Vector3::new(local_sidestep, local_forward, 0.0);
-    let world_planar = body.pose.rotation.rotate_vector(local_planar);
+    // Project local drive through the horizontal heading rather than full 3D pose rotation so
+    // pitched or rolled entities (e.g. from gizmo edits) keep horizontal grounded drive.
+    let horizontal_drive =
+        Quaternion::from_heading(body.pose.rotation.to_heading()).rotate_vector(local_planar);
+    let world_planar = Vector3::new(horizontal_drive.x, horizontal_drive.y, 0.0);
     let base_heading = match effective.axes.turn() {
         Some((_, _)) if capability.turn == PossessionLocomotionSource::TargetAuthored => {
             body.pose.rotation.multiply(&gated.rotation).to_heading()

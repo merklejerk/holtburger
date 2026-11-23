@@ -102,12 +102,13 @@ export const explorerWorldSettingsSchema = z
 			.strict()
 			.readonly()
 			.default(EXPLORER_WORLD_DEFAULTS.minimapViewDiameters),
+		showNameplates: z.boolean().default(EXPLORER_WORLD_DEFAULTS.showNameplates),
 	})
 	.strict()
 	.readonly();
 export type ExplorerWorldSettings = z.infer<typeof explorerWorldSettingsSchema>;
 
-/** Explorer-scoped input preferences: remappable fly bindings, fly inversion, and HUD-hide shortcut. */
+/** Explorer-scoped input preferences: remappable fly bindings, fly inversion, and Explorer shortcuts. */
 export const explorerInputSettingsSchema = z
 	.object({
 		fly: z
@@ -115,6 +116,12 @@ export const explorerInputSettingsSchema = z
 			.readonly()
 			.default(EXPLORER_INPUT_DEFAULTS.fly),
 		toggleHud: bindingListSchema.default(EXPLORER_INPUT_DEFAULTS.toggleHud),
+		despawnSelected: bindingListSchema.default(
+			EXPLORER_INPUT_DEFAULTS.despawnSelected,
+		),
+		togglePossession: bindingListSchema.default(
+			EXPLORER_INPUT_DEFAULTS.togglePossession,
+		),
 		invertFlyHorizontal: z
 			.boolean()
 			.default(EXPLORER_INPUT_DEFAULTS.invertFlyHorizontal),

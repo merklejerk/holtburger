@@ -44,6 +44,7 @@
 		/** Whether meshes suppressed by retail's degradation sentinel remain visible. */
 		readonly showRetailHiddenGeometry: boolean;
 		readonly updateShowRetailHiddenGeometry: (visible: boolean) => void;
+		readonly showNameplates: boolean;
 		readonly nameplates: NameplateSettings;
 		readonly updateNameplateCategory: (
 			category: NameplateCategory,
@@ -75,6 +76,7 @@
 		updateLayerVisibility,
 		showRetailHiddenGeometry,
 		updateShowRetailHiddenGeometry,
+		showNameplates,
 		nameplates,
 		updateNameplateCategory,
 		ambientOcclusion,
@@ -173,7 +175,10 @@
 				/>
 			</ExplorerControlGroup>
 
-			<ExplorerControlGroup title="Nameplates" disabled={!runtimeReady}>
+			<ExplorerControlGroup
+				title="Nameplates"
+				disabled={!runtimeReady || !showNameplates}
+			>
 				{#each NAMEPLATE_CATEGORIES as category (category)}
 					<ToggleField
 						checked={nameplates.categoryVisibility[category]}

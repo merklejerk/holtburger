@@ -6,6 +6,7 @@
 	import type { HostKinematicBoomStatus } from "../../lib/game/camera/host-kinematic-boom-session";
 	import type { ExplorerSelectionStatus } from "./entity-commands";
 	import {
+		canPossessExplorerEntity,
 		explorerEntityOperationTargets,
 		explorerEntitySelection,
 		type ExplorerEntityOperation,
@@ -238,7 +239,7 @@
 
 	{#if selected.placement.kind === "world"}
 		<div class="selected-actions">
-			{#if selected.presentation.content.motionTableDid !== null}
+			{#if canPossessExplorerEntity(selected)}
 				<button
 					type="button"
 					class="explorer-action ui-button"

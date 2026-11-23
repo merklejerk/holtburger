@@ -80,6 +80,20 @@
 		precision: "Precision slow",
 	};
 
+	const EXPLORER_SHORTCUT_ACTIONS = [
+		"toggleHud",
+		"togglePossession",
+		"despawnSelected",
+	] as const;
+	type ExplorerShortcutAction = (typeof EXPLORER_SHORTCUT_ACTIONS)[number];
+	const EXPLORER_SHORTCUT_LABELS: Readonly<
+		Record<ExplorerShortcutAction, string>
+	> = {
+		toggleHud: "Hide / show HUD",
+		togglePossession: "Possess / release entity",
+		despawnSelected: "Despawn selected entity",
+	};
+
 	type ExplorerBindingTarget =
 		| { readonly scope: "client"; readonly row: ClientBindingRow }
 		| {
@@ -87,7 +101,18 @@
 				readonly action: FlyAction;
 				readonly label: string;
 		  }
-		| { readonly scope: "toggleHud"; readonly label: string };
+		| {
+				readonly scope: "explorerAction";
+				readonly action: ExplorerShortcutAction;
+				readonly label: string;
+		  };
+
+	type ExplorerConflictTarget =
+		| { readonly scope: "fly"; readonly action: FlyAction }
+		| {
+				readonly scope: "explorerAction";
+				readonly action: ExplorerShortcutAction;
+		  };
 
 	interface PendingCapture {
 		readonly target: ExplorerBindingTarget;
@@ -100,10 +125,7 @@
 		} | null;
 		readonly conflictLabels: readonly string[];
 		readonly conflictClientRows: readonly ClientBindingRow[];
-		readonly conflictExplorerTargets: readonly (
-			| { readonly scope: "fly"; readonly action: FlyAction }
-			| { readonly scope: "toggleHud" }
-		)[];
+		readonly conflictExplorerTargets: readonly ExplorerConflictTarget[];
 	}
 
 	interface Props {
@@ -113,11 +135,13 @@
 		readonly graphics: ClientGraphicsSettings;
 		readonly textureFilteringCapabilities: TextureFilteringCapabilities | null;
 		readonly ui: ClientUiSettings;
+		readonly showNameplates: boolean;
 		readonly audio: ClientAudioSettings;
 		readonly input: ClientInputConfiguration;
 		readonly explorerInput: ExplorerInputSettings;
 		readonly onGraphicsChange: (graphics: ClientGraphicsSettings) => void;
 		readonly onUiChange: (ui: ClientUiSettings) => void;
+		readonly onShowNameplatesChange: (showNameplates: boolean) => void;
 		readonly onAudioChange: (audio: ClientAudioSettings) => void;
 		readonly onInputChange: (input: ClientInputConfiguration) => void;
 		readonly onExplorerInputChange: (input: ExplorerInputSettings) => void;
@@ -132,11 +156,13 @@
 		graphics,
 		textureFilteringCapabilities,
 		ui,
+		showNameplates,
 		audio,
 		input,
 		explorerInput,
 		onGraphicsChange,
 		onUiChange,
+		onShowNameplatesChange,
 		onAudioChange,
 		onInputChange,
 		onExplorerInputChange,
@@ -166,7 +192,7 @@
 		if (target.scope === "fly") {
 			return explorerInput.fly[target.action];
 		}
-		return explorerInput.toggleHud;
+		return explorerInput[target.action];
 	}
 
 	function removeBinding(target: ExplorerBindingTarget, index: number): void {
@@ -189,7 +215,7 @@
 		}
 		onExplorerInputChange({
 			...explorerInput,
-			toggleHud: nextBindings,
+			[target.action]: nextBindings,
 		});
 	}
 
@@ -218,7 +244,7 @@
 		}
 		onExplorerInputChange({
 			...explorerInput,
-			toggleHud: EXPLORER_INPUT_DEFAULTS.toggleHud,
+			[target.action]: EXPLORER_INPUT_DEFAULTS[target.action],
 		});
 	}
 
@@ -293,14 +319,9 @@
 		}
 
 		// Explorer-owned bindings only conflict within Explorer's own actions.
-		const explorerConflicts: (
-			| {
-					readonly scope: "fly";
-					readonly action: FlyAction;
-					readonly label: string;
-			  }
-			| { readonly scope: "toggleHud"; readonly label: string }
-		)[] = [];
+		const explorerConflicts: (ExplorerConflictTarget & {
+			readonly label: string;
+		})[] = [];
 		for (const action of FLY_ACTIONS) {
 			if (target.scope === "fly" && target.action === action) continue;
 			if (
@@ -315,16 +336,20 @@
 				});
 			}
 		}
-		if (
-			target.scope !== "toggleHud" &&
-			explorerInput.toggleHud.some((binding) =>
-				clientBindingsOverlap(candidate, binding, witness),
-			)
-		) {
-			explorerConflicts.push({
-				scope: "toggleHud",
-				label: "Hide / show HUD",
-			});
+		for (const action of EXPLORER_SHORTCUT_ACTIONS) {
+			if (target.scope === "explorerAction" && target.action === action)
+				continue;
+			if (
+				explorerInput[action].some((binding) =>
+					clientBindingsOverlap(candidate, binding, witness),
+				)
+			) {
+				explorerConflicts.push({
+					scope: "explorerAction",
+					action,
+					label: EXPLORER_SHORTCUT_LABELS[action],
+				});
+			}
 		}
 		if (explorerConflicts.length === 0) {
 			commitExplorerBinding(target, [...existing, candidate], [], witness);
@@ -385,14 +410,11 @@
 	function commitExplorerBinding(
 		target: Exclude<ExplorerBindingTarget, { readonly scope: "client" }>,
 		bindings: readonly KeyBinding[],
-		conflicts: readonly (
-			| { readonly scope: "fly"; readonly action: FlyAction }
-			| { readonly scope: "toggleHud" }
-		)[],
+		conflicts: readonly ExplorerConflictTarget[],
 		witness: KeyboardEvent | null,
 	): void {
 		let nextFly = { ...explorerInput.fly };
-		let nextToggleHud = explorerInput.toggleHud;
+		let nextInput: ExplorerInputSettings = { ...explorerInput };
 		for (const conflict of conflicts) {
 			if (conflict.scope === "fly") {
 				nextFly = {
@@ -405,23 +427,25 @@
 					),
 				};
 			} else {
-				nextToggleHud = nextToggleHud.filter(
-					(binding) =>
-						!bindings.some((candidate) =>
-							clientBindingsOverlap(candidate, binding, witness),
-						),
-				);
+				nextInput = {
+					...nextInput,
+					[conflict.action]: nextInput[conflict.action].filter(
+						(binding) =>
+							!bindings.some((candidate) =>
+								clientBindingsOverlap(candidate, binding, witness),
+							),
+					),
+				};
 			}
 		}
 		if (target.scope === "fly") {
 			nextFly = { ...nextFly, [target.action]: bindings };
 		} else {
-			nextToggleHud = bindings;
+			nextInput = { ...nextInput, [target.action]: bindings };
 		}
 		onExplorerInputChange({
-			...explorerInput,
+			...nextInput,
 			fly: nextFly,
-			toggleHud: nextToggleHud,
 		});
 	}
 
@@ -539,6 +563,14 @@
 								onchange={(event) =>
 									onUiChange({ ...ui, showFps: event.currentTarget.checked })}
 							/> Show FPS</label
+						>
+						<label class="ui-checkbox"
+							><input
+								type="checkbox"
+								checked={showNameplates}
+								onchange={(event) =>
+									onShowNameplatesChange(event.currentTarget.checked)}
+							/> Show nameplates</label
 						>
 					</div>
 				</details>
@@ -659,23 +691,21 @@
 								/>Invert fly vertical</label
 							>
 						</div>
-						<BindingRow
-							label="Hide / show HUD"
-							bindings={explorerInput.toggleHud}
-							{platform}
-							onRemove={(index) =>
-								removeBinding(
-									{ scope: "toggleHud", label: "Hide / show HUD" },
-									index,
-								)}
-							onAdd={() =>
-								beginCapture({ scope: "toggleHud", label: "Hide / show HUD" })}
-							onReset={() =>
-								resetTargetBinding({
-									scope: "toggleHud",
-									label: "Hide / show HUD",
-								})}
-						/>
+						{#each EXPLORER_SHORTCUT_ACTIONS as action}
+							{@const target = {
+								scope: "explorerAction" as const,
+								action,
+								label: EXPLORER_SHORTCUT_LABELS[action],
+							}}
+							<BindingRow
+								label={target.label}
+								bindings={explorerInput[action]}
+								{platform}
+								onRemove={(index) => removeBinding(target, index)}
+								onAdd={() => beginCapture(target)}
+								onReset={() => resetTargetBinding(target)}
+							/>
+						{/each}
 						{#each FLY_ACTIONS as action}
 							{@const target = {
 								scope: "fly",

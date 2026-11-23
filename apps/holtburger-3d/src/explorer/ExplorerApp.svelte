@@ -63,6 +63,7 @@
 	import { hostWorldMapSource } from "../lib/assets/world-map-source";
 	import type { SceneEnvironmentSelection } from "../lib/game/environment/scene-environment";
 	import type { ExplorerCameraMode } from "../lib/game/motion/host-physical-fly-path";
+	import { EMPTY_ENTITY_OVERLAY_FRAME } from "../lib/game/renderer/overlays/entity-overlay-policy";
 	import type { FrameSettings } from "../lib/game/renderer/renderer";
 	import type { TextureFilteringCapabilities } from "../lib/game/renderer/webgl2/texture-filtering-policy";
 	import type { DynamicEntityView } from "../lib/game/runtime/dynamic-entity-feed";
@@ -101,7 +102,10 @@
 		type TransformGizmoTarget,
 	} from "./gizmo/transform-gizmo-controller";
 	import {
+		canDespawnExplorerEntity,
+		canPossessExplorerEntity,
 		cycleNearbyExplorerEntity,
+		explorerEntityMatchesSelection,
 		findExplorerEntityWearer,
 		findSelectedExplorerEntity,
 		isExplorerEntityWithinSceneInterest,
@@ -443,6 +447,17 @@
 		panelFocusRevision += 1;
 	}
 
+	function syncNameplateVisibility(showNameplates: boolean): void {
+		gameRuntime?.setEntityOverlayFrame(
+			showNameplates ? { kind: "ambient" } : EMPTY_ENTITY_OVERLAY_FRAME,
+		);
+	}
+
+	function handleShowNameplatesChange(showNameplates: boolean): void {
+		persistExplorerWorld({ showNameplates });
+		syncNameplateVisibility(showNameplates);
+	}
+
 	function resetHudLayout(): void {
 		const layout = createDefaultExplorerHudLayout();
 		userSettings = { ...userSettings, explorerHudLayout: layout };
@@ -467,6 +482,7 @@
 		audioFollowsCamera = EXPLORER_WORLD_DEFAULTS.audioFollowsCamera;
 		cameraAuthority.setAudioFollowsCamera(audioFollowsCamera);
 		cameraAuthority.updateSceneInterestRadii(EXPLORER_WORLD_DEFAULTS.radii);
+		syncNameplateVisibility(EXPLORER_WORLD_DEFAULTS.showNameplates);
 		syncCameraInputSettings(userSettings.input, EXPLORER_INPUT_DEFAULTS);
 		void settingsPersistence
 			.flush()
@@ -715,18 +731,18 @@
 		(): readonly HudSelectedEntityAction[] => {
 			if (
 				selectedEntity === null ||
-				selectedEntity.placement.kind !== "world"
+				!canDespawnExplorerEntity(selectedEntity)
 			) {
 				return [];
 			}
 			const entity = selectedEntity;
-			const isPossessed =
-				explorerPossession !== null &&
-				explorerPossession.guid === entity.identity.guid &&
-				explorerPossession.entityGeneration === entity.generation;
+			const isPossessed = explorerEntityMatchesSelection(
+				entity,
+				possessedSelection,
+			);
 			const busy = !runtimeReady || entityPending !== null;
 			const actions: HudSelectedEntityAction[] = [];
-			if (entity.presentation.content.motionTableDid !== null) {
+			if (canPossessExplorerEntity(entity)) {
 				actions.push({
 					action: "possess",
 					label: isPossessed ? "Release possession" : "Possess",
@@ -1127,6 +1143,43 @@
 				openInspectWindow();
 				return;
 			}
+			if (
+				runtimeReady &&
+				entityPending === null &&
+				matchesKey(event, userSettings.explorerInput.togglePossession)
+			) {
+				if (
+					selectedEntity !== null &&
+					canPossessExplorerEntity(selectedEntity)
+				) {
+					const isPossessed = explorerEntityMatchesSelection(
+						selectedEntity,
+						possessedSelection,
+					);
+					event.preventDefault();
+					void runEntityPossession(
+						selectedEntity,
+						isPossessed ? null : selectedEntity.identity.guid,
+					);
+					return;
+				}
+				if (possessedSelection !== null) {
+					event.preventDefault();
+					void runReleasePossession();
+					return;
+				}
+			}
+			if (
+				runtimeReady &&
+				entityPending === null &&
+				selectedEntity !== null &&
+				canDespawnExplorerEntity(selectedEntity) &&
+				matchesKey(event, userSettings.explorerInput.despawnSelected)
+			) {
+				event.preventDefault();
+				void runEntityDespawn(selectedEntity);
+				return;
+			}
 			if (event.key === "Escape" && !event.defaultPrevented) {
 				if (cameraAuthority.cancelPrimaryDrag()) {
 					event.preventDefault();
@@ -1222,6 +1275,7 @@
 				cameraAuthority.setInterestFollowsCamera(interestFollowsCamera);
 				cameraAuthority.setAudioFollowsCamera(audioFollowsCamera);
 				syncCameraInputSettings(userSettings.input, userSettings.explorerInput);
+				syncNameplateVisibility(userSettings.explorerWorld.showNameplates);
 				entityController.attachRuntime(presentation.runtime);
 				runtimeReady = true;
 
@@ -1671,6 +1725,7 @@
 				showRetailHiddenGeometry={frameSettings.showRetailHiddenGeometry}
 				updateShowRetailHiddenGeometry={(visible) =>
 					displayDiagnostics.updateShowRetailHiddenGeometry(visible)}
+				showNameplates={userSettings.explorerWorld.showNameplates}
 				nameplates={frameSettings.nameplates}
 				updateNameplateCategory={(category, visible) =>
 					displayDiagnostics.updateNameplateCategory(category, visible)}
@@ -1714,6 +1769,8 @@
 				pending={entityPending}
 				search={(request) => entityController.searchExplorerWeenies(request)}
 				spawn={runEntitySpawn}
+				despawn={runEntityDespawn}
+				possess={runEntityPossession}
 				clearAll={runEntityResetAll}
 			/>
 		</HudWindow>
@@ -1810,11 +1867,13 @@
 				graphics={userSettings.graphics}
 				{textureFilteringCapabilities}
 				ui={userSettings.ui}
+				showNameplates={userSettings.explorerWorld.showNameplates}
 				audio={userSettings.audio}
 				input={userSettings.input}
 				explorerInput={userSettings.explorerInput}
 				onGraphicsChange={handleGraphicsChange}
 				onUiChange={handleUiChange}
+				onShowNameplatesChange={handleShowNameplatesChange}
 				onAudioChange={handleAudioChange}
 				onInputChange={handleInputChange}
 				onExplorerInputChange={handleExplorerInputChange}

@@ -31,12 +31,18 @@ export function createManifestFixture(
       "navigation.hnav": sha256(Buffer.from("navigation")),
     },
   };
+  const explorerContent = {
+    contentSha256: sha256(Buffer.from("explorer content zip")),
+    contentFiles: {
+      "weenies.hwc": sha256(Buffer.from("weenie catalog")),
+    },
+  };
   const native = PRODUCTS.flatMap((product) =>
     TARGETS.map((target) => ({
       ...shared,
       product,
       target: target.triple,
-      ...(product === "cli" ? content : {}),
+      ...(product === "cli" ? content : explorerContent),
       archive: `holtburger-${product}-${shared.version}-${target.triple}${target.platform === "linux" ? ".tar.gz" : ".zip"}`,
       sha256: sha256(Buffer.from(`${product}/${target.triple}`)),
     })),
@@ -45,7 +51,7 @@ export function createManifestFixture(
     ...shared,
     product,
     target: "x86_64-unknown-linux-gnu",
-    ...(product === "cli" ? content : {}),
+    ...(product === "cli" ? content : explorerContent),
     appId: `io.github.merklejerk.holtburger-${product}`,
     runtime: "org.freedesktop.Platform/x86_64/26.08",
     archive: `holtburger-${product}-${shared.version}-x86_64.flatpak`,

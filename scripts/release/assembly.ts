@@ -21,6 +21,7 @@ import {
 import { archiveBundle, extractBundle } from "./archives.ts";
 import {
   executablePaths,
+  explorerCatalogPath,
   validateManifest,
   verifyBundle,
 } from "./artifacts.ts";
@@ -38,7 +39,11 @@ import {
   type BundleInfo,
   type NativeTarget,
 } from "./contracts.ts";
-import { verifyStagedContent, CONTENT_FILES } from "./content.ts";
+import {
+  verifyStagedContent,
+  verifyStagedExplorerContent,
+  CONTENT_FILES,
+} from "./content.ts";
 import { cliScripts } from "./cli-scripts.ts";
 import { sourceFacts } from "./source.ts";
 import { readChannel } from "./version.ts";
@@ -48,12 +53,14 @@ import type { Distribution } from "./identity.ts";
 export type AssemblyInput = {
   /** Native target selects the package layout and executable inspection. */
   readonly target: string;
+  /** Verified staged content directory for this product. */
+  readonly content: string;
   /** Reviewed suite notice document copied into this archive. */
   readonly notices: string;
   /** Artifact directory receiving the archive and its inspected receipt. */
   readonly output: string;
 } & (
-  | { readonly product: "cli"; readonly content: string }
+  | { readonly product: "cli" }
   | { readonly product: "3d"; readonly package: string }
 );
 
@@ -186,6 +193,11 @@ export async function assemble(
         ),
       });
     } else {
+      const content = resolve(input.content),
+        expected = z
+          .object({ sha256: digestSchema })
+          .parse(readJson(join(root, ".github/explorer-content.json"))).sha256;
+      await verifyStagedExplorerContent(content, expected);
       cpSync(input.package, join(bundle, "h3d"), {
         recursive: true,
         verbatimSymlinks: true,
@@ -195,7 +207,17 @@ export async function assemble(
         join(binaries, `holtburger-3d-host${suffix}`),
         target,
       );
-      info = bundleInfo.parse(common);
+      const catalogDigest = digest(join(content, "weenies.hwc"));
+      if (digest(explorerCatalogPath(bundle, target)) !== catalogDigest)
+        throw new Error(
+          "Forge bundled a different weenies.hwc than the pinned Explorer content",
+        );
+      info = bundleInfo.parse({
+        ...common,
+        product: "3d",
+        contentSha256: expected,
+        contentFiles: { "weenies.hwc": catalogDigest },
+      });
     }
     cpSync(
       join(root, `release/quickstarts/${input.product}/${target.platform}.md`),
@@ -301,14 +323,22 @@ export function freezeManifest(
     assets,
   });
   const inventory = validateManifest(document),
-    contentDigest = z
+    cliContentDigest = z
       .object({ sha256: digestSchema })
-      .parse(readJson(join(root, ".github/cli-content.json"))).sha256;
-  for (const item of native)
-    if (item.product === "cli" && item.contentSha256 !== contentDigest)
+      .parse(readJson(join(root, ".github/cli-content.json"))).sha256,
+    explorerContentDigest = z
+      .object({ sha256: digestSchema })
+      .parse(readJson(join(root, ".github/explorer-content.json"))).sha256;
+  for (const item of native) {
+    if (item.product === "cli" && item.contentSha256 !== cliContentDigest)
       throw new Error(
         "CLI release content differs from the pinned source input",
       );
+    if (item.product === "3d" && item.contentSha256 !== explorerContentDigest)
+      throw new Error(
+        "3D release content differs from the pinned source input",
+      );
+  }
   const runtime = flatpakRuntimeRef(
     readJson(
       join(root, ".github/flatpak/io.github.merklejerk.holtburger-3d.json"),

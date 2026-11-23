@@ -802,6 +802,7 @@ fn discover_host_state(
         holtburger_content::WeenieCatalogContent::discover(
             repository.source_description().map(Path::new),
             std::env::var_os("HOLTBURGER_WEENIE_CATALOG").map(std::path::PathBuf::from),
+            None,
         ),
     )));
     let entities = Arc::new(ExplorerEntityDriver::new(

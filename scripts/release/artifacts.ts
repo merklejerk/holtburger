@@ -84,6 +84,16 @@ export function validateManifest(document: unknown): ReleaseInventory {
     contentSha256: cli[0].contentSha256,
     contentFiles: cli[0].contentFiles,
   };
+  const desktop = doc.native.filter((record) => record.product === "3d");
+  if (desktop.length === 0)
+    throw new Error("Release manifest requires 3D native records");
+  const explorerContent =
+    desktop[0].contentSha256 === undefined
+      ? null
+      : {
+          contentSha256: desktop[0].contentSha256,
+          contentFiles: desktop[0].contentFiles,
+        };
   for (const record of doc.native) {
     requireFields(
       record,
@@ -100,6 +110,19 @@ export function validateManifest(document: unknown): ReleaseInventory {
         record,
         content,
         "CLI native targets contain different content companions",
+      );
+    else if (explorerContent !== null)
+      requireFields(
+        record,
+        explorerContent,
+        "3D native targets contain different Explorer content companions",
+      );
+    else if (
+      record.contentSha256 !== undefined ||
+      record.contentFiles !== undefined
+    )
+      throw new Error(
+        "3D native targets contain different Explorer content companions",
       );
   }
   for (const record of doc.installers) {
@@ -149,7 +172,12 @@ export function validateManifest(document: unknown): ReleaseInventory {
         ...shared,
         target: "x86_64-unknown-linux-gnu",
         appId: `io.github.merklejerk.holtburger-${record.product}`,
-        ...(record.product === "cli" ? content : {}),
+        ...(record.product === "cli"
+          ? content
+          : (explorerContent ?? {
+              contentSha256: undefined,
+              contentFiles: undefined,
+            })),
       },
       "Flatpak release identity mismatch",
     );
@@ -242,6 +270,17 @@ export function executablePaths(
       ];
 }
 
+/** One layout owner locates the bundled Explorer weenie catalog inside h3d resources. */
+export function explorerCatalogPath(
+  bundle: string,
+  target: NativeTarget,
+): string {
+  const app = join(bundle, "h3d");
+  return target.platform === "darwin"
+    ? join(app, "holtburger-3d.app/Contents/Resources/weenies.hwc")
+    : join(app, "resources/weenies.hwc");
+}
+
 /** Validate downloaded native payload shape, source facts, executable headers and notices. */
 export function verifyBundle(bundle: string, root: string): BundleInfo {
   const info = bundleInfo.parse(readJson(join(bundle, "build-info.json")));
@@ -275,7 +314,15 @@ export function verifyBundle(bundle: string, root: string): BundleInfo {
       if (digest(join(bundle, "content", name)) !== hash)
         throw new Error(`CLI content digest mismatch: ${name}`);
     resources.push(...scriptFiles.map((name) => `scripts/${name}`));
-  } else expected.push("h3d");
+  } else {
+    expected.push("h3d");
+    const catalog = explorerCatalogPath(bundle, target);
+    if (
+      !lstatSync(catalog).isFile() ||
+      digest(catalog) !== info.contentFiles["weenies.hwc"]
+    )
+      throw new Error("3D content digest mismatch: weenies.hwc");
+  }
   exactNames(
     readdirSync(bundle),
     expected,
@@ -295,8 +342,17 @@ export function verifyBundle(bundle: string, root: string): BundleInfo {
   }
   // Canonicalize both sides: macOS temporary paths can traverse /var -> /private/var.
   const canonicalBundle = realpathSync(bundle);
+  const expectedCatalog =
+    info.product === "3d"
+      ? realpathSync(explorerCatalogPath(bundle, target))
+      : null;
   for (const path of walk(bundle)) {
-    if (info.product === "3d" && /\.(hba|hwc)$/i.test(path))
+    if (
+      info.product === "3d" &&
+      /\.(hba|hwc)$/i.test(path) &&
+      (lstatSync(path).isSymbolicLink() ||
+        realpathSync(path) !== expectedCatalog)
+    )
       throw new Error(`Unexpected content archive in h3d: ${path}`);
     if (lstatSync(path).isSymbolicLink()) {
       const rel = relative(canonicalBundle, realpathSync(path));

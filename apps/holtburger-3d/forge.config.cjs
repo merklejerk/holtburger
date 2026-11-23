@@ -10,6 +10,10 @@ const hostBinary =
 const hostPath = process.env.HOLTBURGER_PACKAGE_HOST
 	? resolve(process.env.HOLTBURGER_PACKAGE_HOST)
 	: resolve(__dirname, "../../target/release", hostBinary);
+// Release CI supplies the staged Explorer catalog; ordinary local packaging uses local/content/weenies.hwc.
+const weenieCatalogPath = process.env.HOLTBURGER_PACKAGE_WEENIE_CATALOG
+	? resolve(process.env.HOLTBURGER_PACKAGE_WEENIE_CATALOG)
+	: resolve(__dirname, "../../local/content/weenies.hwc");
 const packagedDirectoryRoots = new Set([
 	"dist",
 	"dist-electron",
@@ -79,6 +83,7 @@ module.exports = {
 		extendInfo: { CFBundleIconFile: "holtburger.icns" },
 		extraResource: [
 			hostPath,
+			weenieCatalogPath,
 			resolve(__dirname, "../../LICENSE.md"),
 			resolve(__dirname, "../../assets/branding/icon.png"),
 		],

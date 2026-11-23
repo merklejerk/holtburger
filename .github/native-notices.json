@@ -226,6 +226,13 @@
       "sourceUrl": "https://github.com/refi64/nickle/blob/0ac7f5dbf659caa8d1d45cb57e942f2bc565da1e/LICENSE",
       "encoding": "utf-8",
       "sha256": "db87e67f94ffffed1513469f065d0ca51afdca3ab94fc8455cc779a38cf707db"
+    },
+    {
+      "component": "ACE-World (ACEmulator)",
+      "path": "licenses/native/ace-world/LICENSE",
+      "sourceUrl": "https://raw.githubusercontent.com/ACEmulator/ACE-World-16PY-Patches/f5edf9b95b98fd63ebed901f6691effcf486ecba/LICENSE",
+      "encoding": "utf-8",
+      "sha256": "76a97c878c9c7a8321bb395c2b44d3fe2f8d81314d219b20138ed0e2dddd5182"
     }
   ]
 }

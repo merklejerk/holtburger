@@ -92,11 +92,33 @@ test("invalid release arguments fail before filesystem, Git or network operation
       ["assemble", "--product", "cli"],
       /Missing required arguments/,
     ],
+    [
+      "scripts/release/suite.ts",
+      [
+        "assemble",
+        "--product",
+        "3d",
+        "--target",
+        "x86_64-unknown-linux-gnu",
+        "--package",
+        "pkg",
+        "--notices",
+        "notices.html",
+        "--output",
+        "out",
+      ],
+      /--product 3d requires --content/,
+    ],
     ["scripts/release/suite.ts", ["plan", "--typo"], /Unknown argument/],
     [
       "scripts/release/suite.ts",
       ["plan", "--product", "cli", "--product", "3d"],
       /must be a single string/,
+    ],
+    [
+      "scripts/release/content.ts",
+      ["fetch", "out", "--product", "invalid"],
+      /Expected one of/,
     ],
     [
       "scripts/release/content.ts",

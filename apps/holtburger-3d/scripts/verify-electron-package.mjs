@@ -5,6 +5,7 @@ import { constants } from "node:fs";
 import {
 	access,
 	lstat,
+	open,
 	readFile,
 	readdir,
 	readlink,
@@ -16,6 +17,12 @@ import { verifyMacPackage } from "./mac-package.mjs";
 
 const scriptPath = fileURLToPath(import.meta.url);
 const appRoot = resolve(fileURLToPath(new URL("../", import.meta.url)));
+// Mirrors holtburger-weenie-catalog and root scripts/release/content.ts across the standalone app boundary.
+export const WEENIE_CATALOG_MAGIC = Buffer.from([
+	0x48, 0x42, 0x57, 0x43, 0x41, 0x54, 0x00, 0x1a,
+]);
+export const WEENIE_CATALOG_FORMAT_VERSION = 11;
+export const WEENIE_CATALOG_HEADER_SIZE = 64;
 
 /** Verify the native host and compiled application payload in one Forge package directory. */
 export async function verifyElectronPackage(packageRoot) {
@@ -46,8 +53,24 @@ export async function verifyElectronPackage(packageRoot) {
 			? "holtburger-3d-host.exe"
 			: "holtburger-3d-host";
 	const hostPath = join(resourcesDirectory, hostExecutable);
+	const weenieCatalogPath = join(resourcesDirectory, "weenies.hwc");
 
 	const hostMetadata = await requireNonEmptyFile(hostPath, constants.X_OK);
+	const weenieCatalogMetadata = await requireNonEmptyFile(
+		weenieCatalogPath,
+		constants.R_OK,
+	);
+	await verifyWeenieCatalogHeader(weenieCatalogPath);
+	if (process.env.HOLTBURGER_PACKAGE_WEENIE_CATALOG !== undefined) {
+		const expectedCatalog = await readFile(
+			resolve(process.env.HOLTBURGER_PACKAGE_WEENIE_CATALOG),
+		);
+		if (!(await readFile(weenieCatalogPath)).equals(expectedCatalog)) {
+			throw new Error(
+				"packaged weenies.hwc differs from HOLTBURGER_PACKAGE_WEENIE_CATALOG",
+			);
+		}
+	}
 
 	await access(archivePath, constants.R_OK);
 	await requireNonEmptyFile(licensePath, constants.R_OK);
@@ -188,8 +211,51 @@ export async function verifyElectronPackage(packageRoot) {
 		packageRoot: normalizedPackageRoot,
 		hostExecutable,
 		hostBytes: hostMetadata.size,
+		weenieCatalogBytes: weenieCatalogMetadata.size,
 		archiveEntryCount: archiveEntries.size,
 	};
+}
+
+/** Validate the bundled HWC binary header without duplicating full catalog decoding. */
+export async function verifyWeenieCatalogHeader(path) {
+	const handle = await open(path, "r");
+	const header = Buffer.alloc(WEENIE_CATALOG_HEADER_SIZE);
+	try {
+		const { bytesRead } = await handle.read(
+			header,
+			0,
+			WEENIE_CATALOG_HEADER_SIZE,
+			0,
+		);
+		if (bytesRead < WEENIE_CATALOG_HEADER_SIZE) {
+			throw new Error(`packaged weenie catalog header is truncated: ${path}`);
+		}
+	} finally {
+		await handle.close();
+	}
+	if (!header.subarray(0, 8).equals(WEENIE_CATALOG_MAGIC)) {
+		throw new Error(`packaged weenie catalog has invalid magic: ${path}`);
+	}
+	const version = header.readUInt32LE(8);
+	if (version !== WEENIE_CATALOG_FORMAT_VERSION) {
+		throw new Error(
+			`packaged weenie catalog format ${version} is unsupported: ${path}`,
+		);
+	}
+	const headerLength = header.readUInt32LE(12);
+	if (headerLength !== WEENIE_CATALOG_HEADER_SIZE) {
+		throw new Error(
+			`packaged weenie catalog header length ${headerLength} is unsupported: ${path}`,
+		);
+	}
+	if (
+		!header.subarray(20, 24).equals(Buffer.alloc(4)) ||
+		!header.subarray(56, 64).equals(Buffer.alloc(8))
+	) {
+		throw new Error(
+			`packaged weenie catalog reserved header bytes are nonzero: ${path}`,
+		);
+	}
 }
 
 async function requireNonEmptyFile(path, mode) {

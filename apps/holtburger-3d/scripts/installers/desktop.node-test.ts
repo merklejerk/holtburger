@@ -13,6 +13,12 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { APP_ROOT, run, runResult } from "./native.ts";
 import {
+	verifyWeenieCatalogHeader,
+	WEENIE_CATALOG_FORMAT_VERSION,
+	WEENIE_CATALOG_HEADER_SIZE,
+	WEENIE_CATALOG_MAGIC,
+} from "../verify-electron-package.mjs";
+import {
 	dmgDocuments,
 	dmgLayout,
 	compileWindows,
@@ -214,4 +220,38 @@ test("native installer commands retain diagnostics and distinguish refusal from 
 			),
 		/ETIMEDOUT/,
 	);
+});
+
+test("packaged weenie catalog header verification accepts valid headers and rejects malformed ones", async (t) => {
+	const root = mkdtempSync(join(tmpdir(), "holtburger-hwc-header-"));
+	t.after(() => rmSync(root, { recursive: true, force: true }));
+	const catalogPath = join(root, "weenies.hwc");
+	const makeValidHeader = () => {
+		const header = Buffer.alloc(WEENIE_CATALOG_HEADER_SIZE);
+		WEENIE_CATALOG_MAGIC.copy(header, 0);
+		header.writeUInt32LE(WEENIE_CATALOG_FORMAT_VERSION, 8);
+		header.writeUInt32LE(WEENIE_CATALOG_HEADER_SIZE, 12);
+		return header;
+	};
+
+	writeFileSync(catalogPath, makeValidHeader());
+	await verifyWeenieCatalogHeader(catalogPath);
+
+	const wrongVersion = makeValidHeader();
+	wrongVersion.writeUInt32LE(WEENIE_CATALOG_FORMAT_VERSION + 1, 8);
+	const wrongHeaderLength = makeValidHeader();
+	wrongHeaderLength.writeUInt32LE(WEENIE_CATALOG_HEADER_SIZE + 8, 12);
+	const nonzeroReserved = makeValidHeader();
+	nonzeroReserved.writeUInt32LE(1, 56);
+
+	for (const [bytes, pattern] of [
+		[Buffer.alloc(16), /truncated/],
+		[Buffer.alloc(WEENIE_CATALOG_HEADER_SIZE), /invalid magic/],
+		[wrongVersion, /is unsupported/],
+		[wrongHeaderLength, /header length .* is unsupported/],
+		[nonzeroReserved, /reserved header bytes are nonzero/],
+	] as const) {
+		writeFileSync(catalogPath, bytes);
+		await assert.rejects(verifyWeenieCatalogHeader(catalogPath), pattern);
+	}
 });

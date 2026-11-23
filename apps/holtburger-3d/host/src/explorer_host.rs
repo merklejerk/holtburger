@@ -177,6 +177,10 @@ impl ExplorerHostRuntime {
             ExplorerPossessionControlProfile::standard()
                 .context("failed to construct standard Explorer possession control profile")?,
         ));
+        let bundled_catalog = std::env::current_exe().ok().and_then(|exe| {
+            exe.parent()
+                .map(|dir| dir.join(holtburger_content::weenie_catalog::WEENIE_CATALOG_FILE_NAME))
+        });
         let catalog = Arc::new(ExplorerWeenieCatalog::new(Arc::new(
             holtburger_content::WeenieCatalogContent::discover(
                 content
@@ -184,6 +188,7 @@ impl ExplorerHostRuntime {
                     .source_description()
                     .map(std::path::Path::new),
                 weenie_catalog_override,
+                bundled_catalog,
             ),
         )));
         let explorer_entity_driver = Arc::new(ExplorerEntityDriver::new(

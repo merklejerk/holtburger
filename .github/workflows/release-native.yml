@@ -76,6 +76,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: npm run --silent content:fetch -- .holtburger-local/cli-content
+      - name: Fetch pinned 3D explorer content
+        if: inputs.product != 'cli'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          npm run --silent content:fetch -- --product 3d .holtburger-local/explorer-content
+          echo "HOLTBURGER_PACKAGE_WEENIE_CATALOG=$GITHUB_WORKSPACE/.holtburger-local/explorer-content/weenies.hwc" >> "$GITHUB_ENV"
       - name: Build selected executables together
         run: |
           PACKAGES=()
@@ -129,6 +136,7 @@ jobs:
           npm run --silent release -- assemble --product 3d \
             --target '${{ matrix.triple }}' \
             --package 'apps/holtburger-3d/out/holtburger-3d-${{ matrix.platform }}-${{ matrix.architecture }}' \
+            --content .holtburger-local/explorer-content \
             --notices .holtburger-local/release-notices/THIRD_PARTY_NOTICES.html \
             --output .holtburger-local/release-artifacts/3d
       - uses: actions/upload-artifact@v7

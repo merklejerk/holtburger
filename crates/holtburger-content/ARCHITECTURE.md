@@ -296,8 +296,10 @@ codec validation rather than bootstrap hashing or a source-corpus census.
 
 ## Optional Explorer server snapshot
 
-`WeenieCatalogContent` resolves the caller-selected `weenies.hwc` path, reports missing
-or invalid content explicitly, and owns the catalog reader. Explorer owns discovery
+`WeenieCatalogContent` resolves `weenies.hwc` in strict precedence order (explicit
+override, conventional sibling of selected DAT/HBA content, then an optional bundled
+fallback), reports missing or invalid content explicitly without masking corrupt
+higher-precedence files, and owns the catalog reader. Explorer owns discovery
 and uses the snapshot for template search and preparation; offline tools can also
 query it. The snapshot describes one server database and is not authoritative for
 live entities. It is never included in world bootstrap or opened by the live client.

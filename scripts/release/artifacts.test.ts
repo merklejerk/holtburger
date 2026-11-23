@@ -95,11 +95,62 @@ test("native identities, filenames, notices and shared CLI companions must agree
       },
       /different content companions/,
     ],
+    [
+      (doc: ReturnType<typeof createManifestFixture>) => {
+        const desktop = doc.native.filter((record) => record.product === "3d");
+        if (desktop[0].contentFiles !== undefined)
+          desktop[0].contentFiles["weenies.hwc"] = "e".repeat(64);
+      },
+      /different Explorer content companions/,
+    ],
   ] as const) {
     const doc = createManifestFixture();
     mutate(doc);
     assert.throws(() => validateManifest(doc), error);
   }
+});
+
+test("manifest admission preserves historical pre-bundling 3D schema 2 releases while rejecting mixed receipts", () => {
+  const legacy = structuredClone(createManifestFixture()) as Record<
+    string,
+    unknown
+  >;
+  for (const record of [
+    ...(legacy.native as Record<string, unknown>[]),
+    ...(legacy.flatpaks as Record<string, unknown>[]),
+  ]) {
+    if (record.product === "3d") {
+      delete record.contentSha256;
+      delete record.contentFiles;
+    }
+  }
+  assert.equal(validateManifest(legacy).identity.version, "0.2.0");
+
+  const mixedNative = structuredClone(createManifestFixture()) as Record<
+    string,
+    unknown
+  >;
+  const firstDesktop = (mixedNative.native as Record<string, unknown>[]).find(
+    (record) => record.product === "3d",
+  );
+  assert.ok(firstDesktop !== undefined);
+  delete firstDesktop.contentSha256;
+  delete firstDesktop.contentFiles;
+  assert.throws(
+    () => validateManifest(mixedNative),
+    /different Explorer content companions/,
+  );
+
+  const halfPresent = structuredClone(createManifestFixture()) as Record<
+    string,
+    unknown
+  >;
+  const halfDesktop = (halfPresent.native as Record<string, unknown>[]).find(
+    (record) => record.product === "3d",
+  );
+  assert.ok(halfDesktop !== undefined);
+  delete halfDesktop.contentFiles;
+  assert.throws(() => validateManifest(halfPresent));
 });
 
 test("Flatpak family/app identity, installer source digests and asset bytes are bound", () => {
@@ -246,6 +297,72 @@ test("native CLI admission requires exact content/scripts, notices, executable p
     );
   }
 });
+
+test(
+  "native 3D admission verifies the bundled weenies.hwc file and rejects symlinks or stray content archives",
+  { skip: process.platform !== "linux" },
+  (t) => {
+    const root = scratch(t),
+      bundle = join(root, "bundle");
+    mkdirSync(join(bundle, "h3d/resources"), { recursive: true });
+    const header = Buffer.alloc(64);
+    Buffer.from([0x7f, 0x45, 0x4c, 0x46, 2, 1]).copy(header);
+    header.writeUInt16LE(62, 18);
+    writeFileSync(join(bundle, "h3d/holtburger-3d"), header, { mode: 0o755 });
+    writeFileSync(join(bundle, "h3d/resources/holtburger-3d-host"), header, {
+      mode: 0o755,
+    });
+    const catalogBytes = Buffer.from("synthetic weenie catalog");
+    const catalogPath = join(bundle, "h3d/resources/weenies.hwc");
+    writeFileSync(catalogPath, catalogBytes);
+    writeFileSync(join(bundle, "THIRD_PARTY_NOTICES.html"), "notices");
+    writeFileSync(join(bundle, "LICENSE.md"), "license");
+    writeFileSync(join(bundle, "QUICKSTART.md"), "instructions");
+    writeJson(join(bundle, "build-info.json"), {
+      version: "0.2.0",
+      commit: "a".repeat(40),
+      modified: false,
+      kind: "release",
+      channel: "beta",
+      product: "3d",
+      target: "x86_64-unknown-linux-gnu",
+      noticesSha256: sha256(Buffer.from("notices")),
+      contentSha256: sha256(Buffer.from("explorer zip")),
+      contentFiles: { "weenies.hwc": sha256(catalogBytes) },
+    });
+
+    // Digest substitution is rejected before Electron package inspection.
+    writeFileSync(catalogPath, "substituted");
+    assert.throws(
+      () => verifyBundle(bundle, root),
+      /3D content digest mismatch: weenies\.hwc/,
+    );
+
+    // Symlinked catalog is rejected even when pointing to matching bytes.
+    const realCatalog = join(bundle, "h3d/resources/real.bin");
+    writeFileSync(realCatalog, catalogBytes);
+    rmSync(catalogPath);
+    symlinkSync("real.bin", catalogPath);
+    assert.throws(
+      () => verifyBundle(bundle, root),
+      /3D content digest mismatch: weenies\.hwc/,
+    );
+    rmSync(catalogPath);
+    rmSync(realCatalog);
+    writeFileSync(catalogPath, catalogBytes);
+
+    // Stray .hwc or .hba files elsewhere inside h3d remain forbidden.
+    for (const rogue of ["h3d/extra.hwc", "h3d/resources/leaked.hba"]) {
+      const roguePath = join(bundle, rogue);
+      writeFileSync(roguePath, "unexpected");
+      assert.throws(
+        () => verifyBundle(bundle, root),
+        /Unexpected content archive in h3d/,
+      );
+      rmSync(roguePath);
+    }
+  },
+);
 
 test("installed payload verification detects substitution, inventory, links and modes", (t) => {
   const root = scratch(t),

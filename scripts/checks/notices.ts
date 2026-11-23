@@ -176,7 +176,9 @@ export function renderNotices(
       );
     sections.push(`</ul><pre>${escapeHtml(text)}</pre>`);
   }
-  sections.push("<h1>Native libraries and packaging helpers</h1>");
+  sections.push(
+    "<h1>Native libraries, data snapshots, and packaging helpers</h1>",
+  );
   if (native.files.length === 0)
     throw new Error("No embedded native-library notices");
   const directory = realpathSync(dirname(nativeManifest));

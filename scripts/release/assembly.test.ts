@@ -281,6 +281,10 @@ test("release freezing validates actual bytes, source pins and complete receipts
     sha256: document.native.find((record) => record.product === "cli")
       ?.contentSha256,
   });
+  writeJson(join(root, ".github/explorer-content.json"), {
+    sha256: document.native.find((record) => record.product === "3d")
+      ?.contentSha256,
+  });
   writeJson(
     join(root, ".github/flatpak/io.github.merklejerk.holtburger-3d.json"),
     { runtime: "org.freedesktop.Platform", "runtime-version": "26.08" },
@@ -329,6 +333,38 @@ test("release freezing validates actual bytes, source pins and complete receipts
   const asset = join(artifacts, document.flatpaks[0].archive);
   writeFileSync(asset, "changed");
   assert.throws(() => freezeManifest(root, artifacts, {}), /digest mismatch/);
+  writeFileSync(asset, `flatpak/${document.flatpaks[0].product}`);
+  writeJson(join(root, ".github/explorer-content.json"), {
+    sha256: "f".repeat(64),
+  });
+  git(root, "add", ".github/explorer-content.json");
+  git(root, "commit", "-m", "Mismatch explorer pin");
+  const bumpedCommit = git(root, "rev-parse", "HEAD");
+  for (const record of [
+    ...document.native,
+    ...document.flatpaks,
+    ...document.installers,
+  ])
+    record.commit = bumpedCommit;
+  for (const record of document.native)
+    writeJson(
+      join(artifacts, `metadata-${record.product}-${record.target}.json`),
+      record,
+    );
+  for (const record of document.flatpaks)
+    writeJson(
+      join(artifacts, `metadata-${record.product}-flatpak.json`),
+      record,
+    );
+  for (const record of document.installers)
+    writeJson(
+      join(artifacts, `metadata-3d-installer-${record.target}.json`),
+      record,
+    );
+  assert.throws(
+    () => freezeManifest(root, artifacts, {}),
+    /3D release content differs/,
+  );
   writeFileSync(join(root, "LICENSE.md"), "untracked source");
   assert.throws(() => freezeManifest(root, artifacts, {}), /modified source/);
 });

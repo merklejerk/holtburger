@@ -343,6 +343,7 @@ mod tests {
         ExplorerWeenieCatalog::new(Arc::new(WeenieCatalogContent::discover(
             content,
             override_path,
+            None,
         )))
     }
 

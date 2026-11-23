@@ -169,6 +169,15 @@ npm run --silent content:stage -- /path/to/cli-content.zip \
   --sha256 APPROVED_SHA256 --output .holtburger-local/cli-content
 ```
 
+`.github/explorer-content.json` pins the approved 3D Explorer weenie catalog ZIP (`weenies.hwc`, compiled from ACE-World AGPL-3.0 world data) in the same public, non-latest content prerelease. Release builds bundle `weenies.hwc` inside h3d's application resources so World Explorer entity spawning works out of the box without separate setup, while still allowing an explicit launcher override or a sibling `weenies.hwc` next to the user's DATs to take precedence.
+
+```sh
+npm run --silent content:fetch -- --product 3d .holtburger-local/explorer-content
+# Local alternative: use the SHA-256 recorded in .github/explorer-content.json.
+npm run --silent content:stage -- --product 3d /path/to/explorer-content.zip \
+  --sha256 APPROVED_SHA256 --output .holtburger-local/explorer-content
+```
+
 Use a new staging directory. The ZIP digest, exact entry names, and archive headers
 are checked before staging. The assembler compares staged components
 with the retained input ZIP. Runtime uses the content crate's codec validation;
@@ -196,13 +205,15 @@ npm run --silent release -- assemble --product cli \
   --notices .github/licenses/THIRD_PARTY_NOTICES.html --output .holtburger-local/release-artifacts
 npm run --silent release -- assemble --product 3d \
   --target x86_64-unknown-linux-gnu --package apps/holtburger-3d/out/holtburger-3d-linux-x64 \
+  --content .holtburger-local/explorer-content \
   --notices .github/licenses/THIRD_PARTY_NOTICES.html --output .holtburger-local/release-artifacts
 ```
 
 These commands require the corresponding native target build outputs. Forge receives the
-explicit target host through `HOLTBURGER_PACKAGE_HOST`; it does not rebuild it implicitly.
+explicit target host through `HOLTBURGER_PACKAGE_HOST` and the staged Explorer catalog
+through `HOLTBURGER_PACKAGE_WEENIE_CATALOG`; it does not rebuild them implicitly.
 Assembly checks architecture, executable modes, notices/content identity, native linkage,
-and extracted layout. 3D also checks packaged host and renderer source identity. CLI needs
+and extracted layout. 3D also checks packaged host, bundled `weenies.hwc`, and renderer source identity. CLI needs
 no Node/Electron installation. 3D needs no compact CLI content.
 
 ### Desktop installers

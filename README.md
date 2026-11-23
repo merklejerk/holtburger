@@ -227,3 +227,5 @@ fixes, are not being accepted while the codebase matures. See
 ## License
 
 Holtburger is licensed under the [GNU Affero General Public License v3.0](LICENSE.md).
+
+Packaged Holtburger 3D distributions bundle a compiled entity catalog (`weenies.hwc`) for offline World Explorer derived from [ACEmulator / ACE-World](https://github.com/ACEmulator/ACE-World-16PY-Patches), which is also licensed under the GNU Affero General Public License v3.0. Full third-party notices are included in each release bundle as `THIRD_PARTY_NOTICES.html`.

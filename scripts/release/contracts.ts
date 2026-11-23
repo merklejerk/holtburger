@@ -66,18 +66,27 @@ export const contentFields = {
     })
     .describe("Exact extracted companion identities"),
 };
+/** 3D Explorer catalog stays one composite receipt, never independent unbound digests. */
+export const explorerContentFields = {
+  contentSha256: digestSchema.describe("Pinned generated ZIP identity"),
+  contentFiles: z
+    .strictObject({
+      "weenies.hwc": digestSchema,
+    })
+    .describe("Exact extracted Explorer catalog identity"),
+};
 /** Native identity is kept lossless so generated receipts retain platform evidence. */
 const bundleFields = identityFields
   .extend({ target: z.string() })
   .passthrough();
-/** CLI and 3D payloads have different required content contracts. */
+/** CLI and 3D payloads each bind their exact pinned content contracts. */
 export const bundleInfo = z.discriminatedUnion("product", [
   bundleFields.extend({ product: z.literal("cli"), ...contentFields }),
-  bundleFields.extend({ product: z.literal("3d") }),
+  bundleFields.extend({ product: z.literal("3d"), ...explorerContentFields }),
 ]);
 /** Validated native installation metadata used by packaging and installers. */
 export type BundleInfo = z.infer<typeof bundleInfo>;
-/** Downloadable native archive receipt. */
+/** Downloadable native archive receipt for current builds. */
 export const nativeRecord = z.discriminatedUnion("product", [
   bundleFields.extend({
     product: z.literal("cli"),
@@ -87,6 +96,7 @@ export const nativeRecord = z.discriminatedUnion("product", [
   }),
   bundleFields.extend({
     product: z.literal("3d"),
+    ...explorerContentFields,
     archive: z.string(),
     sha256: digestSchema,
   }),
@@ -103,6 +113,34 @@ export const flatpakRecord = z.discriminatedUnion("product", [
   }),
   bundleFields.extend({
     product: z.literal("3d"),
+    ...explorerContentFields,
+    archive: z.string(),
+    sha256: digestSchema,
+    appId: z.string(),
+    runtime: z.string(),
+  }),
+]);
+/** Schema 2 published 3D records prior to catalog bundling omit both Explorer content fields together. */
+const omittedExplorerContent = {
+  contentSha256: z.never().optional(),
+  contentFiles: z.never().optional(),
+};
+/** Published manifests admit both current bundled-catalog 3D records and historical schema 2 releases. */
+const publishedNativeRecord = z.union([
+  nativeRecord,
+  bundleFields.extend({
+    product: z.literal("3d"),
+    ...omittedExplorerContent,
+    archive: z.string(),
+    sha256: digestSchema,
+  }),
+]);
+/** Published Flatpak manifests mirror the native schema 2 compatibility boundary. */
+const publishedFlatpakRecord = z.union([
+  flatpakRecord,
+  bundleFields.extend({
+    product: z.literal("3d"),
+    ...omittedExplorerContent,
     archive: z.string(),
     sha256: digestSchema,
     appId: z.string(),
@@ -120,8 +158,8 @@ export const installerRecord = bundleFields.extend({
 /** Complete managed release description, admitted independently of the local checkout. */
 export const manifestSchema = identityFields.omit({ modified: true }).extend({
   schemaVersion: z.literal(2),
-  native: z.array(nativeRecord),
-  flatpaks: z.array(flatpakRecord),
+  native: z.array(publishedNativeRecord),
+  flatpaks: z.array(publishedFlatpakRecord),
   installers: z.array(installerRecord),
   assets: z.array(z.object({ name: z.string(), sha256: digestSchema })),
 });

@@ -157,7 +157,7 @@
 							id="explorer-weenie-catalog"
 							class="ui-input"
 							bind:value={weenieCatalogPath}
-							placeholder="Auto-discover sibling weenies.hwc"
+							placeholder="Auto-discover sibling or bundled weenies.hwc"
 							disabled={busy}
 						/>
 						<div class="explorer-launcher-path-actions">
@@ -182,8 +182,9 @@
 						</div>
 					</div>
 					<small>
-						Optional compiled ACE weenie catalog for entity spawning. World,
-						Renderer, and Map tools work without it.
+						Optional override for the compiled ACE weenie catalog used for
+						entity spawning. Release builds bundle one automatically; World,
+						Renderer, and Map tools also work without it.
 					</small>
 				</div>
 			</div>

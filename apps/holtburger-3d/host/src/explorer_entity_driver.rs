@@ -1957,7 +1957,12 @@ mod tests {
         let gravity_only =
             holtburger_core::DynamicEntityPhysicsFlags::from_physics_state(PhysicsState::GRAVITY);
         let enabled = driver
-            .replace_physics_flags(guid, generation, gravity_only, ExplorerPhysicalMode::Integrated)
+            .replace_physics_flags(
+                guid,
+                generation,
+                gravity_only,
+                ExplorerPhysicalMode::Integrated,
+            )
             .unwrap();
         assert_eq!(
             enabled.body.physical_change.change,

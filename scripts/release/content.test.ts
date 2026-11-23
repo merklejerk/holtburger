@@ -24,13 +24,23 @@ import {
   archiveComponents,
   CONTENT_FILES,
   contentDescriptor,
+  EXPLORER_CONTENT_FILES,
+  explorerArchiveComponents,
   fetchContent,
+  fetchExplorerContent,
   NAVIGATION_FORMAT_VERSION,
   NAVIGATION_HEADER_SIZE,
   unpackContent,
+  unpackExplorerContent,
   validateComponents,
+  validateExplorerComponents,
   verifyStagedContent,
+  verifyStagedExplorerContent,
+  WEENIE_CATALOG_FORMAT_VERSION,
+  WEENIE_CATALOG_HEADER_SIZE,
+  WEENIE_CATALOG_MAGIC,
   type ContentComponents,
+  type ExplorerContentComponents,
 } from "./content.ts";
 
 /** Synthetic content shares only its runtime header constants with the staging code. */
@@ -43,6 +53,15 @@ function components(): ContentComponents {
     "bootstrap.hba": Buffer.from("HBA\0synthetic bootstrap"),
     "navigation.hnav": navigation,
   };
+}
+
+/** Synthetic Explorer catalog matches only the checked header invariants. */
+function explorerComponents(): ExplorerContentComponents {
+  const catalog = Buffer.alloc(WEENIE_CATALOG_HEADER_SIZE);
+  WEENIE_CATALOG_MAGIC.copy(catalog, 0);
+  catalog.writeUInt32LE(WEENIE_CATALOG_FORMAT_VERSION, 8);
+  catalog.writeUInt32LE(WEENIE_CATALOG_HEADER_SIZE, 12);
+  return { "weenies.hwc": catalog };
 }
 
 /** Owned scratch space is removed even when an archive or native check fails. */
@@ -283,4 +302,94 @@ test("ZIP creation propagates invalid member and unavailable source failures thr
     archiveBundle(join(root, "missing"), join(root, "missing.zip"), "darwin"),
     /ENOENT/,
   );
+});
+
+test("Explorer weenie catalog staging, fetch and header validation bind pinned bytes", async (t) => {
+  const root = scratch(t);
+  const archive = join(root, "explorer.zip");
+  await writeZip(
+    [
+      {
+        name: "weenies.hwc",
+        data: explorerComponents()["weenies.hwc"],
+        kind: "file",
+        mode: 0o100644,
+      },
+    ],
+    archive,
+  );
+  const bytes = readFileSync(archive);
+  const hash = sha256(bytes);
+  const staged = join(root, "explorer-staged");
+  await unpackExplorerContent(bytes, hash, staged);
+  await verifyStagedExplorerContent(staged, hash);
+  assert.deepEqual(readFileSync(join(staged, "explorer-content.zip")), bytes);
+  for (const name of EXPLORER_CONTENT_FILES)
+    assert.deepEqual(
+      readFileSync(join(staged, name)),
+      explorerComponents()[name],
+    );
+  writeFileSync(join(staged, "weenies.hwc"), "substituted");
+  await assert.rejects(
+    verifyStagedExplorerContent(staged, hash),
+    /weenies\.hwc differs/,
+  );
+
+  const extraArchive = join(root, "explorer-extra.zip");
+  await writeZip(
+    [
+      {
+        name: "weenies.hwc",
+        data: explorerComponents()["weenies.hwc"],
+        kind: "file",
+        mode: 0o100644,
+      },
+      {
+        name: "extra.hwc",
+        data: Buffer.from("extra"),
+        kind: "file",
+        mode: 0o100644,
+      },
+    ],
+    extraArchive,
+  );
+  const extraBytes = readFileSync(extraArchive);
+  await assert.rejects(
+    explorerArchiveComponents(extraBytes, sha256(extraBytes)),
+    /must contain exactly weenies\.hwc/,
+  );
+
+  const descriptor = {
+    url: "https://api.github.com/repos/merklejerk/holtburger/releases/assets/456",
+    sha256: hash,
+  };
+  const fetched = join(root, "explorer-fetched");
+  await fetchExplorerContent(descriptor, fetched, (args) => {
+    assert.deepEqual(args, [
+      descriptor.url,
+      "--header",
+      "Accept: application/octet-stream",
+    ]);
+    return bytes;
+  });
+  await verifyStagedExplorerContent(fetched, hash);
+
+  const wrongVersion = Buffer.from(explorerComponents()["weenies.hwc"]);
+  wrongVersion.writeUInt32LE(WEENIE_CATALOG_FORMAT_VERSION + 1, 8);
+  const wrongHeaderLength = Buffer.from(explorerComponents()["weenies.hwc"]);
+  wrongHeaderLength.writeUInt32LE(WEENIE_CATALOG_HEADER_SIZE + 8, 12);
+  const nonzeroReserved = Buffer.from(explorerComponents()["weenies.hwc"]);
+  nonzeroReserved.writeUInt32LE(1, 20);
+  for (const [payload, error] of [
+    [Buffer.alloc(16), /truncated/],
+    [Buffer.alloc(WEENIE_CATALOG_HEADER_SIZE), /HBWCAT header/],
+    [wrongVersion, /Unsupported Explorer weenie catalog format/],
+    [wrongHeaderLength, /Unsupported Explorer weenie catalog header length/],
+    [nonzeroReserved, /reserved header bytes are nonzero/],
+  ] as const) {
+    assert.throws(
+      () => validateExplorerComponents({ "weenies.hwc": payload }),
+      error,
+    );
+  }
 });

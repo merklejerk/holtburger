@@ -23,17 +23,15 @@ function payload(
   content: string | undefined,
   archive: string | undefined,
 ) {
+  if (content === undefined)
+    throw new Error(`--product ${product} requires --content`);
   if (product === "cli") {
     if (archive !== undefined)
       throw new Error("--package is only valid for --product 3d");
-    if (content === undefined)
-      throw new Error("--product cli requires --content");
     return { product, content: resolve(content) };
   }
-  if (content !== undefined)
-    throw new Error("--content is only valid for --product cli");
   if (archive === undefined) throw new Error("--product 3d requires --package");
-  return { product, package: resolve(archive) };
+  return { product, content: resolve(content), package: resolve(archive) };
 }
 
 /** CLI contracts precede artifact policy and keep help free of release side effects. */
@@ -98,7 +96,7 @@ async function main(args: string[]): Promise<void> {
             .option("content", {
               type: "string",
               coerce: nonEmpty,
-              describe: "Verified staged content directory (cli only)",
+              describe: "Verified staged content directory",
             })
             .option("notices", {
               ...requiredString,

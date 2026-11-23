@@ -119,17 +119,16 @@ impl HostLaunch {
                 HostContentSelection::Automatic(path)
             });
         }
-        let mode = match mode
-            .ok_or_else(|| anyhow::anyhow!("missing required --mode=explorer|client"))?
-        {
-            HostMode::Explorer => HostLaunchMode::Explorer { weenie_catalog },
-            HostMode::Client => {
-                if weenie_catalog.is_some() {
-                    bail!("--weenie-catalog is only supported in Explorer mode");
+        let mode =
+            match mode.ok_or_else(|| anyhow::anyhow!("missing required --mode=explorer|client"))? {
+                HostMode::Explorer => HostLaunchMode::Explorer { weenie_catalog },
+                HostMode::Client => {
+                    if weenie_catalog.is_some() {
+                        bail!("--weenie-catalog is only supported in Explorer mode");
+                    }
+                    HostLaunchMode::Client
                 }
-                HostLaunchMode::Client
-            }
-        };
+            };
         Ok(Self {
             mode,
             content: content

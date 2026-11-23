@@ -1,4 +1,4 @@
-import type { ClientLaunchConfiguration } from "./client-launch.js";
+import type { DesktopLaunchConfiguration } from "./client-launch.js";
 import { formatError } from "../src/lib/format-error.js";
 
 /** One attempt owns resources that cannot be reused after retirement. */
@@ -16,10 +16,13 @@ type ApplicationState<T> =
 interface Dependencies<T extends ApplicationAttempt> {
 	/** Without the launcher, leaving an attempt is terminal for the application. */
 	readonly launcherEnabled: boolean;
-	readonly create: (configuration: ClientLaunchConfiguration) => T;
+	readonly create: (configuration: DesktopLaunchConfiguration) => T;
 	readonly initialize: (attempt: T) => Promise<void>;
 	readonly retire: (attempt: T) => Promise<void>;
-	readonly showPicker: (diagnostic: string | null) => Promise<void>;
+	readonly showPicker: (
+		diagnostic: string | null,
+		view: "client" | "explorer",
+	) => Promise<void>;
 	readonly flushLauncher: () => Promise<void>;
 	readonly exit: (failures: readonly string[]) => void;
 	readonly report: (diagnostic: string) => void;
@@ -29,6 +32,7 @@ interface Dependencies<T extends ApplicationAttempt> {
 export class ClientApplication<T extends ApplicationAttempt> {
 	readonly #dependencies: Dependencies<T>;
 	#state: ApplicationState<T> = { kind: "picker" };
+	#returnPickerView: "client" | "explorer" = "client";
 	#initialization: Promise<void> = Promise.resolve();
 	#retirement: Promise<void> | null = null;
 	#quit: Promise<void> | null = null;
@@ -50,7 +54,7 @@ export class ClientApplication<T extends ApplicationAttempt> {
 	}
 
 	/** Acknowledge admission separately from long-running initialization and document navigation. */
-	play(resolve: () => Promise<ClientLaunchConfiguration>): Promise<void> {
+	play(resolve: () => Promise<DesktopLaunchConfiguration>): Promise<void> {
 		if (!this.canPlay)
 			return Promise.reject(
 				new Error("A game attempt is already active or retiring"),
@@ -60,9 +64,10 @@ export class ClientApplication<T extends ApplicationAttempt> {
 		const launching = Promise.resolve().then(async () => {
 			const configuration = await resolve();
 			if (this.#state.kind !== "starting") {
-				configuration.password = "";
+				if (configuration.kind === "client") configuration.password = "";
 				return;
 			}
+			this.#returnPickerView = configuration.kind;
 			const attempt = this.#dependencies.create(configuration);
 			this.#state = { kind: "starting", attempt };
 			this.#initialization = Promise.resolve()
@@ -101,7 +106,7 @@ export class ClientApplication<T extends ApplicationAttempt> {
 			.then(async () => {
 				if (this.#state.kind === "quitting") return;
 				this.#state = { kind: "picker" };
-				await this.#dependencies.showPicker(diagnostic);
+				await this.#dependencies.showPicker(diagnostic, this.#returnPickerView);
 			})
 			.catch((error: unknown) => {
 				this.#dependencies.report(formatError(error));

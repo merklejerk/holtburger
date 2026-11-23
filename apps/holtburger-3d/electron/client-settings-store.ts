@@ -23,6 +23,30 @@ import {
 import { createDefaultClientUserSections } from "../src/client/settings/settings-defaults.js";
 import { CLIENT_UI_DEFAULTS } from "../src/client/hud/ui-defaults.js";
 import {
+	explorerHudPlacementSchemas,
+	explorerLauncherSettingsSchema,
+	explorerUserSettingsContextSchema,
+	type ExplorerHudLayout,
+	type ExplorerHudPlacementKey,
+	type ExplorerLauncherSettings,
+} from "../src/explorer/settings/explorer-settings-contract.js";
+import {
+	explorerHudPlacementEntries,
+	explorerHudPlacementEntry,
+	explorerResetSettingsSchema,
+	explorerRuntimeSectionEntry,
+	explorerRuntimeSectionSchemas,
+	type ExplorerRuntimeSectionKey,
+	type ExplorerUserSettings,
+	type ExplorerUserSettingsPatch,
+} from "../src/explorer/settings/explorer-settings-sections.js";
+import {
+	createDefaultExplorerHudLayout,
+	EXPLORER_INPUT_DEFAULTS,
+	EXPLORER_LAUNCHER_DEFAULTS,
+	EXPLORER_WORLD_DEFAULTS,
+} from "../src/explorer/settings/explorer-settings-defaults.js";
+import {
 	clientCharacterSectionEntry,
 	clientCharacterSectionSchemas,
 	clientHudPlacementEntries,
@@ -263,6 +287,155 @@ export class ClientSettingsStore {
 		});
 	}
 
+	/** Load persisted Explorer Launcher form preferences for the picker view. */
+	async loadExplorerLauncher(): Promise<ExplorerLauncherSettings> {
+		return this.#queueWrite((document) => {
+			const repaired = repairSettingsEntry(
+				document.user.explorerLauncher,
+				explorerLauncherSettingsSchema,
+				EXPLORER_LAUNCHER_DEFAULTS,
+				"user.explorerLauncher",
+			);
+			const nextDocument =
+				repaired.entry === undefined
+					? document
+					: {
+							...document,
+							user: { ...document.user, explorerLauncher: repaired.entry },
+						};
+			const read = readClientSettingsSection(
+				nextDocument.user.explorerLauncher,
+				explorerLauncherSettingsSchema,
+				"user.explorerLauncher",
+			);
+			const result =
+				read.kind === "loaded" ? read.value : EXPLORER_LAUNCHER_DEFAULTS;
+			return { document: nextDocument, result, backup: true };
+		});
+	}
+
+	/** Save Explorer Launcher form preferences without touching Client or in-world settings. */
+	saveExplorerLauncher(input: unknown): Promise<void> {
+		const value = explorerLauncherSettingsSchema.parse(input);
+		return this.#queueWrite((document) => ({
+			...document,
+			user: {
+				...document.user,
+				explorerLauncher: { version: 1, value },
+			},
+		}));
+	}
+
+	/** Assemble shared + Explorer-owned runtime settings without clobbering Client sections. */
+	async loadExplorerUser(context: unknown, mode: ClientSettingsReadMode) {
+		const request = explorerUserSettingsContextSchema.parse(context);
+		const sharedDefaults = createDefaultClientUserSections(request.platform);
+		const defaults = {
+			graphics: sharedDefaults.graphics,
+			ui: sharedDefaults.ui,
+			audio: sharedDefaults.audio,
+			input: sharedDefaults.input,
+			explorerWorld: EXPLORER_WORLD_DEFAULTS,
+			explorerInput: EXPLORER_INPUT_DEFAULTS,
+		};
+		const layoutDefaults = createDefaultExplorerHudLayout();
+		return this.#queueWrite<{
+			readonly settings: ExplorerUserSettings;
+			readonly repaired: readonly string[];
+		}>((document) => {
+			if (mode === "fresh")
+				return {
+					document,
+					result: {
+						settings: {
+							...defaults,
+							explorerHudLayout: layoutDefaults,
+						} satisfies ExplorerUserSettings,
+						repaired: [] as readonly string[],
+					},
+				};
+			const user = repairEntries(
+				document.user,
+				explorerRuntimeSectionSchemas,
+				defaults,
+				"user",
+			);
+			const values = readSupportedValues(
+				user.entries,
+				explorerRuntimeSectionSchemas,
+				"user",
+			);
+			const hud = explorerHudPlacementEntries({
+				...document,
+				user: user.entries,
+			});
+			const notices = [...user.notices];
+			let placements: SupportedValues<typeof explorerHudPlacementSchemas> = {};
+			if (hud.kind === "invalid") throw new Error(hud.reason);
+			if (hud.kind === "loaded") {
+				const repaired = repairEntries(
+					hud.value,
+					explorerHudPlacementSchemas,
+					layoutDefaults,
+					"explorerHudPlacements",
+				);
+				user.entries.explorerHudPlacements = repaired.entries;
+				placements = readSupportedValues(
+					repaired.entries,
+					explorerHudPlacementSchemas,
+					"explorerHudPlacements",
+				);
+				notices.push(...repaired.notices);
+			}
+			const settings: ExplorerUserSettings = {
+				...defaults,
+				...values,
+				explorerHudLayout: { ...layoutDefaults, ...placements },
+			};
+			return {
+				document: { ...document, user: user.entries },
+				result: { settings, repaired: notices as readonly string[] },
+				backup: true,
+			};
+		});
+	}
+
+	/** Persist a validated Explorer patch (shared ui/audio/input or Explorer-scoped sections). */
+	saveExplorerUserPatch(patch: ExplorerUserSettingsPatch): Promise<void> {
+		const sections = validatedExplorerEntries(patch.sections);
+		const placements = validatedExplorerHudEntries(patch.explorerHudPlacements);
+		return this.#queueWrite((document) => {
+			const user = { ...document.user };
+			for (const [key, entry] of Object.entries(sections)) {
+				user[key] = entry;
+			}
+			if (Object.keys(placements).length > 0) {
+				const hud = { ...requireExplorerHudEntries(document) };
+				for (const [key, entry] of Object.entries(placements)) {
+					hud[key] = entry;
+				}
+				user.explorerHudPlacements = hud;
+			}
+			return { ...document, user };
+		});
+	}
+
+	/** Reset only Explorer-owned runtime sections and placements, preserving shared & Client state. */
+	resetExplorerUser(settings: unknown): Promise<void> {
+		const { explorerHudLayout, ...values } =
+			explorerResetSettingsSchema.parse(settings);
+		const sections = validatedExplorerEntries(values);
+		const placements = validatedExplorerHudEntries(explorerHudLayout);
+		return this.#queueWrite((document) => ({
+			...document,
+			user: {
+				...document.user,
+				...sections,
+				explorerHudPlacements: placements,
+			},
+		}));
+	}
+
 	/** Wait for every queued replacement; each write caller retains its own failure result. */
 	async flush(): Promise<void> {
 		await this.#writeTail;
@@ -419,6 +592,44 @@ function requireHudEntries(
 	document: ClientSettingsCollection,
 ): Readonly<Record<string, unknown>> {
 	const read = clientHudPlacementEntries(document);
+	if (read.kind === "invalid") throw new Error(read.reason);
+	return read.kind === "loaded" ? read.value : {};
+}
+
+function validatedExplorerEntries(
+	values: Partial<Omit<ExplorerUserSettings, "explorerHudLayout">> | undefined,
+): Record<string, unknown> {
+	const entries: Record<string, unknown> = {};
+	for (const [key, value] of Object.entries(values ?? {})) {
+		if (!(key in explorerRuntimeSectionSchemas))
+			throw new Error(`Unknown Explorer settings section ${key}`);
+		entries[key] = explorerRuntimeSectionEntry(
+			key as ExplorerRuntimeSectionKey,
+			value,
+		);
+	}
+	return entries;
+}
+
+function validatedExplorerHudEntries(
+	values: Partial<ExplorerHudLayout> | undefined,
+): Record<string, unknown> {
+	const entries: Record<string, unknown> = {};
+	for (const [key, value] of Object.entries(values ?? {})) {
+		if (!(key in explorerHudPlacementSchemas))
+			throw new Error(`Unknown Explorer HUD placement ${key}`);
+		entries[key] = explorerHudPlacementEntry(
+			key as ExplorerHudPlacementKey,
+			value,
+		);
+	}
+	return entries;
+}
+
+function requireExplorerHudEntries(
+	document: ClientSettingsCollection,
+): Readonly<Record<string, unknown>> {
+	const read = explorerHudPlacementEntries(document);
 	if (read.kind === "invalid") throw new Error(read.reason);
 	return read.kind === "loaded" ? read.value : {};
 }

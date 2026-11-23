@@ -3,9 +3,6 @@ import {
 	type LandblockVector3,
 	acVector3,
 	acVectorToRender,
-	landblockVector3,
-	renderVector3,
-	renderVectorToAc,
 	sceneVec3,
 	sceneVector3,
 } from "../../lib/assets/ac-frame";
@@ -18,7 +15,6 @@ import {
 	createCameraRotationRadians,
 	createEntityFacingCameraYaw,
 	resolveCameraLookAtAngles,
-	rotateRenderVector,
 } from "../../lib/game/math/camera-orientation";
 import { Quat, Vec3 } from "../../lib/game/math/types";
 import {
@@ -52,6 +48,7 @@ import {
 	type EntitySelectionRefinement,
 	type PresentedSelectionRay,
 } from "../../lib/game/selection/entity-selection-intersection";
+import { samplePresentedCameraRay as sampleSharedPresentedCameraRay } from "../../lib/game/selection/presented-camera-ray";
 import type { ClientLifecycleSession } from "./lifecycle-session";
 import { formatClientLocation } from "./location-command";
 import type {
@@ -297,61 +294,25 @@ export class ClientCameraAndSelectionPresenter {
 		const view = this.#lastPrimaryView;
 		const cameraStatus = this.camera.status();
 		if (view === null || cameraStatus.kind !== "active") return null;
-		const bounds = this.#canvas.getBoundingClientRect();
-		if (bounds.width <= 0 || bounds.height <= 0) return null;
-		const normalizedX = ((clientX - bounds.left) / bounds.width) * 2 - 1;
-		const normalizedY = 1 - ((clientY - bounds.top) / bounds.height) * 2;
-		if (!Number.isFinite(normalizedX) || !Number.isFinite(normalizedY)) {
-			return null;
-		}
-		const tangent = Math.tan((view.camera.fov * Math.PI) / 360);
-		const aspect = view.extent.width / view.extent.height;
-		const localDirection = new Vec3(
-			normalizedX * tangent * aspect,
-			normalizedY * tangent,
-			-1,
+		const sampled = sampleSharedPresentedCameraRay(
+			view,
+			this.#canvas,
+			clientX,
+			clientY,
 		);
-		const localLength = Math.hypot(
-			localDirection.x,
-			localDirection.y,
-			localDirection.z,
-		);
-		const renderDirection = rotateRenderVector(
-			new Vec3(
-				localDirection.x / localLength,
-				localDirection.y / localLength,
-				localDirection.z / localLength,
-			),
-			view.camera.placement.rotation,
-		);
-		const acDirection = renderVectorToAc(
-			renderVector3([renderDirection.x, renderDirection.y, renderDirection.z]),
-		);
-		const landblockOrigin = createLandblockWorldOrigin(
-			view.camera.placement.landblockId,
-		);
-		const acStart = renderVectorToAc(
-			renderVector3([
-				view.camera.placement.position.x - landblockOrigin.x,
-				view.camera.placement.position.y - landblockOrigin.y,
-				view.camera.placement.position.z - landblockOrigin.z,
-			]),
-		);
+		if (sampled === null) return null;
 		return {
 			query: {
 				camera: cameraStatus.identity,
 				anchor: parseCellId(view.camera.placement.landblockId),
-				start: landblockVector3(acStart),
-				direction: acDirection,
+				start: sampled.acStart,
+				direction: sampled.acDirection,
 				previousCell:
 					view.camera.placement.envCellId === null
 						? null
 						: parseCellId(view.camera.placement.envCellId),
 			},
-			refinement: {
-				direction: renderDirection,
-				start: view.camera.placement.position.clone(),
-			},
+			refinement: sampled.refinement,
 		};
 	}
 

@@ -57,20 +57,41 @@ pub enum HostContentSelection {
     Automatic(PathBuf),
 }
 
+/// Concrete host launch mode and its mode-specific startup overrides.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HostLaunchMode {
+    Explorer {
+        /// Optional explicit weenie catalog path override for Explorer mode.
+        weenie_catalog: Option<PathBuf>,
+    },
+    Client,
+}
+
+impl HostLaunchMode {
+    /// Returns the coarse host mode discriminant.
+    pub const fn host_mode(&self) -> HostMode {
+        match self {
+            Self::Explorer { .. } => HostMode::Explorer,
+            Self::Client => HostMode::Client,
+        }
+    }
+}
+
 /// Sidecar arguments, kept separate from game-server launch credentials.
 #[derive(Debug)]
 pub struct HostLaunch {
-    /// Concrete host authority composition.
-    pub mode: HostMode,
+    /// Concrete host authority composition and its mode-specific options.
+    pub mode: HostLaunchMode,
     /// Content selection for this process lifetime.
     pub content: HostContentSelection,
 }
 
 impl HostLaunch {
-    /// Accepts exactly one mode and one explicit selection or automatic discovery root.
+    /// Accepts exactly one mode, one content selection, and optional Explorer-only overrides.
     pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Self> {
         let mut mode = None;
         let mut content = None;
+        let mut weenie_catalog = None;
         let mut args = args.into_iter();
         while let Some(argument) = args.next() {
             if argument.starts_with("--mode=") {
@@ -82,28 +103,53 @@ impl HostLaunch {
                 Some((name, value)) => (name, Some(value.to_owned())),
                 None => (argument.as_str(), None),
             };
+            if name == "--weenie-catalog" {
+                ensure_unique(&weenie_catalog, "weenie catalog")?;
+                weenie_catalog = Some(take_path_arg(name, inline, &mut args)?);
+                continue;
+            }
             if !matches!(name, "--content" | "--discovery-root") {
                 bail!("unsupported host argument {argument:?}");
             }
             ensure_unique(&content, "content selection")?;
-            let value = inline
-                .or_else(|| args.next())
-                .ok_or_else(|| anyhow::anyhow!("{name} requires a path"))?;
-            if value.is_empty() || value.starts_with("--") {
-                bail!("{name} requires a nonempty path");
-            }
+            let path = take_path_arg(name, inline, &mut args)?;
             content = Some(if name == "--content" {
-                HostContentSelection::Explicit(value.into())
+                HostContentSelection::Explicit(path)
             } else {
-                HostContentSelection::Automatic(value.into())
+                HostContentSelection::Automatic(path)
             });
         }
+        let mode = match mode
+            .ok_or_else(|| anyhow::anyhow!("missing required --mode=explorer|client"))?
+        {
+            HostMode::Explorer => HostLaunchMode::Explorer { weenie_catalog },
+            HostMode::Client => {
+                if weenie_catalog.is_some() {
+                    bail!("--weenie-catalog is only supported in Explorer mode");
+                }
+                HostLaunchMode::Client
+            }
+        };
         Ok(Self {
-            mode: mode.ok_or_else(|| anyhow::anyhow!("missing required --mode=explorer|client"))?,
+            mode,
             content: content
                 .ok_or_else(|| anyhow::anyhow!("missing --content or --discovery-root"))?,
         })
     }
+}
+
+fn take_path_arg(
+    name: &str,
+    inline: Option<String>,
+    args: &mut impl Iterator<Item = String>,
+) -> Result<PathBuf> {
+    let value = inline
+        .or_else(|| args.next())
+        .ok_or_else(|| anyhow::anyhow!("{name} requires a path"))?;
+    if value.is_empty() || value.starts_with("--") {
+        bail!("{name} requires a nonempty path");
+    }
+    Ok(PathBuf::from(value))
 }
 
 fn ensure_unique<T>(value: &Option<T>, name: &str) -> Result<()> {
@@ -167,5 +213,101 @@ mod tests {
         assert!(HostMode::parse_args(["--mode=unknown"]).is_err());
         assert!(HostMode::parse_args(["--mode", "client"]).is_err());
         assert!(HostMode::parse_args(["--mode=client", "--release"]).is_err());
+    }
+
+    #[test]
+    fn host_launch_parses_explorer_weenie_catalog_and_rejects_client_override() {
+        let launch = HostLaunch::parse(
+            [
+                "--mode=explorer",
+                "--content",
+                "/tmp/dats",
+                "--weenie-catalog",
+                "/tmp/weenies.hwc",
+            ]
+            .into_iter()
+            .map(String::from),
+        )
+        .unwrap();
+        assert_eq!(
+            launch.mode,
+            HostLaunchMode::Explorer {
+                weenie_catalog: Some(PathBuf::from("/tmp/weenies.hwc"))
+            }
+        );
+
+        let inline = HostLaunch::parse(
+            [
+                "--mode=explorer",
+                "--discovery-root=/tmp/root",
+                "--weenie-catalog=/tmp/custom.hwc",
+            ]
+            .into_iter()
+            .map(String::from),
+        )
+        .unwrap();
+        assert_eq!(
+            inline.mode,
+            HostLaunchMode::Explorer {
+                weenie_catalog: Some(PathBuf::from("/tmp/custom.hwc"))
+            }
+        );
+
+        assert!(
+            HostLaunch::parse(
+                [
+                    "--mode=explorer",
+                    "--content",
+                    "/tmp/dats",
+                    "--weenie-catalog=",
+                ]
+                .into_iter()
+                .map(String::from),
+            )
+            .is_err()
+        );
+
+        assert!(
+            HostLaunch::parse(
+                [
+                    "--mode=client",
+                    "--content",
+                    "/tmp/dats",
+                    "--weenie-catalog",
+                    "/tmp/weenies.hwc",
+                ]
+                .into_iter()
+                .map(String::from),
+            )
+            .is_err()
+        );
+        assert!(
+            HostLaunch::parse(
+                [
+                    "--mode=explorer",
+                    "--content",
+                    "/tmp/dats",
+                    "--weenie-catalog",
+                    "/tmp/a.hwc",
+                    "--weenie-catalog=/tmp/b.hwc",
+                ]
+                .into_iter()
+                .map(String::from),
+            )
+            .is_err()
+        );
+        assert!(
+            HostLaunch::parse(
+                [
+                    "--mode=explorer",
+                    "--content",
+                    "/tmp/dats",
+                    "--weenie-catalog"
+                ]
+                .into_iter()
+                .map(String::from),
+            )
+            .is_err()
+        );
     }
 }

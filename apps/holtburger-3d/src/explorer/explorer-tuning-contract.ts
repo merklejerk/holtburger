@@ -106,6 +106,11 @@ export interface ExplorerTuningOverrides {
 	};
 	/** Explorer's initial color-grade enablement and parameters. */
 	readonly colorGrade: FrontendColorGradeTuning;
+	/** Explorer entity-interaction policy bounds. */
+	readonly entities: {
+		/** Maximum distance in meters from the camera for Tab-targeting nearby entities. */
+		readonly tabTargetMaxDistanceMeters: number;
+	};
 }
 
 /** Complete exported Explorer tuning after initial frame-policy composition. */

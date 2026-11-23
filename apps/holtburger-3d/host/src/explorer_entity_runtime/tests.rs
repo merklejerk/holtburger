@@ -1112,12 +1112,15 @@ fn explorer_and_client_authored_grounded_adapters_resolve_equal_actuation() {
 
     let explorer = possession_grounded_actuation(
         &active,
-        offset,
-        &body,
-        1.0,
-        runtime.possession_profile,
-        1.0 / 30.0,
-        None,
+        super::possession::PossessionGroundedStep {
+            authored_offset: offset,
+            body: &body,
+            object_scale: 1.0,
+            profile: runtime.possession_profile,
+            delta_seconds: 1.0 / 30.0,
+            launch: None,
+            manual_yaw_radians: 0.0,
+        },
     )
     .expect("Explorer adapter should produce grounded actuation");
     let client = holtburger_world::authored_grounded_actuation(
@@ -2645,7 +2648,7 @@ fn host_boom_follows_exact_possession_without_registering_a_camera_body() {
 
     let started_at = Instant::now();
     // Registration's proved seed is sufficient before the next entity tick arrives.
-    let initial_tick = boom.advance(1.0 / 30.0, Ok).unwrap().unwrap();
+    let initial_tick = boom.advance(1.0 / 30.0).unwrap();
     assert!(matches!(
         initial_tick,
         HostKinematicBoomTick::Reseeded {
@@ -2661,7 +2664,7 @@ fn host_boom_follows_exact_possession_without_registering_a_camera_body() {
     // A pending entity transaction cannot block advancement against already published input.
     let tick = {
         let _entity_transaction = entities.registry.lock().unwrap();
-        boom.advance(1.0 / 30.0, Ok).unwrap().unwrap()
+        boom.advance(1.0 / 30.0).unwrap()
     };
     let HostKinematicBoomTick::Advanced {
         identity,
@@ -2686,7 +2689,7 @@ fn host_boom_follows_exact_possession_without_registering_a_camera_body() {
     assert_eq!(path.legs.last().unwrap().end_fraction, 1.0);
     assert!(path.initial.visual_pivot.coords.z.is_finite());
     assert_eq!(simulation.registered_body_count(), body_count);
-    let continued = boom.advance(1.0 / 60.0, Ok).unwrap().unwrap();
+    let continued = boom.advance(1.0 / 60.0).unwrap();
     assert!(matches!(
         continued,
         HostKinematicBoomTick::Advanced { sequence: 3, .. }
@@ -2716,7 +2719,7 @@ fn host_boom_follows_exact_possession_without_registering_a_camera_body() {
     };
     boom.publish_target(&rejected_target);
     assert!(matches!(
-        boom.advance(1.0 / 30.0, Ok).unwrap(),
+        boom.advance(1.0 / 30.0),
         Some(HostKinematicBoomTick::Advanced {
             identity,
             sequence: 4,
@@ -2741,7 +2744,7 @@ fn host_boom_follows_exact_possession_without_registering_a_camera_body() {
     };
     boom.publish_target(&missing_target);
     assert!(matches!(
-        boom.advance(1.0 / 30.0, Ok).unwrap(),
+        boom.advance(1.0 / 30.0),
         Some(HostKinematicBoomTick::Held {
             identity,
             sequence: 5,
@@ -2762,7 +2765,7 @@ fn host_boom_follows_exact_possession_without_registering_a_camera_body() {
     );
     boom.publish_target(&collection);
     assert!(matches!(
-        boom.advance(1.0 / 30.0, Ok).unwrap(),
+        boom.advance(1.0 / 30.0),
         Some(HostKinematicBoomTick::Advanced {
             identity,
             sequence: 6,
@@ -2776,7 +2779,7 @@ fn host_boom_follows_exact_possession_without_registering_a_camera_body() {
     collection.entity_collision = Some(Err("injected collision preparation failure".into()));
     boom.publish_target(&collection);
     assert!(matches!(
-        boom.advance(1.0 / 30.0, Ok).unwrap(),
+        boom.advance(1.0 / 30.0),
         Some(HostKinematicBoomTick::Held {
             reason: HostKinematicBoomFailureReason::TargetContract,
             ..
@@ -2785,7 +2788,7 @@ fn host_boom_follows_exact_possession_without_registering_a_camera_body() {
     collection.entity_collision = prepared_entities;
     boom.publish_target(&collection);
     assert!(matches!(
-        boom.advance(1.0 / 30.0, Ok).unwrap(),
+        boom.advance(1.0 / 30.0),
         Some(HostKinematicBoomTick::Advanced { .. })
     ));
 
@@ -2822,8 +2825,7 @@ fn host_boom_follows_exact_possession_without_registering_a_camera_body() {
     };
     boom.publish_target(&replacement_missing_target);
     assert!(matches!(
-        boom.advance(1.0 / 30.0, Ok)
-            .unwrap(),
+        boom.advance(1.0 / 30.0),
         Some(HostKinematicBoomTick::Fallback {
             identity,
             sequence: 1,
@@ -2839,7 +2841,7 @@ fn host_boom_follows_exact_possession_without_registering_a_camera_body() {
         .unwrap();
     boom.publish_target(&replacement_collection);
     assert!(matches!(
-        boom.advance(1.0 / 30.0, Ok).unwrap(),
+        boom.advance(1.0 / 30.0),
         Some(HostKinematicBoomTick::Reseeded {
             identity,
             sequence: 2,
@@ -2858,35 +2860,36 @@ fn host_boom_follows_exact_possession_without_registering_a_camera_body() {
         )
         .unwrap();
     boom.publish_target(&released_collection);
-    assert!(boom.advance(1.0 / 30.0, Ok).unwrap().is_none());
+    assert!(boom.advance(1.0 / 30.0).is_none());
     boom.publish_target(&released_collection);
-    assert!(boom.advance(1.0 / 30.0, Ok).unwrap().is_none());
+    assert!(boom.advance(1.0 / 30.0).is_none());
     assert_eq!(simulation.registered_body_count(), body_count);
 }
 
 #[test]
-fn camera_worker_advances_without_entity_ticks_and_retires_on_release() {
+fn fixed_tick_publishes_entity_and_boom_together_and_retires_on_release() {
     use crate::explorer_entity_delivery::{ExplorerEntityDelivery, ExplorerFixedTickEnvelope};
-    use crate::explorer_entity_simulation::DynamicEntityEventSink;
+    use crate::explorer_entity_simulation::{DynamicEntityEventSink, ExplorerEntitySimulation};
+    use crate::host_fixed_tick_runtime::HostFixedTickParticipant;
     use crate::host_kinematic_boom_runtime::{
         HostKinematicBoomIntentRequest, HostKinematicBoomRuntime, HostKinematicBoomStartRequest,
         HostKinematicBoomUpdateReceipt,
     };
-    use std::sync::mpsc;
 
-    struct CameraSink(mpsc::Sender<ExplorerFixedTickEnvelope>);
-    impl DynamicEntityEventSink for CameraSink {
+    struct RecordingSink(Mutex<Vec<ExplorerFixedTickEnvelope>>);
+    impl DynamicEntityEventSink for RecordingSink {
         fn publish(&self, envelope: ExplorerFixedTickEnvelope) -> anyhow::Result<()> {
-            self.0.send(envelope)?;
+            self.0.lock().unwrap().push(envelope);
             Ok(())
         }
         fn publish_possession_outcomes(
             &self,
             _: Vec<PossessionEventOutcome>,
         ) -> anyhow::Result<()> {
-            panic!("camera servicing does not publish possession outcomes")
+            Ok(())
         }
     }
+
     let (simulation, entities, guid) = walking_runtime();
     settle(&simulation, Instant::now());
     let entities = Arc::new(entities);
@@ -2909,24 +2912,34 @@ fn camera_worker_advances_without_entity_ticks_and_retires_on_release() {
         })
         .unwrap();
     let delivery = Arc::new(ExplorerEntityDelivery::new(Arc::clone(&entities)));
-    let (sent, received) = mpsc::channel();
-    let worker = camera.spawn(delivery, Arc::new(CameraSink(sent))).unwrap();
+    let sink = Arc::new(RecordingSink(Mutex::new(Vec::new())));
+    let simulation_participant = ExplorerEntitySimulation::new(
+        Arc::clone(&entities),
+        delivery,
+        Arc::clone(&camera),
+        Arc::clone(&sink) as Arc<dyn DynamicEntityEventSink>,
+    );
+    let tick = Duration::from_secs_f64(1.0 / crate::host_fixed_tick_runtime::HOST_FIXED_TICK_HZ);
+
+    simulation_participant.fixed_tick(tick).unwrap();
+    simulation_participant.fixed_tick(tick).unwrap();
     {
-        let _entity_transaction = entities.registry.lock().unwrap();
-        let first = received.recv_timeout(Duration::from_secs(2)).unwrap();
-        let second = received.recv_timeout(Duration::from_secs(2)).unwrap();
-        assert!(first.entity_advances.is_empty() && second.entity_advances.is_empty());
-        assert!(first.boom.is_some() && second.boom.is_some());
-        assert!(second.epoch > first.epoch);
-        assert!(first.duration_ms > 0.0 && second.duration_ms > 0.0);
+        let published = sink.0.lock().unwrap();
+        assert_eq!(published.len(), 2);
+        assert!(published[0].boom.is_some() && published[1].boom.is_some());
+        assert_eq!(published[0].entity_advances.len(), 1);
+        assert_eq!(published[1].entity_advances.len(), 1);
+        assert!(published[1].epoch > published[0].epoch);
+        assert!((published[0].duration_ms - 1000.0 / 30.0).abs() < 1e-6);
     }
+
     entities.release_possession(Instant::now()).unwrap();
-    // Events completed before release may already be queued. Nothing can follow that boundary.
-    received.try_iter().for_each(drop);
-    assert!(matches!(
-        received.recv_timeout(Duration::from_millis(50)),
-        Err(mpsc::RecvTimeoutError::Timeout)
-    ));
+    sink.0.lock().unwrap().clear();
+    simulation_participant.fixed_tick(tick).unwrap();
+    {
+        let published = sink.0.lock().unwrap();
+        assert!(published.iter().all(|envelope| envelope.boom.is_none()));
+    }
     assert_eq!(
         camera
             .set_intent(HostKinematicBoomIntentRequest {
@@ -2938,8 +2951,8 @@ fn camera_worker_advances_without_entity_ticks_and_retires_on_release() {
             .unwrap(),
         HostKinematicBoomUpdateReceipt::IgnoredStale
     );
-    worker.shutdown();
-    assert!(camera.advance(1.0 / 60.0, Ok).unwrap().is_none());
+    camera.shutdown();
+    assert!(camera.advance(1.0 / 30.0).is_none());
 }
 
 #[test]
@@ -3047,7 +3060,7 @@ fn host_boom_retains_session_while_control_work_is_limited() {
         .unwrap();
     boom.publish_target(&collection);
     assert!(matches!(
-        boom.advance(1.0 / 30.0, Ok).unwrap(),
+        boom.advance(1.0 / 30.0),
         Some(HostKinematicBoomTick::Reseeded {
             identity,
             sequence: 1,
@@ -3056,7 +3069,7 @@ fn host_boom_retains_session_while_control_work_is_limited() {
     ));
     boom.publish_target(&collection);
     assert!(matches!(
-        boom.advance(1.0 / 30.0, Ok).unwrap(),
+        boom.advance(1.0 / 30.0),
         Some(HostKinematicBoomTick::Advanced {
             identity,
             sequence: 2,
@@ -3066,7 +3079,7 @@ fn host_boom_retains_session_while_control_work_is_limited() {
     ));
     boom.publish_target(&collection);
     assert!(matches!(
-        boom.advance(1.0 / 30.0, Ok).unwrap(),
+        boom.advance(1.0 / 30.0),
         Some(HostKinematicBoomTick::Advanced {
             identity,
             sequence: 3,
@@ -3074,4 +3087,143 @@ fn host_boom_retains_session_while_control_work_is_limited() {
         }) if identity == receipt.identity
     ));
     assert_eq!(simulation.registered_body_count(), 1);
+}
+
+#[test]
+fn possession_manual_yaw_accumulates_rotates_once_and_rejects_stale_or_non_finite() {
+    let (simulation, runtime, guid) = walking_runtime();
+    let settled_at = settle(&simulation, Instant::now());
+    let possession = runtime.possess(guid).unwrap();
+
+    // Stale generation is ignored without error.
+    assert_eq!(
+        runtime
+            .apply_possession_yaw(possession.possession_generation + 99, 0.5)
+            .unwrap(),
+        PossessionIntentReplaceResult::IgnoredStalePossession
+    );
+    // Non-finite yaw is rejected loudly.
+    assert!(
+        runtime
+            .apply_possession_yaw(possession.possession_generation, f32::NAN)
+            .is_err()
+    );
+    assert!(
+        runtime
+            .apply_possession_yaw(possession.possession_generation, f32::INFINITY)
+            .is_err()
+    );
+
+    let initial_heading = simulation
+        .physical_body_snapshot(SpatialBodyId::Entity(guid))
+        .unwrap()
+        .pose
+        .rotation
+        .to_heading();
+
+    // Two samples accumulate before the next fixed tick (total +PI/2 = +90 deg clockwise).
+    assert_eq!(
+        runtime
+            .apply_possession_yaw(
+                possession.possession_generation,
+                std::f32::consts::FRAC_PI_4
+            )
+            .unwrap(),
+        PossessionIntentReplaceResult::Accepted
+    );
+    assert_eq!(
+        runtime
+            .apply_possession_yaw(
+                possession.possession_generation,
+                std::f32::consts::FRAC_PI_4
+            )
+            .unwrap(),
+        PossessionIntentReplaceResult::Accepted
+    );
+
+    let tick1 = settled_at + Duration::from_millis(34);
+    runtime.tick_physical_collection(1.0 / 30.0, tick1).unwrap();
+    let heading_after_tick1 = simulation
+        .physical_body_snapshot(SpatialBodyId::Entity(guid))
+        .unwrap()
+        .pose
+        .rotation
+        .to_heading();
+    let expected_heading =
+        (initial_heading + std::f32::consts::FRAC_PI_2).rem_euclid(std::f32::consts::TAU);
+    assert!(
+        (heading_after_tick1 - expected_heading).abs() < 0.01,
+        "expected heading ~{expected_heading}, got {heading_after_tick1}"
+    );
+
+    // Subsequent tick with no new yaw samples does not replay the previous delta.
+    let tick2 = tick1 + Duration::from_millis(34);
+    runtime.tick_physical_collection(1.0 / 30.0, tick2).unwrap();
+    let heading_after_tick2 = simulation
+        .physical_body_snapshot(SpatialBodyId::Entity(guid))
+        .unwrap()
+        .pose
+        .rotation
+        .to_heading();
+    assert!(
+        (heading_after_tick2 - heading_after_tick1).abs() < 0.01,
+        "manual yaw must be consumed once per tick: {heading_after_tick1} vs {heading_after_tick2}"
+    );
+
+    // Large finite deltas wrap before accumulation so they cannot overflow to NaN.
+    assert_eq!(
+        runtime
+            .apply_possession_yaw(possession.possession_generation, f32::MAX)
+            .unwrap(),
+        PossessionIntentReplaceResult::Accepted
+    );
+    assert_eq!(
+        runtime
+            .apply_possession_yaw(possession.possession_generation, f32::MAX)
+            .unwrap(),
+        PossessionIntentReplaceResult::Accepted
+    );
+    let tick3 = tick2 + Duration::from_millis(34);
+    runtime.tick_physical_collection(1.0 / 30.0, tick3).unwrap();
+    let heading_after_tick3 = simulation
+        .physical_body_snapshot(SpatialBodyId::Entity(guid))
+        .unwrap()
+        .pose
+        .rotation
+        .to_heading();
+    assert!(heading_after_tick3.is_finite());
+
+    // Motion Reset clears queued manual yaw so it does not apply on that tick.
+    assert_eq!(
+        runtime
+            .apply_possession_yaw(
+                possession.possession_generation,
+                std::f32::consts::FRAC_PI_2
+            )
+            .unwrap(),
+        PossessionIntentReplaceResult::Accepted
+    );
+    runtime
+        .queue_possession_event(ExplorerPossessionEventRequest {
+            possession_generation: possession.possession_generation,
+            sequence: 0,
+            revision: 1,
+            stance: possession.accepted_stance,
+            run_rate_scalar: possession.run_rate_capability.initial,
+            drive: CharacterDrive::default(),
+            event: crate::explorer_possession_control::PossessionLifecycleEvent::Reset,
+        })
+        .unwrap();
+    let tick4 = tick3 + Duration::from_millis(34);
+    runtime.tick_physical_collection(1.0 / 30.0, tick4).unwrap();
+    let heading_after_reset = simulation
+        .physical_body_snapshot(SpatialBodyId::Entity(guid))
+        .unwrap()
+        .pose
+        .rotation
+        .to_heading();
+    assert!(
+        (heading_after_reset - heading_after_tick3).abs() < 0.01,
+        "Reset must clear pending manual yaw: {heading_after_tick3} vs {heading_after_reset}"
+    );
 }

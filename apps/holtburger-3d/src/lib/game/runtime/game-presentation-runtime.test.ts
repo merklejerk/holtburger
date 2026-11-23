@@ -5769,7 +5769,16 @@ function spawnedEntity(
 			lighting: false,
 			noDraw: false,
 			participation: "pose-only",
-			semanticMask: 0,
+			flags: {
+				reportCollisions: false,
+				gravity: false,
+				ethereal: false,
+				ignoreCollisions: false,
+				missile: false,
+				inelastic: false,
+				edgeSlide: false,
+				frozen: false,
+			},
 			...physics,
 		},
 		placement: {

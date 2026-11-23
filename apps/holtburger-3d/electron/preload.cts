@@ -55,9 +55,15 @@ contextBridge.exposeInMainWorld("holtburgerLauncher", {
 	appSettings: () => invoke("launcher:app-settings"),
 	saveAppSettings: (value: unknown) =>
 		invoke("launcher:save-app-settings", value),
+	defaultContent: () => invoke("launcher:default-content"),
+	saveDefaultContent: (location: string | null) =>
+		invoke("launcher:save-default-content", location),
 	restart: () => invoke("launcher:restart"),
 	chooseContentPath: (previous: string | null) =>
 		invoke("launcher:choose-content-path", previous),
+	chooseWeenieCatalog: (previous: string | null) =>
+		invoke("launcher:choose-weenie-catalog", previous),
+	explorerSettings: () => invoke("launcher:explorer-settings"),
 	directory: (refresh: boolean) => invoke("launcher:directory", refresh),
 	importServer: (key: string) => invoke("launcher:import-server", key),
 	saveServer: (value: unknown) => invoke("launcher:save-server", value),
@@ -67,6 +73,7 @@ contextBridge.exposeInMainWorld("holtburgerLauncher", {
 	credentials: (selection: unknown) =>
 		invoke("launcher:credentials", selection),
 	play: (value: unknown) => invoke("launcher:play", value),
+	launchExplorer: (value: unknown) => invoke("launcher:launch-explorer", value),
 	back: (diagnostic: string | null) => invoke("launcher:back", diagnostic),
 });
 
@@ -137,25 +144,22 @@ contextBridge.exposeInMainWorld("holtburgerContent", {
 	},
 });
 
-if (process.argv.includes("--holtburger-mode=client")) {
-	contextBridge.exposeInMainWorld("holtburgerUpdates", {
-		snapshot: () => invoke("updates:snapshot"),
-		registerPregame: (visible: boolean) =>
-			invoke("updates:register-pregame", visible),
-		setPregameVisible: (token: string, visible: boolean) =>
-			invoke("updates:pregame-visible", token, visible),
-		releasePregame: (token: string) => invoke("updates:release-pregame", token),
-		openDownloads: () => invoke("updates:open-downloads"),
-		refresh: () => invoke("updates:refresh"),
-		openHistory: () => invoke("updates:open-history"),
-		listen(handler: (snapshot: unknown) => void): () => void {
-			const listener = (_event: unknown, snapshot: unknown) =>
-				handler(snapshot);
-			ipcRenderer.on("updates:state", listener);
-			return () => ipcRenderer.removeListener("updates:state", listener);
-		},
-	});
-}
+contextBridge.exposeInMainWorld("holtburgerUpdates", {
+	snapshot: () => invoke("updates:snapshot"),
+	registerPregame: (visible: boolean) =>
+		invoke("updates:register-pregame", visible),
+	setPregameVisible: (token: string, visible: boolean) =>
+		invoke("updates:pregame-visible", token, visible),
+	releasePregame: (token: string) => invoke("updates:release-pregame", token),
+	openDownloads: () => invoke("updates:open-downloads"),
+	refresh: () => invoke("updates:refresh"),
+	openHistory: () => invoke("updates:open-history"),
+	listen(handler: (snapshot: unknown) => void): () => void {
+		const listener = (_event: unknown, snapshot: unknown) => handler(snapshot);
+		ipcRenderer.on("updates:state", listener);
+		return () => ipcRenderer.removeListener("updates:state", listener);
+	},
+});
 
 contextBridge.exposeInMainWorld("holtburgerThemes", {
 	list(): Promise<unknown> {
@@ -169,120 +173,132 @@ contextBridge.exposeInMainWorld("holtburgerThemes", {
 	},
 });
 
-if (process.argv.includes("--holtburger-mode=client")) {
-	// Preload is ready before Svelte: retain an early native close request until the app registers.
-	type PreparationHandler = () => Promise<unknown>;
-	let preparation:
-		| {
-				kind: "waiting";
-				requested: boolean;
-				handler: PreparationHandler | null;
-		  }
-		| { kind: "running" } = {
-		kind: "waiting",
-		requested: false,
-		handler: null,
-	};
-	const prepare = () => {
-		if (preparation.kind === "running") return;
-		preparation.requested = true;
-		const handler = preparation.handler;
-		if (handler === null) return;
-		preparation = { kind: "running" };
-		void Promise.resolve()
-			.then(handler)
-			.then(
-				(result) => invoke("client:prepared-close", result),
-				(error) =>
-					invoke("client:prepared-close", {
-						kind: "failed",
-						diagnostic: error instanceof Error ? error.message : String(error),
-					}),
-			)
-			.catch((error) =>
-				console.error("Client close acknowledgement failed", error),
-			);
-	};
-	ipcRenderer.on("client:prepare-close", prepare);
+// Preload is ready before Svelte: retain an early native close request until the app registers.
+type PreparationHandler = () => Promise<unknown>;
+let preparation:
+	| {
+			kind: "waiting";
+			requested: boolean;
+			handler: PreparationHandler | null;
+	  }
+	| { kind: "running" } = {
+	kind: "waiting",
+	requested: false,
+	handler: null,
+};
+const prepare = () => {
+	if (preparation.kind === "running") return;
+	preparation.requested = true;
+	const handler = preparation.handler;
+	if (handler === null) return;
+	preparation = { kind: "running" };
+	void Promise.resolve()
+		.then(handler)
+		.then(
+			(result) => invoke("client:prepared-close", result),
+			(error) =>
+				invoke("client:prepared-close", {
+					kind: "failed",
+					diagnostic: error instanceof Error ? error.message : String(error),
+				}),
+		)
+		.catch((error) =>
+			console.error("Session close acknowledgement failed", error),
+		);
+};
+ipcRenderer.on("client:prepare-close", prepare);
 
-	contextBridge.exposeInMainWorld("holtburgerClient", {
-		quit(): Promise<void> {
-			return invoke("client:request-close");
-		},
-		onPrepareClose(handler: PreparationHandler): () => void {
-			if (preparation.kind === "running" || preparation.handler !== null)
-				throw new Error(
-					"Client close preparation handler is already registered.",
-				);
-			preparation.handler = handler;
-			if (preparation.requested) prepare();
-			return () => {
-				if (preparation.kind === "waiting" && preparation.handler === handler)
-					preparation.handler = null;
-			};
-		},
-		start(): Promise<void> {
-			return invoke("client:start");
-		},
-	});
-	contextBridge.exposeInMainWorld("holtburgerVisualCache", {
-		read(guid: number): Promise<unknown> {
-			return invoke("visual-cache:read", guid);
-		},
-		stage(capture: unknown): Promise<void> {
-			return invoke("visual-cache:stage", capture);
-		},
-		listenFailures(handler: (message: unknown) => void): () => void {
-			const listener = (_event: unknown, message: unknown) => handler(message);
-			ipcRenderer.on("visual-cache:failure", listener);
-			return () => ipcRenderer.removeListener("visual-cache:failure", listener);
-		},
-	});
-	contextBridge.exposeInMainWorld("holtburgerEquipmentCache", {
-		readAll(): Promise<unknown> {
-			return invoke("equipment-cache:read-all");
-		},
-		stage(entry: unknown): Promise<void> {
-			return invoke("equipment-cache:stage", entry);
-		},
-		listenFailures(handler: (message: unknown) => void): () => void {
-			const listener = (_event: unknown, message: unknown) => handler(message);
-			ipcRenderer.on("equipment-cache:failure", listener);
-			return () =>
-				ipcRenderer.removeListener("equipment-cache:failure", listener);
-		},
-	});
-	contextBridge.exposeInMainWorld("holtburgerDisplay", {
-		snapshot: (): Promise<unknown> => invoke("window:display-snapshot"),
-		change: (request: unknown): Promise<void> =>
-			invoke("window:display-change", request),
-		onState(handler: (snapshot: unknown) => void): () => void {
-			const listener = (_event: Electron.IpcRendererEvent, snapshot: unknown) =>
-				handler(snapshot);
-			ipcRenderer.on("window:display-state", listener);
-			return () => {
-				ipcRenderer.removeListener("window:display-state", listener);
-			};
-		},
-	});
-	contextBridge.exposeInMainWorld("holtburgerSettings", {
-		loadUser(context: unknown): Promise<unknown> {
-			return invoke("settings:load-user", context);
-		},
-		saveUserPatch(patch: unknown): Promise<void> {
-			return invoke("settings:save-user-patch", patch);
-		},
-		resetUser(settings: unknown): Promise<unknown> {
-			return invoke("settings:reset-user", settings);
-		},
-		loadCharacter(characterGuid: number, defaults: unknown): Promise<unknown> {
-			return invoke("settings:load-character", characterGuid, defaults);
-		},
-		saveCharacterPatch(characterGuid: number, patch: unknown): Promise<void> {
-			return invoke("settings:save-character-patch", {
-				characterGuid,
-				patch,
-			});
-		},
-	});
-}
+contextBridge.exposeInMainWorld("holtburgerClient", {
+	quit(): Promise<void> {
+		return invoke("client:request-close");
+	},
+	onPrepareClose(handler: PreparationHandler): () => void {
+		if (preparation.kind === "running" || preparation.handler !== null)
+			throw new Error(
+				"Session close preparation handler is already registered.",
+			);
+		preparation.handler = handler;
+		if (preparation.requested) prepare();
+		return () => {
+			if (preparation.kind === "waiting" && preparation.handler === handler)
+				preparation.handler = null;
+		};
+	},
+	start(): Promise<void> {
+		return invoke("client:start");
+	},
+});
+contextBridge.exposeInMainWorld("holtburgerExplorer", {
+	launchConfig(): Promise<unknown> {
+		return invoke("explorer:launch-config");
+	},
+});
+contextBridge.exposeInMainWorld("holtburgerVisualCache", {
+	read(guid: number): Promise<unknown> {
+		return invoke("visual-cache:read", guid);
+	},
+	stage(capture: unknown): Promise<void> {
+		return invoke("visual-cache:stage", capture);
+	},
+	listenFailures(handler: (message: unknown) => void): () => void {
+		const listener = (_event: unknown, message: unknown) => handler(message);
+		ipcRenderer.on("visual-cache:failure", listener);
+		return () => ipcRenderer.removeListener("visual-cache:failure", listener);
+	},
+});
+contextBridge.exposeInMainWorld("holtburgerEquipmentCache", {
+	readAll(): Promise<unknown> {
+		return invoke("equipment-cache:read-all");
+	},
+	stage(entry: unknown): Promise<void> {
+		return invoke("equipment-cache:stage", entry);
+	},
+	listenFailures(handler: (message: unknown) => void): () => void {
+		const listener = (_event: unknown, message: unknown) => handler(message);
+		ipcRenderer.on("equipment-cache:failure", listener);
+		return () =>
+			ipcRenderer.removeListener("equipment-cache:failure", listener);
+	},
+});
+contextBridge.exposeInMainWorld("holtburgerDisplay", {
+	snapshot: (): Promise<unknown> => invoke("window:display-snapshot"),
+	change: (request: unknown): Promise<void> =>
+		invoke("window:display-change", request),
+	onState(handler: (snapshot: unknown) => void): () => void {
+		const listener = (_event: Electron.IpcRendererEvent, snapshot: unknown) =>
+			handler(snapshot);
+		ipcRenderer.on("window:display-state", listener);
+		return () => {
+			ipcRenderer.removeListener("window:display-state", listener);
+		};
+	},
+});
+contextBridge.exposeInMainWorld("holtburgerSettings", {
+	loadUser(context: unknown): Promise<unknown> {
+		return invoke("settings:load-user", context);
+	},
+	saveUserPatch(patch: unknown): Promise<void> {
+		return invoke("settings:save-user-patch", patch);
+	},
+	resetUser(settings: unknown): Promise<unknown> {
+		return invoke("settings:reset-user", settings);
+	},
+	loadExplorerUser(context: unknown): Promise<unknown> {
+		return invoke("settings:load-explorer", context);
+	},
+	saveExplorerUserPatch(patch: unknown): Promise<void> {
+		return invoke("settings:save-explorer-patch", patch);
+	},
+	resetExplorerUser(settings: unknown): Promise<unknown> {
+		return invoke("settings:reset-explorer", settings);
+	},
+	loadCharacter(characterGuid: number, defaults: unknown): Promise<unknown> {
+		return invoke("settings:load-character", characterGuid, defaults);
+	},
+	saveCharacterPatch(characterGuid: number, patch: unknown): Promise<void> {
+		return invoke("settings:save-character-patch", {
+			characterGuid,
+			patch,
+		});
+	},
+});

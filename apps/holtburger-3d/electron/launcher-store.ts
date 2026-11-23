@@ -24,6 +24,7 @@ import {
 	type LauncherSnapshot,
 	type LauncherCredentials,
 	type LauncherServer,
+	type LauncherViewMode,
 } from "../src/launcher/launcher-contract.js";
 import type { ClientWindowSettings } from "../src/app/desktop/window-settings-contract.js";
 import type { ClientLaunchConfiguration } from "./client-launch.js";
@@ -125,7 +126,11 @@ export class LauncherStore {
 	get window(): ClientWindowSettings {
 		return this.#document.window;
 	}
-	snapshot(failure: string | null, canPlay: boolean): LauncherSnapshot {
+	snapshot(
+		failure: string | null,
+		canPlay: boolean,
+		initialView: LauncherViewMode = "client",
+	): LauncherSnapshot {
 		return {
 			servers: this.#document.servers,
 			profiles: this.#document.profiles.map((profile) => {
@@ -150,6 +155,7 @@ export class LauncherStore {
 			failure:
 				this.#loadFailure ?? this.#failure ?? failure ?? this.#repairNotice,
 			canPlay: canPlay && this.#loadFailure === null,
+			initialView,
 		};
 	}
 	#write(update: (value: LauncherSettings) => LauncherSettings): Promise<void> {

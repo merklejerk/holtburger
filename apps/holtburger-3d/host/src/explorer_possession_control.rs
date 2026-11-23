@@ -27,7 +27,7 @@ const PHYSICAL_CHANNEL_EPSILON: f32 = 1.0e-4;
 pub struct PossessionRunRateScalar(f32);
 
 impl PossessionRunRateScalar {
-    pub const INITIAL: Self = Self(1.0);
+    pub const INITIAL: Self = Self(3.0);
     pub const MINIMUM: Self = Self(1.0);
     // RETAIL DIVERGENCE: retail's command adjustment reads `my_run_rate` for forward and
     // sidestep but its resolved skill/burden path naturally tops out around 4.5. Explorer
@@ -516,12 +516,12 @@ impl PossessionLifetime {
         Self(Arc::new(Mutex::new(true)))
     }
 
-    /// Retirement waits for a current camera operation, never for a physical collection.
+    /// Retirement waits for any in-progress boom camera advance before clearing active state.
     pub(crate) fn retire(&self) {
         *self.0.lock().expect("possession lifetime poisoned") = false;
     }
 
-    /// Keeps retirement ordered after the complete operation, including its event delivery.
+    /// Runs a boom camera state operation only while this possession epoch is still live.
     pub(crate) fn while_live<T>(&self, operation: impl FnOnce() -> T) -> Option<T> {
         let live = self.0.lock().expect("possession lifetime poisoned");
         if *live { Some(operation()) } else { None }
@@ -553,6 +553,8 @@ pub struct ActivePossession {
     pub next_event_sequence: u64,
     /// Out-of-order lifecycle edges waiting for their contiguous predecessor.
     pub pending_events: BTreeMap<u64, PendingPossessionEvent>,
+    /// Coalesced manual yaw displacement in radians waiting for the next fixed tick.
+    pending_manual_yaw_radians: f32,
 }
 
 impl ActivePossession {
@@ -587,7 +589,30 @@ impl ActivePossession {
             applied_intent: intent,
             next_event_sequence: 0,
             pending_events: BTreeMap::new(),
+            pending_manual_yaw_radians: 0.0,
         })
+    }
+
+    /// Accumulates one finite manual yaw displacement (in radians) for the next fixed tick.
+    pub fn queue_manual_yaw(&mut self, delta_radians: f32) -> Result<(), PossessionIntentError> {
+        if !delta_radians.is_finite() {
+            return Err(PossessionIntentError::InvalidManualYaw);
+        }
+        let tau = std::f32::consts::TAU;
+        // Wrap delta before adding so large finite deltas cannot overflow to infinity and NaN.
+        self.pending_manual_yaw_radians =
+            (self.pending_manual_yaw_radians + (delta_radians % tau)) % tau;
+        Ok(())
+    }
+
+    /// Consumes and clears the queued manual yaw displacement for one tick proposal.
+    pub fn take_manual_yaw(&mut self) -> f32 {
+        std::mem::replace(&mut self.pending_manual_yaw_radians, 0.0)
+    }
+
+    /// Discards any queued manual yaw displacement (for example on motion reset).
+    pub fn clear_manual_yaw(&mut self) {
+        self.pending_manual_yaw_radians = 0.0;
     }
 
     pub fn replace_intent(
@@ -690,6 +715,8 @@ pub enum PossessionIntentError {
     UnmodelledStance { stance: u32 },
     #[error("invalid possession run-rate scalar: {0}")]
     InvalidRunRateScalar(#[source] PossessionRunRateError),
+    #[error("possession manual yaw displacement must be finite")]
+    InvalidManualYaw,
     #[error(transparent)]
     InvalidKinematics(holtburger_core::CharacterKinematicsError),
     #[error(transparent)]

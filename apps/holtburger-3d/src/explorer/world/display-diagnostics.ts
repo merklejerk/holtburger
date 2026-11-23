@@ -3,7 +3,6 @@ import {
 	type FrameRates,
 	type FrameRateSampler,
 } from "../../app/performance/frame-rate-sampler";
-import type { FrameMetrics } from "../panels/FrameMetricsOverlay.svelte";
 import type { MinimapFrame } from "../../app/minimap/frame";
 import { PerformanceSession } from "../../app/performance/performance-session";
 import type { ActiveRegionSource } from "../../lib/assets/active-region-source";
@@ -24,7 +23,6 @@ import {
 	type EntityShadowSettings,
 } from "../../lib/game/renderer/shadows/entity-shadow-policy";
 import type { NameplateCategory } from "../../lib/game/renderer/overlays/nameplate-policy";
-import { isRenderScale } from "../../lib/game/renderer/render-scale";
 import type {
 	EnvCellRenderMode,
 	FrameSettings,
@@ -52,19 +50,8 @@ import { EXPLORER_TUNING } from "../explorer-tuning";
 /** Fast enough that a tick boundary is never visibly late; resolution is tick-quantized. */
 const CLOCK_SAMPLE_INTERVAL_MS = 250;
 
-/**
- * Sampling density presets.
- *
- * Explorer-local UX: the renderer accepts any density within its bounds, and which handful to
- * put in front of a viewer is a frontend choice. One is native CSS resolution; above it buys
- * supersampled edges for the square of the cost. Filtered against the renderer's own bounds so
- * tightening them can never leave a preset here that the next frame throws on.
- */
-export const EXPLORER_RENDER_SCALE_OPTIONS = [0.5, 0.75, 1, 1.5, 2].filter(
-	isRenderScale,
-);
-
 export interface ExplorerDisplayDiagnosticsDependencies {
+	readonly initialFrameSettings: FrameSettings;
 	readonly isRuntimeReady: () => boolean;
 	readonly readCameraLocation: () => ExplorerCameraLocation | null;
 	readonly readCameraYawRadians: () => number;
@@ -78,8 +65,6 @@ export interface ExplorerDisplayDiagnosticsDependencies {
 		selection: SceneEnvironmentSelection,
 	) => void;
 	readonly onClockFollowingChange: (enabled: boolean) => void;
-	readonly onEffectVolumeChange: (volume: number) => void;
-	readonly onAmbientVolumeChange: (volume: number) => void;
 }
 
 /**
@@ -88,9 +73,8 @@ export interface ExplorerDisplayDiagnosticsDependencies {
  * outside Svelte reactive state.
  */
 export class ExplorerDisplayDiagnosticsController {
-	private frameSettings: FrameSettings = {
-		...EXPLORER_TUNING.frameSettings,
-	};
+	private frameSettings: FrameSettings;
+	private forcedFlatEnvCellRenderMode = false;
 	private environmentSelection: SceneEnvironmentSelection = {
 		dayIndex: EXPLORER_TUNING.environment.defaultDayIndex,
 		timeOfDay: EXPLORER_TUNING.environment.defaultTimeOfDay,
@@ -99,10 +83,7 @@ export class ExplorerDisplayDiagnosticsController {
 	private clockFollowing = false;
 	private clockStartedAtMs = 0;
 	private clockTimer: ReturnType<typeof setInterval> | undefined;
-	private effectVolume = 1;
-	private ambientVolume = 1;
 
-	private frameMetrics: FrameMetrics | null = null;
 	private readonly frameRateSampler: FrameRateSampler = createFrameRateSampler(
 		EXPLORER_TUNING.diagnostics.frameMetricsEmaWindowMs,
 	);
@@ -113,7 +94,9 @@ export class ExplorerDisplayDiagnosticsController {
 	private activeRegion: ActiveRegionSource | undefined;
 	private canvasElement: HTMLCanvasElement | null = null;
 
-	constructor(private readonly deps: ExplorerDisplayDiagnosticsDependencies) {}
+	constructor(private readonly deps: ExplorerDisplayDiagnosticsDependencies) {
+		this.frameSettings = { ...deps.initialFrameSettings };
+	}
 
 	readFrameSettingsSnapshot(): FrameSettings {
 		return this.frameSettings;
@@ -145,13 +128,13 @@ export class ExplorerDisplayDiagnosticsController {
 
 	detach(): void {
 		this.stopClockTimer();
+		this.forcedFlatEnvCellRenderMode = false;
 		this.performanceSession?.retire();
 		this.performanceSession = null;
 		this.presentationOwner = undefined;
 		this.gameRuntime = undefined;
 		this.activeRegion = undefined;
 		this.canvasElement = null;
-		this.frameMetrics = null;
 	}
 
 	stopClockTimer(): void {
@@ -159,14 +142,10 @@ export class ExplorerDisplayDiagnosticsController {
 		this.clockTimer = undefined;
 	}
 
-	clearFrameMetrics(): void {
-		this.frameMetrics = null;
-	}
-
 	recordFrameSample(
 		animationFrameTimeMs: number,
 		tickStartedAt: number,
-		updateAndDrawStartedAt: number,
+		_updateAndDrawStartedAt: number,
 		frameFinishedAt: number,
 	): void {
 		this.performanceSession?.recordFrame(frameFinishedAt - tickStartedAt);
@@ -175,19 +154,10 @@ export class ExplorerDisplayDiagnosticsController {
 			startedAtMs: tickStartedAt,
 			workMs: frameFinishedAt - tickStartedAt,
 		});
-		this.frameMetrics = {
-			tickMs: updateAndDrawStartedAt - tickStartedAt,
-			updateFrameMs: frameFinishedAt - updateAndDrawStartedAt,
-			frameMs: frameFinishedAt - tickStartedAt,
-		};
 	}
 
 	readFrameRates(): FrameRates | null {
 		return this.frameRateSampler.readFrameRates();
-	}
-
-	readFrameMetrics(): FrameMetrics | null {
-		return this.frameMetrics;
 	}
 
 	readPerformanceSession(): PerformanceSession | null {
@@ -288,24 +258,6 @@ export class ExplorerDisplayDiagnosticsController {
 		);
 	}
 
-	updateEffectVolume(volume: number): void {
-		this.effectVolume = volume;
-		this.deps.onEffectVolumeChange(volume);
-		this.gameRuntime?.setAudioSettings({
-			ambientVolume: this.ambientVolume,
-			effectVolume: volume,
-		});
-	}
-
-	updateAmbientVolume(volume: number): void {
-		this.ambientVolume = volume;
-		this.deps.onAmbientVolumeChange(volume);
-		this.gameRuntime?.setAudioSettings({
-			ambientVolume: volume,
-			effectVolume: this.effectVolume,
-		});
-	}
-
 	private setFrameSettings(next: FrameSettings): void {
 		this.frameSettings = next;
 		this.deps.onFrameSettingsChange(next);
@@ -313,7 +265,22 @@ export class ExplorerDisplayDiagnosticsController {
 	}
 
 	applyFrameSettings(): void {
-		this.gameRuntime?.setFrameSettings(this.frameSettings);
+		const effective =
+			this.forcedFlatEnvCellRenderMode &&
+			this.frameSettings.envCellRenderMode !== "flat"
+				? { ...this.frameSettings, envCellRenderMode: "flat" as const }
+				: this.frameSettings;
+		this.gameRuntime?.setFrameSettings(effective);
+	}
+
+	/**
+	 * Temporarily force flat EnvCell rendering while free-fly is OOB (dungeon OOB or
+	 * beneath outdoor terrain outside any EnvCell) without mutating the user's setting.
+	 */
+	setForcedFlatEnvCellRenderMode(forced: boolean): void {
+		if (this.forcedFlatEnvCellRenderMode === forced) return;
+		this.forcedFlatEnvCellRenderMode = forced;
+		this.applyFrameSettings();
 	}
 
 	updateEntitySelectionColors(
@@ -332,6 +299,20 @@ export class ExplorerDisplayDiagnosticsController {
 		this.setFrameSettings({
 			...this.frameSettings,
 			distanceFogEnabled: enabled,
+		});
+	}
+
+	updateSealedInteriorAmbientLevel(level: number): void {
+		this.setFrameSettings({
+			...this.frameSettings,
+			sealedInteriorAmbientLevel: Math.max(0, Math.min(1, level)),
+		});
+	}
+
+	updateStaticLights(enabled: boolean): void {
+		this.setFrameSettings({
+			...this.frameSettings,
+			staticLightsEnabled: enabled,
 		});
 	}
 

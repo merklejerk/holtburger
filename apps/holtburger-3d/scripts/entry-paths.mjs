@@ -11,18 +11,30 @@ const ENTRY_PATHS = {
 	},
 };
 
-const CLIENT_LAUNCH_ARGUMENT_NAMES = new Set([
+const SHARED_DESKTOP_ARGUMENT_NAMES = new Set([
+	"ignore-config",
+	"ignore-world-map-cache",
+	"settings-file",
+	"no-launcher",
+	"no-updates",
+]);
+const CLIENT_ONLY_ARGUMENT_NAMES = new Set([
 	"server",
 	"host",
 	"port",
 	"account",
 	"password",
 	"melee-max-chase-distance",
-	"ignore-config",
-	"ignore-world-map-cache",
-	"settings-file",
-	"no-launcher",
-	"no-updates",
+	"launcher-view",
+]);
+const EXPLORER_ONLY_ARGUMENT_NAMES = new Set(["weenie-catalog", "location"]);
+const CLIENT_LAUNCH_ARGUMENT_NAMES = new Set([
+	...SHARED_DESKTOP_ARGUMENT_NAMES,
+	...CLIENT_ONLY_ARGUMENT_NAMES,
+]);
+const EXPLORER_LAUNCH_ARGUMENT_NAMES = new Set([
+	...SHARED_DESKTOP_ARGUMENT_NAMES,
+	...EXPLORER_ONLY_ARGUMENT_NAMES,
 ]);
 const CLIENT_SHORT_ARGUMENT_NAMES = new Map([
 	["s", "server"],
@@ -32,6 +44,7 @@ const CLIENT_SHORT_ARGUMENT_NAMES = new Map([
 	["P", "password"],
 	["i", "ignore-config"],
 ]);
+const EXPLORER_SHORT_ARGUMENT_NAMES = new Map([["i", "ignore-config"]]);
 const CLIENT_BOOLEAN_ARGUMENT_NAMES = new Set([
 	"no-launcher",
 	"no-updates",
@@ -254,18 +267,103 @@ export function partitionClientLaunchArguments(
 
 /** Resolve a canonical client option name from either its long or one-character spelling. */
 export function parseClientLaunchArgument(argument) {
+	return parseLaunchArgument(
+		argument,
+		CLIENT_LAUNCH_ARGUMENT_NAMES,
+		CLIENT_SHORT_ARGUMENT_NAMES,
+	);
+}
+
+/** Resolve a canonical Explorer option name (shared desktop + Explorer-only flags). */
+export function parseExplorerLaunchArgument(argument) {
+	return parseLaunchArgument(
+		argument,
+		EXPLORER_LAUNCH_ARGUMENT_NAMES,
+		EXPLORER_SHORT_ARGUMENT_NAMES,
+	);
+}
+
+/** Identifies client-only flags that are invalid in Explorer mode. */
+export function isClientOnlyLaunchArgument(argument) {
+	return (
+		parseLaunchArgument(
+			argument,
+			CLIENT_ONLY_ARGUMENT_NAMES,
+			new Map([
+				["s", "server"],
+				["h", "host"],
+				["p", "port"],
+				["a", "account"],
+				["P", "password"],
+			]),
+		) !== null
+	);
+}
+
+/** Identifies Explorer-only flags that are invalid in Client mode. */
+export function isExplorerOnlyLaunchArgument(argument) {
+	return (
+		parseLaunchArgument(argument, EXPLORER_ONLY_ARGUMENT_NAMES, new Map()) !==
+		null
+	);
+}
+
+function parseLaunchArgument(argument, allowedLong, allowedShort) {
 	let parsed;
 	if (argument.startsWith("--")) {
 		parsed = parseLongArgument(argument);
-		if (!CLIENT_LAUNCH_ARGUMENT_NAMES.has(parsed.name)) return null;
+		if (!allowedLong.has(parsed.name)) return null;
 	} else {
 		const match = /^-([^-=])(?:=(.*))?$/.exec(argument);
 		if (match === null) return null;
-		const name = CLIENT_SHORT_ARGUMENT_NAMES.get(match[1]);
+		const name = allowedShort.get(match[1]);
 		if (name === undefined) return null;
 		parsed = { name, value: match[2] };
 	}
 	return parsed;
+}
+
+/**
+ * Removes Explorer and shared desktop launch arguments before a renderer URL is assembled.
+ * Resolves filesystem paths (`--settings-file`, `--weenie-catalog`) relative to `baseDirectory`.
+ */
+export function partitionExplorerLaunchArguments(
+	args,
+	baseDirectory = process.cwd(),
+) {
+	const launchArguments = [];
+	const rendererArgs = [];
+	for (let index = 0; index < args.length; index += 1) {
+		const argument = args[index];
+		const parsed = parseExplorerLaunchArgument(argument);
+		if (parsed === null) {
+			rendererArgs.push(argument);
+			continue;
+		}
+		if (CLIENT_BOOLEAN_ARGUMENT_NAMES.has(parsed.name)) {
+			if (parsed.value !== undefined) {
+				throw new Error(`${argument} does not accept a value.`);
+			}
+			launchArguments.push(argument);
+			continue;
+		}
+		let value = parsed.value;
+		if (value === undefined) {
+			value = args[index + 1];
+			if (value === undefined || value.startsWith("-")) {
+				throw new Error(`${argument} requires a value.`);
+			}
+			index += 1;
+		}
+		if (parsed.name === "settings-file" || parsed.name === "weenie-catalog") {
+			if (value.length === 0) throw new Error(`${argument} cannot be empty.`);
+			launchArguments.push(`--${parsed.name}`, resolve(baseDirectory, value));
+		} else {
+			launchArguments.push(argument);
+			if (parsed.value === undefined) launchArguments.push(value);
+		}
+	}
+	return { launchArguments, rendererArguments: rendererArgs };
 }
 
 export function stripClientLaunchArguments(args) {

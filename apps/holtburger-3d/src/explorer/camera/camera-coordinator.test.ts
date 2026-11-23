@@ -349,9 +349,9 @@ describe("ExplorerCameraCoordinator", () => {
 			}),
 		).toBe(false);
 		candidates = null;
-		expect(coordinator.syncFreeFlyCamera(TEST_PROJECTION).renderable).toBe(
-			false,
-		);
+		const oobSync = coordinator.syncFreeFlyCamera(TEST_PROJECTION);
+		expect(oobSync.renderable).toBe(true);
+		expect(oobSync.requiresFlatEnvCellRenderMode).toBe(true);
 		expect(coordinator.sceneInterest()?.target.kind).toBe("dungeon");
 		coordinator.dispose();
 	});
@@ -640,6 +640,7 @@ describe("ExplorerCameraCoordinator", () => {
 				},
 			},
 			renderable: true,
+			requiresFlatEnvCellRenderMode: false,
 		});
 		expect(setPrimaryView).toHaveBeenCalledOnce();
 		coordinator.dispose();
@@ -715,6 +716,7 @@ describe("ExplorerCameraCoordinator", () => {
 		expect(coordinator.syncPhysicalCamera(null, TEST_PROJECTION)).toEqual({
 			location: null,
 			renderable: false,
+			requiresFlatEnvCellRenderMode: false,
 		});
 		coordinator.syncPhysicalCamera(
 			{
@@ -927,6 +929,62 @@ describe("ExplorerCameraCoordinator", () => {
 
 		expect(sync.renderable).toBe(false);
 		expect(setPrimaryView).toHaveBeenCalledOnce();
+		coordinator.dispose();
+	});
+
+	it("requests flat rendering when underground outside EnvCells but stays portal inside valid underground EnvCells", () => {
+		const setPrimaryView = vi.fn();
+		let position = new Vec3(10, 5, -10);
+		let envCells: ScenePointResidencyCandidates["envCells"] = [];
+		const { runtime } = createRuntime({
+			queryWorldPointResidencyCandidates: () => ({
+				envCells,
+				outdoor: { envCellId: null, landblockId: "0x0102ffff" },
+			}),
+			queryOutdoorTerrainSurface: () => ({
+				landblockId: "0x0102ffff",
+				height: 20,
+			}),
+			setPrimaryView,
+		});
+		const coordinator = new ExplorerCameraCoordinator(
+			runtime,
+			{
+				setAutomaticPose: vi.fn(),
+				snapshotState: () => ({
+					hasManualControl: true,
+					pitchRadians: 0,
+					position,
+					yawRadians: 0,
+				}),
+			} as unknown as FreeFlyCameraController,
+			vi.fn(),
+		);
+
+		// Underground and outside any EnvCell -> flat rendering fallback.
+		const undergroundOob = coordinator.syncFreeFlyCamera(TEST_PROJECTION);
+		expect(undergroundOob.renderable).toBe(true);
+		expect(undergroundOob.requiresFlatEnvCellRenderMode).toBe(true);
+
+		// Underground but inside a valid underground EnvCell -> stays in portal mode.
+		envCells = [
+			{
+				containsPoint: true,
+				envCellId: "0x01020100",
+				landblockId: "0x0102ffff",
+			},
+		];
+		const undergroundInCell = coordinator.syncFreeFlyCamera(TEST_PROJECTION);
+		expect(undergroundInCell.renderable).toBe(true);
+		expect(undergroundInCell.requiresFlatEnvCellRenderMode).toBe(false);
+
+		// Above terrain -> stays in portal mode.
+		envCells = [];
+		position = new Vec3(10, 25, -10);
+		const aboveGround = coordinator.syncFreeFlyCamera(TEST_PROJECTION);
+		expect(aboveGround.renderable).toBe(true);
+		expect(aboveGround.requiresFlatEnvCellRenderMode).toBe(false);
+
 		coordinator.dispose();
 	});
 

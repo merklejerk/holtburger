@@ -37,78 +37,6 @@
 		font-size: calc(var(--ui-font-size-body) * var(--ui-text-scale));
 	}
 
-	.explorer-tools {
-		position: fixed;
-		right: clamp(12px, 2vw, 22px);
-		top: clamp(12px, 2vw, 22px);
-		z-index: 10;
-	}
-
-	.explorer-tools-fab {
-		width: 44px;
-		height: 44px;
-		min-height: 44px;
-		font-size: 1.35rem;
-	}
-
-	.explorer-tools-expanded {
-		display: grid;
-		grid-template-columns: 38px minmax(0, 1fr);
-		align-items: start;
-	}
-
-	.explorer-tools-panel {
-		position: relative;
-		width: min(420px, calc(100vw - 62px));
-		display: flex;
-		flex-direction: column;
-		max-height: calc(100dvh - 44px);
-	}
-
-	.explorer-tab-list {
-		align-items: stretch;
-		padding-top: 12px;
-	}
-
-	.explorer-tab-button {
-		position: relative;
-		display: grid;
-		width: 39px;
-		height: 38px;
-		min-height: 38px;
-		place-items: center;
-		padding: 0 8px 0 5px;
-		font-size: 1rem;
-		line-height: 1;
-	}
-
-	.explorer-tools-close {
-		position: absolute;
-		top: 6px;
-		right: 6px;
-		width: 28px;
-		height: 26px;
-		min-height: 26px;
-		font-size: 0.92rem;
-		z-index: 1;
-	}
-
-	.explorer-tools-body {
-		flex: 1 1 auto;
-		min-height: 0;
-		overflow-y: auto;
-		overscroll-behavior: contain;
-		scrollbar-color: var(--ui-color-border) var(--ui-color-well);
-	}
-
-	.explorer-tab-panel p {
-		margin: 0;
-	}
-
-	.explorer-tab-panel p + p {
-		margin-top: 10px;
-	}
-
 	.explorer-action {
 		min-height: 28px;
 		padding: 4px 9px;
@@ -117,12 +45,6 @@
 	.explorer-selectable-list {
 		display: grid;
 		gap: 4px;
-	}
-
-	.explorer-selectable-row {
-		display: grid;
-		padding: 7px;
-		text-align: left;
 	}
 
 	.explorer-data-row {
@@ -152,34 +74,13 @@
 		gap: 9px;
 		min-width: 0;
 		margin: 0;
-		padding: 10px;
+		padding: 10px 10px 10px 14px;
 		border: 0;
 	}
 
 	.explorer-control-note {
 		font-size: calc(var(--ui-font-size-caption) * var(--ui-text-scale));
 		line-height: 1.3;
-	}
-
-	.explorer-world-residency {
-		display: flex;
-		gap: 8px;
-		align-items: baseline;
-		justify-content: space-between;
-		min-width: 0;
-		padding: 7px 8px;
-	}
-
-	.explorer-world-residency > span {
-		font-size: calc(var(--ui-font-size-caption) * var(--ui-text-scale));
-	}
-
-	.explorer-world-residency > strong {
-		min-width: 0;
-		overflow: hidden;
-		font-variant-numeric: tabular-nums;
-		text-overflow: ellipsis;
-		white-space: nowrap;
 	}
 
 	.explorer-frame-panel {
@@ -215,17 +116,6 @@
 		font-weight: 400;
 	}
 
-	.explorer-frame-status {
-		margin: 0;
-		font-size: calc(var(--ui-font-size-body) * var(--ui-text-scale));
-		overflow-wrap: anywhere;
-	}
-
-	.explorer-frame-note {
-		margin-bottom: 0;
-		font-size: calc(var(--ui-font-size-body) * var(--ui-text-scale));
-	}
-
 	.explorer-section {
 		display: grid;
 		gap: 9px;
@@ -253,14 +143,6 @@
 	.explorer-environment-field > input,
 	.explorer-environment-field > select {
 		width: 100%;
-	}
-
-	.explorer-world-form p {
-		font-size: calc(var(--ui-font-size-caption) * var(--ui-text-scale));
-		line-height: 1.3;
-	}
-
-	.explorer-world-form p.invalid {
 	}
 
 	.explorer-lod-controls {
@@ -296,17 +178,6 @@
 		padding: 0;
 	}
 
-	@media (max-width: 560px) {
-		.explorer-tools {
-			right: 10px;
-			top: 10px;
-		}
-
-		.explorer-tools-panel {
-			width: calc(100vw - 58px);
-		}
-	}
-
 	/* Explorer-owned data density; material treatments come from shared UI recipes. */
 	.explorer-section-label {
 		margin: 0 0 8px;
@@ -336,15 +207,11 @@
 		overflow-wrap: anywhere;
 	}
 	.explorer-control-note,
-	.explorer-frame-status,
-	.explorer-frame-note,
-	.explorer-world-form p,
-	.explorer-world-residency > span,
 	.explorer-frame-summary span,
 	.explorer-lod-control > strong {
 		color: var(--ui-color-muted);
 	}
-	.explorer-world-form p.invalid {
+	.explorer-control-note.invalid {
 		color: var(--ui-color-danger);
 	}
 	.explorer-frame-summary strong {

@@ -24,7 +24,7 @@ pub enum ExplorerPhysicalMode {
     Integrated,
 }
 
-/// Complete effective-state replacement requested by one Explorer scenario.
+/// Typed simulation flag and realization-mode update requested by one Explorer scenario.
 #[derive(Debug, Clone, Copy, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReplaceExplorerEntityPhysicsStateRequest {
@@ -32,8 +32,8 @@ pub struct ReplaceExplorerEntityPhysicsStateRequest {
     pub guid: holtburger_common::Guid,
     /// Exact current instance generation.
     pub generation: u64,
-    /// Complete semantic mask; individual bits are never patched at this boundary.
-    pub semantic_mask: u32,
+    /// Typed simulation flags merged onto the entity's current `PhysicsState` on the host.
+    pub flags: holtburger_core::DynamicEntityPhysicsFlags,
     /// Explicit Explorer-local physical realization policy.
     pub physical_mode: ExplorerPhysicalMode,
 }
@@ -110,6 +110,16 @@ impl ExplorerPossessionIntentWireRequest {
             run_rate_scalar: self.run_rate_scalar,
         })
     }
+}
+
+/// Relative yaw displacement applied to the currently possessed entity.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApplyExplorerPossessionYawRequest {
+    /// Exact possession epoch that owns this yaw sample.
+    pub possession_generation: u64,
+    /// Relative clockwise facing displacement in radians.
+    pub delta_radians: f32,
 }
 
 /// Lifecycle payload whose drive and stance come from the enclosing semantic snapshot.

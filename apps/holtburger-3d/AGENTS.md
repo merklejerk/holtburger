@@ -1,15 +1,15 @@
 # Holtburger 3D Frontend
 
-This app contains the working browser runtime and WebGL2 renderer used to prove
-the future replacement client architecture. The Explorer is the current
-working development surface: it loads real client content, manages scene
-interest and residency, realizes static and dynamic objects, renders outdoor
-and EnvCell scenes, executes portal views, and exposes focused inspection
-controls. `ClientApp` is a deliberately thin shell over a separate client
-authority composition: lifecycle, movement, collision, and third-person camera
-facts arrive through typed host events, while shared presentation remains
-renderer-owned. Its small UI surface is intentional and is not a TUI parity
-target.
+This app contains the desktop 3D client (`ClientApp`) and offline content
+Explorer (`ExplorerApp`) for Asheron's Call, built on a shared Svelte 5 +
+WebGL2 presentation runtime and a mode-specific Rust host sidecar
+(`holtburger-3d-host`). Both modes share the unified Electron desktop
+lifecycle, Launcher app shell (including the dedicated Explorer Launcher view),
+user settings store (`client-settings.json`, with shared Window/Display,
+Appearance, Audio, and Character/Mouse Input sections plus isolated `explorer*`
+sections), theme engine, hoisted `src/app/hud/` and `src/app/settings/` UI
+primitives, and WebGL2 renderer. Mode-specific authority remains physically
+separated between `host/src/client_runtime/` and `host/src/explorer_host.rs`.
 
 ## Current Expectations
 
@@ -98,7 +98,7 @@ target.
   inactive tabs stay mounted and hidden/inert, retaining drafts and scrolling.
   Its default scroll area fits within `ui-tabbed-panel`; canvas or nested scroll
   layouts set `scroll={false}` and own their internal layout.
-- Declare retained HUD windows using `ClientHudWindow` with a `visible` prop,
+- Declare retained HUD windows using `HudWindow` (or Client's `ClientHudWindow` wrapper) with a `visible` prop,
   rather than wrapping them in a visibility conditional or adding mounted-once
   flags. The shell mounts its content on first opening and retains it on close.
   Keep resource-owning feature components inside the window's child snippet so

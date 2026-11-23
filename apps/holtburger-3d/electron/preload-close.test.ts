@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
 import ts from "typescript";
 import { describe, expect, it, vi } from "vitest";
-import type { ClientClosePreparation } from "../src/client/session/close-contract";
+import type { ClientClosePreparation } from "../src/lib/host/close-contract";
 
 interface ClientBridge {
 	quit(): Promise<void>;
@@ -42,7 +42,7 @@ function setup() {
 				throw new Error(`Unexpected preload require: ${name}`);
 			return electron;
 		},
-		process: { argv: ["--holtburger-mode=client"] },
+		process: { argv: [] },
 		console: { error: errors },
 		exports: {},
 	});

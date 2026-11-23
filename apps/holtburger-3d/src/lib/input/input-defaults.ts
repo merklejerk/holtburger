@@ -46,17 +46,17 @@ export function createInputDefaults(platform: InputPlatform) {
 			/** Move backward along the camera basis. */
 			backward: [{ key: "s" }],
 			/** Rotate camera yaw left. */
-			turnLeft: [{ key: "a" }],
+			turnLeft: [{ key: "a" }, { key: "ArrowLeft" }],
 			/** Rotate camera yaw right. */
-			turnRight: [{ key: "d" }],
+			turnRight: [{ key: "d" }, { key: "ArrowRight" }],
 			/** Move along camera-local left. */
 			strafeLeft: [{ key: "z" }],
 			/** Move along camera-local right. */
 			strafeRight: [{ key: "c" }],
-			/** Move along camera-local up; either binding may remain held. */
-			ascend: [{ code: "Space" }, { key: "PageUp" }],
+			/** Move along camera-local up; ctrl: false keeps Ctrl+Space strictly for descend. */
+			ascend: [{ code: "Space", ctrl: false }],
 			/** Move along camera-local down. */
-			descend: [{ key: "PageDown" }],
+			descend: [{ code: "Space", ctrl: true }],
 			/** Hold to slow camera motion and pointer gestures. */
 			precision: [{ key: "Shift" }],
 		},

@@ -33,9 +33,10 @@ use crate::host_simulation_runtime::{CollisionSource, HostSimulationRuntime};
 use crate::protocol::{HostResponse, ProtocolError, application_error, encode_json};
 use crate::shared_host_content::SharedHostContent;
 use crate::{
-    ExplorerEntityMutationReceipt, ExplorerPossessionEventWireRequest,
-    ExplorerPossessionIntentWireRequest, ExplorerPossessionReceipt, HostStatus,
-    PossessExplorerEntityRequest, ReplaceExplorerEntityPhysicsStateRequest,
+    ApplyExplorerPossessionYawRequest, ExplorerEntityMutationReceipt,
+    ExplorerPossessionEventWireRequest, ExplorerPossessionIntentWireRequest,
+    ExplorerPossessionReceipt, HostStatus, PossessExplorerEntityRequest,
+    ReplaceExplorerEntityPhysicsStateRequest,
 };
 
 /// Commands accepted only by the Explorer authority.
@@ -73,6 +74,9 @@ pub enum ExplorerHostCommand {
     },
     QueueExplorerPossessionEvent {
         request: ExplorerPossessionEventWireRequest,
+    },
+    ApplyExplorerPossessionYaw {
+        request: ApplyExplorerPossessionYawRequest,
     },
     StartKinematicBoom {
         request: HostKinematicBoomStartRequest,
@@ -116,6 +120,7 @@ pub const EXPLORER_COMMAND_NAMES: &[&str] = &[
     "possess_explorer_entity",
     "set_explorer_possession_intent",
     "queue_explorer_possession_event",
+    "apply_explorer_possession_yaw",
     "start_kinematic_boom",
     "set_kinematic_boom_intent",
     "set_kinematic_boom_clearance",
@@ -145,8 +150,6 @@ pub struct ExplorerHostRuntime {
     pub kinematic_boom_runtime: Arc<HostKinematicBoomRuntime>,
     /// Shared fixed-tick scheduler.
     pub fixed_tick_runtime: Arc<HostFixedTickRuntime>,
-    /// Independently serviced possession camera, joined before the transport shuts down.
-    camera_worker: crate::host_kinematic_boom_runtime::HostKinematicBoomWorker,
     /// Host-owned physical-flight runtime.
     pub physical_fly_runtime: Arc<HostPhysicalFlyRuntime>,
     pub(crate) event_sink: Arc<dyn ExplorerEventSink>,
@@ -158,6 +161,7 @@ impl ExplorerHostRuntime {
     pub fn from_content(
         content: SharedHostContent,
         event_sink: Arc<dyn ExplorerEventSink>,
+        weenie_catalog_override: Option<std::path::PathBuf>,
     ) -> Result<Self> {
         let collision_source: Arc<dyn CollisionSource> = Arc::new(
             crate::reporting_content_source::ReportingContentSource::new(
@@ -179,7 +183,7 @@ impl ExplorerHostRuntime {
                     .repository
                     .source_description()
                     .map(std::path::Path::new),
-                None,
+                weenie_catalog_override,
             ),
         )));
         let explorer_entity_driver = Arc::new(ExplorerEntityDriver::new(
@@ -214,12 +218,10 @@ impl ExplorerHostRuntime {
                     Arc::clone(&explorer_entities),
                     Arc::clone(&explorer_entity_delivery),
                     Arc::clone(&kinematic_boom_runtime),
-                    Arc::clone(&dynamic_event_sink),
+                    dynamic_event_sink,
                 ),
             ),
         );
-        let camera_worker = kinematic_boom_runtime
-            .spawn(Arc::clone(&explorer_entity_delivery), dynamic_event_sink)?;
         fixed_tick_runtime.spawn();
         Ok(Self {
             content,
@@ -230,7 +232,6 @@ impl ExplorerHostRuntime {
             explorer_entity_delivery,
             kinematic_boom_runtime,
             fixed_tick_runtime,
-            camera_worker,
             physical_fly_runtime,
             event_sink,
             physical_event_sink,
@@ -263,7 +264,7 @@ impl ExplorerHostRuntime {
     /// Stops host-owned background work before the sidecar closes its protocol writer.
     pub fn shutdown(&self) {
         self.fixed_tick_runtime.stop();
-        self.camera_worker.shutdown();
+        self.kinematic_boom_runtime.shutdown();
     }
 
     /// Publishes an Explorer-owned dynamic projection through the shell sink.
@@ -354,12 +355,10 @@ pub async fn dispatch_explorer(
             let sink = Arc::clone(&runtime.event_sink);
             let receipt = tokio::task::spawn_blocking(move || {
                 delivery.with_ordered_publication(|| {
-                    let outcome = driver.replace_physics_state(
+                    let outcome = driver.replace_physics_flags(
                         request.guid,
                         request.generation,
-                        holtburger_common::properties::PhysicsState::from_bits_retain(
-                            request.semantic_mask,
-                        ),
+                        request.flags,
                         request.physical_mode,
                     )?;
                     let receipt = ExplorerEntityMutationReceipt {
@@ -460,6 +459,12 @@ pub async fn dispatch_explorer(
             runtime
                 .explorer_entities
                 .queue_possession_event(request.resolve().map_err(application_error)?)
+                .map_err(application_error)?,
+        ),
+        ApplyExplorerPossessionYaw { request } => encode_json(
+            runtime
+                .explorer_entities
+                .apply_possession_yaw(request.possession_generation, request.delta_radians)
                 .map_err(application_error)?,
         ),
         StartKinematicBoom { request } => encode_json(

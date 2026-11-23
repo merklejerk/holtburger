@@ -5,7 +5,7 @@ import type { DocumentAdmission, DocumentRole } from "./document-admission.js";
 
 export type IpcHandleFn = <Args extends unknown[], Result>(
 	channel: string,
-	role: DocumentRole | undefined,
+	role: DocumentRole | readonly DocumentRole[] | undefined,
 	listener: (event: Electron.IpcMainInvokeEvent, ...args: Args) => Result,
 ) => void;
 
@@ -45,7 +45,7 @@ export function requireCharacterGuid(value: unknown): number {
 export function createIpcHandle(context: IpcGuardContext): IpcHandleFn {
 	return <Args extends unknown[], Result>(
 		channel: string,
-		role: DocumentRole | undefined,
+		role: DocumentRole | readonly DocumentRole[] | undefined,
 		listener: (event: Electron.IpcMainInvokeEvent, ...args: Args) => Result,
 	): void => {
 		ipcMain.handle(channel, (event, identity: unknown, ...args: Args) => {
@@ -55,8 +55,9 @@ export function createIpcHandle(context: IpcGuardContext): IpcHandleFn {
 			if (retirement !== undefined && !retirement.acceptsRendererRequests)
 				throw new Error("Document retirement has sealed game IPC");
 			const canPlay = context.getDesktopCanPlay();
+			const pickerOnly = role === "picker";
 			if (
-				role === "picker" &&
+				pickerOnly &&
 				channel !== "launcher:snapshot" &&
 				canPlay !== undefined &&
 				!canPlay

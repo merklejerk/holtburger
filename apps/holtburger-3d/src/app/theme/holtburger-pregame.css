@@ -246,7 +246,7 @@
 	.client-pregame-screen .launcher-server-choice[aria-pressed="true"] {
 		color: var(--ui-color-highlight);
 	}
-	/* ClientPregameScreen. */
+	/* PregameScreen. */
 	.client-pregame-screen {
 		background:
 			radial-gradient(
@@ -553,7 +553,7 @@
 		box-shadow: inset 0 -2px var(--ui-color-accent);
 	}
 
-	/* ClientLoadingPage. */
+	/* LoadingScreen. */
 	.client-pregame-screen .loading-flavor {
 		color: var(--ui-color-muted);
 		font-family: var(--ui-font-heading);

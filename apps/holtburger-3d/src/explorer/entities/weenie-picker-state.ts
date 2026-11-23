@@ -1,24 +1,4 @@
-import {
-	parseExplorerWcid,
-	type ExplorerWeenieSearchResult,
-} from "./entity-commands";
-
-/** User input while no exact catalog result has been committed. */
-interface EditingExplorerWeeniePicker {
-	readonly kind: "editing";
-	readonly input: string;
-}
-
-/** One explicitly committed catalog identity and its stable visible label. */
-interface SelectedExplorerWeeniePicker {
-	readonly kind: "selected";
-	readonly input: string;
-	readonly selection: ExplorerWeenieSearchResult;
-}
-
-/** Picker state keeps unresolved text structurally separate from an exact catalog identity. */
-export type ExplorerWeeniePickerState =
-	EditingExplorerWeeniePicker | SelectedExplorerWeeniePicker;
+import { parseExplorerWcid } from "./entity-commands";
 
 /** Input intent is classified before validation so partial numeric text never becomes a query. */
 export type ExplorerWeenieInputIntent =
@@ -58,33 +38,6 @@ export function classifyExplorerWeenieInput(
 		}
 	}
 	return { kind: "search", query: trimmed };
-}
-
-/** Any authored edit invalidates a committed identity immediately. */
-export function editExplorerWeeniePicker(
-	input: string,
-): ExplorerWeeniePickerState {
-	return { kind: "editing", input };
-}
-
-/** Commit only an exact result chosen through explicit pointer or keyboard action. */
-export function selectExplorerWeenie(
-	selection: ExplorerWeenieSearchResult,
-): ExplorerWeeniePickerState {
-	return { kind: "selected", input: selection.name, selection };
-}
-
-/** Resolve the one exact numeric target accepted by the existing spawn request contract. */
-export function resolveExplorerWeenieSpawnTarget(
-	state: ExplorerWeeniePickerState,
-): number {
-	if (state.kind === "selected") return state.selection.wcid;
-	const intent = classifyExplorerWeenieInput(state.input);
-	if (intent.kind === "numeric") {
-		if (intent.result.kind === "valid") return intent.result.value;
-		throw new Error(intent.result.message);
-	}
-	throw new Error("Choose a weenie search result or enter a WCID.");
 }
 
 /** Reject late successes and failures through the same revision decision. */

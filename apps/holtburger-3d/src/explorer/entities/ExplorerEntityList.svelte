@@ -1,4 +1,5 @@
 <script lang="ts">
+	import ExamineIcon from "../../assets/icons/hud-examine.svg?component";
 	import type { DynamicEntityView } from "../../lib/game/runtime/dynamic-entity-feed";
 	import {
 		explorerEntitySelection,
@@ -11,9 +12,10 @@
 		readonly selected: ExplorerEntitySelection | null;
 		readonly possessed: ExplorerEntitySelection | null;
 		readonly select: (selection: ExplorerEntitySelection) => void;
+		readonly onInspect?: (selection: ExplorerEntitySelection) => void;
 	}
 
-	let { entities, selected, possessed, select }: Props = $props();
+	let { entities, selected, possessed, select, onInspect }: Props = $props();
 	const tree = $derived(buildExplorerEntityTree(entities));
 
 	function isSelected(entity: DynamicEntityView): boolean {
@@ -36,33 +38,63 @@
 </script>
 
 {#snippet entityRow(entity: DynamicEntityView, detail: string)}
-	<button
-		type="button"
-		class="explorer-selectable-row ui-button"
-		aria-pressed={isSelected(entity)}
+	{@const rowSelection = explorerEntitySelection(entity)}
+	<div
+		class="entity-row"
+		class:selected={isSelected(entity)}
 		class:possessed={isPossessed(entity)}
-		onclick={() => select(explorerEntitySelection(entity))}
 	>
-		<span class="entity-heading">
-			<strong>{entity.display.name}</strong>
-			<span>WCID {entity.identity.wcid}</span>
-		</span>
-		<span>
-			{formatGuid(entity.identity.guid)}
-			{#if isPossessed(entity)}
-				<span class="possession-label"> · possessed</span>
-			{/if}
-			· {detail}
-		</span>
-	</button>
+		<button
+			type="button"
+			class="ui-catalog-trigger entity-trigger"
+			aria-pressed={isSelected(entity)}
+			onclick={() => select(rowSelection)}
+			ondblclick={() => {
+				select(rowSelection);
+				onInspect?.(rowSelection);
+			}}
+			oncontextmenu={(event) => {
+				if (onInspect === undefined) return;
+				event.preventDefault();
+				select(rowSelection);
+				onInspect(rowSelection);
+			}}
+		>
+			<span class="entity-heading">
+				<strong>{entity.display.name}</strong>
+				<span>WCID {entity.identity.wcid}</span>
+			</span>
+			<span class="entity-detail">
+				{formatGuid(entity.identity.guid)}
+				{#if isPossessed(entity)}
+					<span class="possession-label"> · possessed</span>
+				{/if}
+				· {detail}
+			</span>
+		</button>
+		{#if onInspect !== undefined}
+			<button
+				type="button"
+				class="ui-catalog-trigger entity-inspect-button"
+				title={`Inspect ${entity.display.name}`}
+				aria-label={`Inspect ${entity.display.name}`}
+				onclick={() => {
+					select(rowSelection);
+					onInspect(rowSelection);
+				}}
+			>
+				<ExamineIcon />
+			</button>
+		{/if}
+	</div>
 {/snippet}
 
 {#if entities.length === 0}
 	<p class="entity-note">No Explorer-spawned entities.</p>
 {:else}
-	<ul class="explorer-selectable-list entity-list">
+	<ul class="entity-list">
 		{#each tree.roots as root (`${root.entity.identity.guid}-${root.entity.generation}`)}
-			<li class="entity-node">
+			<li class="ui-catalog-row entity-node">
 				{@render entityRow(
 					root.entity,
 					`${root.entity.physics.participation} · ${root.entity.placement.kind}`,
@@ -87,9 +119,9 @@
 			{tree.orphans.length} held item(s) reference a wearer absent from this feed
 			generation.
 		</p>
-		<ul class="explorer-selectable-list entity-list orphan-list">
+		<ul class="entity-list orphan-list">
 			{#each tree.orphans as orphan (`${orphan.identity.guid}-${orphan.generation}`)}
-				<li class="entity-node orphan">
+				<li class="ui-catalog-row entity-node orphan">
 					{@render entityRow(
 						orphan,
 						`missing wearer ${formatGuid(orphan.placement.parent)}`,
@@ -113,12 +145,10 @@
 		}
 
 		.entity-list {
-			max-height: clamp(170px, 34dvh, 390px);
 			overflow: auto;
 			margin: 0;
 			padding: 0;
 			list-style: none;
-			--tree-gap: 4px;
 		}
 
 		.entity-node,
@@ -126,11 +156,6 @@
 		.entity-child {
 			display: grid;
 			grid-template-columns: minmax(0, 1fr);
-		}
-
-		.entity-node,
-		.entity-children {
-			gap: var(--tree-gap);
 		}
 
 		.entity-children {
@@ -147,33 +172,64 @@
 		.entity-child::before {
 			content: "";
 			position: absolute;
-			top: calc(-1 * var(--tree-gap));
+			top: 0;
 			bottom: 0;
-			left: 4px;
+			left: 6px;
 			border-left: 1px solid var(--ui-color-border);
 		}
 
 		.entity-child:last-child::before {
 			bottom: auto;
-			height: calc(50% + var(--tree-gap));
+			height: 50%;
 		}
 
 		.entity-child::after {
 			content: "";
 			position: absolute;
 			top: 50%;
-			left: 4px;
+			left: 6px;
 			width: 7px;
 			border-top: 1px solid var(--ui-color-border);
 		}
 
-		.explorer-selectable-row {
-			gap: 2px;
+		.entity-row {
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) auto;
+			align-items: center;
 			min-width: 0;
 		}
 
-		.explorer-selectable-row.possessed {
+		.entity-row.selected {
+			background: var(--ui-color-selection);
+		}
+
+		.entity-row.possessed {
 			box-shadow: inset 3px 0 0 var(--ui-color-success);
+		}
+
+		.entity-trigger {
+			display: grid;
+			gap: 2px;
+			min-width: 0;
+			text-align: left;
+		}
+
+		.entity-inspect-button {
+			display: grid;
+			place-items: center;
+			width: 28px;
+			height: 28px;
+			padding: 5px;
+			color: var(--ui-color-muted);
+		}
+
+		.entity-inspect-button:hover {
+			color: var(--ui-color-text);
+		}
+
+		.entity-inspect-button :global(svg) {
+			width: 16px;
+			height: 16px;
 		}
 
 		.possession-label {
@@ -189,18 +245,20 @@
 		}
 
 		.entity-heading strong,
-		.entity-heading span {
+		.entity-heading span,
+		.entity-detail {
 			overflow: hidden;
 			text-overflow: ellipsis;
 			white-space: nowrap;
 		}
 
-		.explorer-selectable-row > span {
+		.entity-heading span,
+		.entity-detail {
 			color: var(--ui-color-muted);
 			font-size: calc(var(--ui-font-size-caption) * var(--ui-text-scale));
 		}
 
-		.orphan .explorer-selectable-row {
+		.orphan {
 			border-color: var(--ui-color-danger);
 		}
 

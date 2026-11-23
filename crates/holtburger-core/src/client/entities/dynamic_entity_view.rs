@@ -1508,10 +1508,7 @@ mod tests {
             assert!(batch.advances.is_empty());
             assert_eq!(batch.updates.len(), 1);
             assert_eq!(batch.updates[0].display.level, Some(new_level as u32));
-            assert_ne!(
-                batch.updates[0].physics.semantic_mask & PhysicsState::ETHEREAL.bits(),
-                0
-            );
+            assert!(batch.updates[0].physics.flags.ethereal);
         }
     }
 

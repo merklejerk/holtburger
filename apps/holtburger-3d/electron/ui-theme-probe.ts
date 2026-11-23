@@ -100,7 +100,6 @@ app.whenReady().then(async () => {
 				contextIsolation: true,
 				nodeIntegration: false,
 				preload: join(import.meta.dirname, "preload.cjs"),
-				additionalArguments: ["--holtburger-mode=client"],
 			},
 		});
 		installUiThemeProtocol(window.webContents.session, catalog);

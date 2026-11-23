@@ -1,5 +1,13 @@
+import {
+	SHARED_AUDIO_DEFAULTS,
+	SHARED_FONT_FAMILY_OPTIONS,
+	SHARED_GRAPHICS_DEFAULTS,
+	SHARED_GRAPHICS_RANGES,
+	SHARED_HUD_WINDOW_OPACITY,
+	SHARED_TEXT_SCALE,
+	SHARED_UI_SCALE,
+} from "../../app/settings/shared-settings-contract.js";
 import { TRAVELERS_KIT_THEME_ID } from "../../app/theme/ui-theme-contract.js";
-import { SHARED_FRAME_SETTINGS } from "../../lib/frontend-frame-settings.js";
 import { MAP_DEFAULT_VIEW_DIAMETERS } from "../../lib/game/map/map-appearance.js";
 import type { InputPlatform } from "../../lib/input/input-platform.js";
 import { initialActionBar } from "../hud/action-bar-state.js";
@@ -33,47 +41,22 @@ export const CLIENT_IDLE_CAMERA_ORBIT_DELAY_SECONDS = {
 } as const;
 
 /** Editable client graphics ranges, shared by durable validation and controls. */
-export const CLIENT_GRAPHICS_RANGES = {
-	sealedInteriorAmbientLevel: { minimum: 0, maximum: 1, step: 0.01 },
-	viewDistance: { minimum: 0, maximum: 8, step: 1 },
-	verticalFovDegrees: { minimum: 50, maximum: 100, step: 1 },
-	renderScale: { minimum: 0.5, maximum: 2 },
-} as const;
+export const CLIENT_GRAPHICS_RANGES = SHARED_GRAPHICS_RANGES;
 
 /** Theme used by fresh/reset settings and sections without an explicit theme choice. */
 export const CLIENT_DEFAULT_THEME_ID = TRAVELERS_KIT_THEME_ID;
 
 /** Additional client text enlargement, composed with the overall UI scale. */
-export const CLIENT_TEXT_SCALE = {
-	initial: 1,
-	minimum: 0.75,
-	maximum: 2,
-	step: 0.05,
-} as const;
+export const CLIENT_TEXT_SCALE = SHARED_TEXT_SCALE;
 
 /** Overall client interface scale, applied once at UI layout boundaries. */
-export const CLIENT_UI_SCALE = {
-	initial: 1,
-	minimum: 0.75,
-	maximum: 2,
-	step: 0.05,
-} as const;
+export const CLIENT_UI_SCALE = SHARED_UI_SCALE;
 
 /** Background opacity for floating gameplay windows; foreground content stays opaque. */
-export const CLIENT_HUD_WINDOW_OPACITY = {
-	initial: 0.74,
-	minimum: 0,
-	maximum: 1,
-	step: 0.01,
-} as const;
+export const CLIENT_HUD_WINDOW_OPACITY = SHARED_HUD_WINDOW_OPACITY;
 
 /** Closed font choices for each client UI role; Theme default inherits the active theme. */
-export const CLIENT_FONT_FAMILY_OPTIONS = [
-	"theme",
-	"sans",
-	"serif",
-	"mono",
-] as const;
+export const CLIENT_FONT_FAMILY_OPTIONS = SHARED_FONT_FAMILY_OPTIONS;
 export type ClientFontFamily = (typeof CLIENT_FONT_FAMILY_OPTIONS)[number];
 
 /** Fixed recovery buffer prevents warning flicker near the user's threshold. */
@@ -118,16 +101,7 @@ export const CLIENT_LOCK_INTERACTION_DEFAULTS = {
 } as const;
 
 /** Absence defaults composed from shared rendering policy and client-only view choices. */
-export const CLIENT_GRAPHICS_DEFAULTS = {
-	viewDistance: 6,
-	sealedInteriorAmbientLevel: SHARED_FRAME_SETTINGS.sealedInteriorAmbientLevel,
-	ambientOcclusionEnabled: SHARED_FRAME_SETTINGS.ambientOcclusion.enabled,
-	entityShadowMode: SHARED_FRAME_SETTINGS.entityShadows.mode,
-	verticalFovDegrees: 75,
-	textureFiltering: SHARED_FRAME_SETTINGS.quality.textureFiltering,
-	renderScale: SHARED_FRAME_SETTINGS.quality.renderScale,
-	weatherEnabled: SHARED_FRAME_SETTINGS.weatherEnabled,
-} as const;
+export const CLIENT_GRAPHICS_DEFAULTS = SHARED_GRAPHICS_DEFAULTS;
 
 /** Smart Nameplates are the default cutover mode for new and upgraded installs. */
 const CLIENT_NAMEPLATE_DEFAULTS = {
@@ -135,14 +109,7 @@ const CLIENT_NAMEPLATE_DEFAULTS = {
 } as const;
 
 /** First-run and reset mix; frontend preferences remain separate from engine tuning. */
-export const CLIENT_AUDIO_DEFAULTS = {
-	masterVolume: 1,
-	musicVolume: 0.75,
-	effectVolume: 1,
-	ambientVolume: 1,
-	muted: false,
-	playInBackground: false,
-} as const;
+export const CLIENT_AUDIO_DEFAULTS = SHARED_AUDIO_DEFAULTS;
 
 /** First-run and reset UI preferences; schema upgrades draw per-field defaults from here. */
 export const CLIENT_UI_SETTINGS_DEFAULTS = {

@@ -51,7 +51,16 @@ export function dynamicEntityViewFixture(
 			},
 		},
 		physics: {
-			semanticMask: 0,
+			flags: {
+				reportCollisions: false,
+				gravity: false,
+				ethereal: false,
+				ignoreCollisions: false,
+				missile: false,
+				inelastic: false,
+				edgeSlide: false,
+				frozen: false,
+			},
 			participation: "pose-only",
 			noDraw: false,
 			hidden: false,

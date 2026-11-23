@@ -34,11 +34,16 @@ export class DocumentAdmission {
 			throw new Error("Document boot is unavailable for this entry");
 		return document.id;
 	}
-	require(id: unknown, role?: DocumentRole): void {
+	require(id: unknown, role?: DocumentRole | readonly DocumentRole[]): void {
 		if (!this.#open) throw new Error("Document request admission is closed");
 		this.requireIdentity(id);
-		if (role !== undefined && this.#document?.role !== role)
-			throw new Error(`Request is unavailable in ${this.#document?.role}`);
+		if (role !== undefined) {
+			const current = this.#document?.role;
+			const admitted = Array.isArray(role)
+				? current !== undefined && role.includes(current)
+				: current === role;
+			if (!admitted) throw new Error(`Request is unavailable in ${current}`);
+		}
 	}
 	/** Product Quit remains available from the current document after its game IPC is sealed. */
 	requireIdentity(id: unknown): void {

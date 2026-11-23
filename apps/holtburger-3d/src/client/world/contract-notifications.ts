@@ -1,5 +1,5 @@
 import type { ContractMembershipChange } from "./contracts-state";
-import type { ClientToastScheduler } from "../hud/toast-center";
+import type { HudToastScheduler as ClientToastScheduler } from "../../app/hud/toast-center";
 import type { ClientLifecycleSessionEvent } from "../session/lifecycle-session";
 
 /** App-owned wording and burst summaries; membership classification arrives from world/core. */

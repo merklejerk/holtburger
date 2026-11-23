@@ -3,6 +3,7 @@
 use crate::placed_motion::{interpolate_rotation, present_placed_motion_pose};
 use anyhow::Result;
 use holtburger_common::position::WorldPosition;
+use holtburger_common::properties::PhysicsState;
 use holtburger_common::{Guid, ParentLocation, Placement, Quaternion};
 use holtburger_world::motion::{
     MotionClipCompletion, MotionPlayback, MotionPlaybackLayer, MotionPresentation,
@@ -81,12 +82,63 @@ pub enum PhysicalBodyParticipationView {
     Physical,
 }
 
+/// Typed simulation-relevant physics flags projected once from `PhysicsState`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DynamicEntityPhysicsFlags {
+    /// Emit collision notifications when contacting other bodies.
+    pub report_collisions: bool,
+    /// Integrate vertical gravitational acceleration.
+    pub gravity: bool,
+    /// Allow other bodies to pass through without blocking.
+    pub ethereal: bool,
+    /// Suppress collision response and peer collision reports.
+    pub ignore_collisions: bool,
+    /// Participate as a projectile body.
+    pub missile: bool,
+    /// Resolve impacts without elastic bounce.
+    pub inelastic: bool,
+    /// Apply creature cliff/ledge protection.
+    pub edge_slide: bool,
+    /// Pause physical integration.
+    pub frozen: bool,
+}
+
+impl DynamicEntityPhysicsFlags {
+    /// Projects the named simulation flags from an authoritative `PhysicsState` mask.
+    pub const fn from_physics_state(state: PhysicsState) -> Self {
+        Self {
+            report_collisions: state.contains(PhysicsState::REPORT_COLLISIONS),
+            gravity: state.contains(PhysicsState::GRAVITY),
+            ethereal: state.contains(PhysicsState::ETHEREAL),
+            ignore_collisions: state.contains(PhysicsState::IGNORE_COLLISIONS),
+            missile: state.contains(PhysicsState::MISSILE),
+            inelastic: state.contains(PhysicsState::INELASTIC),
+            edge_slide: state.contains(PhysicsState::EDGE_SLIDE),
+            frozen: state.contains(PhysicsState::FROZEN),
+        }
+    }
+
+    /// Merges these typed flags into `base`, preserving unrelated bits (lighting, BSP, etc.).
+    pub fn apply_to(self, mut base: PhysicsState) -> PhysicsState {
+        base.set(PhysicsState::REPORT_COLLISIONS, self.report_collisions);
+        base.set(PhysicsState::GRAVITY, self.gravity);
+        base.set(PhysicsState::ETHEREAL, self.ethereal);
+        base.set(PhysicsState::IGNORE_COLLISIONS, self.ignore_collisions);
+        base.set(PhysicsState::MISSILE, self.missile);
+        base.set(PhysicsState::INELASTIC, self.inelastic);
+        base.set(PhysicsState::EDGE_SLIDE, self.edge_slide);
+        base.set(PhysicsState::FROZEN, self.frozen);
+        base
+    }
+}
+
 /// Presentation-owned consequences plus current local physical participation.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DynamicEntityPhysicsView {
-    /// Complete semantic state mask retained without frontend reinterpretation.
-    pub semantic_mask: u32,
+    /// Named simulation-relevant flags derived from `PhysicsState`.
+    pub flags: DynamicEntityPhysicsFlags,
     /// Whether the canonical pose body currently carries local physical state.
     pub participation: PhysicalBodyParticipationView,
     /// Ordinary rendering is disabled.
@@ -609,7 +661,7 @@ pub fn project_dynamic_entity_view(source: DynamicEntityViewSource) -> DynamicEn
             radar: source.radar,
         },
         physics: DynamicEntityPhysicsView {
-            semantic_mask: source.physics.semantic.bits(),
+            flags: DynamicEntityPhysicsFlags::from_physics_state(source.physics.semantic),
             participation: participation.into(),
             no_draw: presentation.no_draw,
             hidden: presentation.hidden,
@@ -677,8 +729,9 @@ impl From<SpatialSampleMode> for DynamicEntitySampleModeView {
 #[cfg(test)]
 mod tests {
     use holtburger_common::Guid;
+    use holtburger_common::properties::PhysicsState;
 
-    use super::dynamic_entity_display_view;
+    use super::{DynamicEntityPhysicsFlags, dynamic_entity_display_view};
 
     #[test]
     fn display_level_preserves_absence_and_zero() {
@@ -698,5 +751,42 @@ mod tests {
             dynamic_entity_display_view("Invalid".to_owned(), Some(-1), Guid(3)).level,
             None
         );
+    }
+
+    #[test]
+    fn physics_flags_round_trip_and_preserve_unrelated_bits() {
+        let base = PhysicsState::GRAVITY
+            | PhysicsState::ETHEREAL
+            | PhysicsState::EDGE_SLIDE
+            | PhysicsState::LIGHTING_ON
+            | PhysicsState::HAS_PHYSICS_BSP;
+        let mut flags = DynamicEntityPhysicsFlags::from_physics_state(base);
+        assert!(flags.gravity);
+        assert!(flags.ethereal);
+        assert!(flags.edge_slide);
+        assert!(!flags.report_collisions);
+        assert!(!flags.ignore_collisions);
+        assert!(!flags.missile);
+        assert!(!flags.inelastic);
+        assert!(!flags.frozen);
+
+        flags.report_collisions = true;
+        flags.gravity = false;
+        flags.ignore_collisions = true;
+        flags.missile = true;
+        flags.inelastic = true;
+        flags.edge_slide = false;
+        flags.frozen = true;
+        let updated = flags.apply_to(base);
+        assert!(updated.contains(PhysicsState::REPORT_COLLISIONS));
+        assert!(!updated.contains(PhysicsState::GRAVITY));
+        assert!(updated.contains(PhysicsState::ETHEREAL));
+        assert!(updated.contains(PhysicsState::IGNORE_COLLISIONS));
+        assert!(updated.contains(PhysicsState::MISSILE));
+        assert!(updated.contains(PhysicsState::INELASTIC));
+        assert!(!updated.contains(PhysicsState::EDGE_SLIDE));
+        assert!(updated.contains(PhysicsState::FROZEN));
+        assert!(updated.contains(PhysicsState::LIGHTING_ON));
+        assert!(updated.contains(PhysicsState::HAS_PHYSICS_BSP));
     }
 }

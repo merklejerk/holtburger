@@ -1,5 +1,5 @@
 import { createDefaultClientCharacterSettings } from "./settings-defaults";
-import { ClientSettingsPersistence } from "./settings-persistence";
+import { SettingsPersistence } from "../../app/settings/settings-persistence";
 import type {
 	ClientCharacterSettingsLoad,
 	ClientSettingsTransport,
@@ -36,7 +36,7 @@ export class ClientCharacterSettingsOwner {
 	readonly #publish: (state: ClientCharacterSettingsState) => void;
 	readonly #loadFailed: (error: unknown) => void;
 	readonly #repaired: (reasons: readonly string[]) => void;
-	readonly #persistence: ClientSettingsPersistence<CharacterSettingsSave>;
+	readonly #persistence: SettingsPersistence<CharacterSettingsSave>;
 	#state: ClientCharacterSettingsState = { kind: "absent" };
 	#generation = 0;
 	#observedName: {
@@ -59,7 +59,7 @@ export class ClientCharacterSettingsOwner {
 		this.#publish = options.publish;
 		this.#loadFailed = options.loadFailed;
 		this.#repaired = options.repaired;
-		this.#persistence = new ClientSettingsPersistence({
+		this.#persistence = new SettingsPersistence({
 			delayMs: options.saveDelayMs,
 			save: (snapshot: CharacterSettingsSave) =>
 				this.#transport.saveCharacterPatch(

@@ -5,7 +5,6 @@ import {
 	ENTITY_SHADOW_MODES,
 	type EntityShadowMode,
 } from "./entity-shadow-modes.js";
-export { ENTITY_SHADOW_MODES } from "./entity-shadow-modes.js";
 export type { EntityShadowMode } from "./entity-shadow-modes.js";
 
 /** Complete cascade capacity compiled into the bounded outdoor shadow shader family. */

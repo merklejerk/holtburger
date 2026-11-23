@@ -848,7 +848,8 @@ impl Drop for MapStopGuard {
 
 /// Runs the framed sidecar protocol over stdin/stdout.
 pub async fn run_stdio(launch: crate::host_mode::HostLaunch) -> anyhow::Result<()> {
-    let mode = launch.mode;
+    let mode = launch.mode.host_mode();
+    let launch_mode = launch.mode;
     let (sender, receiver) = mpsc::sync_channel(WRITER_QUEUE_CAPACITY);
     let writer_thread = thread::spawn(move || -> anyhow::Result<()> {
         let stdout = io::stdout();
@@ -866,7 +867,7 @@ pub async fn run_stdio(launch: crate::host_mode::HostLaunch) -> anyhow::Result<(
         )?;
         content.failures = crate::content_failure::ContentFailureReporter::Stdio(sender.clone());
         let runtime = HostRuntime::from_content(
-            mode,
+            launch_mode,
             content,
             Arc::clone(&event_sink) as Arc<dyn ClientEventSink>,
             Arc::clone(&event_sink) as Arc<dyn ExplorerEventSink>,

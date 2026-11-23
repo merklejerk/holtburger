@@ -1015,7 +1015,10 @@
 		padding: 10px 0;
 	}
 	.ui-theme .ui-disclosure-body {
-		padding: 0 0 12px;
+		padding: 0 0 12px 14px;
+	}
+	.ui-theme .ui-disclosure-body.ui-inset {
+		margin-left: 14px;
 	}
 	/* Interactive overlays own hit testing even inside a click-through HUD.
 	   Top-layer placement does not reset inherited pointer-events. Decorative

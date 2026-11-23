@@ -19,7 +19,7 @@ import {
 } from "./app-failure-report.js";
 import type { ApplicationWindow } from "./application-window.js";
 import type { ClientApplication } from "./client-application.js";
-import { ContentPreferenceStore } from "./content-preference-store.js";
+import type { ContentPreferenceStore } from "./content-preference-store.js";
 import { ContentStartup } from "./content-startup.js";
 import { SidecarHostClient, SidecarProtocolError } from "./host-protocol.js";
 import { launchHost, type EntryArguments } from "./main-entry.js";
@@ -31,9 +31,12 @@ import type { DocumentAdmission } from "./document-admission.js";
 
 export interface ContentStartupContext {
 	readonly window: ApplicationWindow;
+	readonly mode: HostMode;
 	readonly entry: EntryArguments;
+	readonly store: ContentPreferenceStore;
 	readonly clearContent: boolean;
 	readonly overridePath: string | null;
+	readonly weenieCatalogPath?: string | null;
 	readonly isCurrent: () => boolean;
 	readonly detach: (() => void)[];
 	readonly getDesktop: () => Pick<ClientApplication<never>, "back"> | undefined;
@@ -47,11 +50,9 @@ export interface ContentStartupContext {
 export function createContentStartup(
 	context: ContentStartupContext,
 ): ContentStartup<SidecarHostClient> {
-	const { window, entry, isCurrent, detach } = context;
+	const { window, mode, entry, store, isCurrent, detach } = context;
 	const startup = new ContentStartup({
-		store: new ContentPreferenceStore(
-			join(app.getPath("userData"), "content-selection.json"),
-		),
+		store,
 		overridePath: context.overridePath,
 		noContentSearch: entry.noContentSearch,
 		clearContent: context.clearContent,
@@ -62,9 +63,11 @@ export function createContentStartup(
 				join(dirname(process.execPath), "dats"),
 			),
 		launch: (selection) =>
-			launchHost(entry.mode, entry.ignoreWorldMapCache, selection),
+			launchHost(mode, entry.ignoreWorldMapCache, selection, {
+				weenieCatalogPath: context.weenieCatalogPath,
+			}),
 		admit: async (client) => {
-			for (const event of hostEventNamesForMode(entry.mode)) {
+			for (const event of hostEventNamesForMode(mode)) {
 				const unlisten = await client.listen(event, (payload) => {
 					if (isCurrent() && !window.native.isDestroyed()) {
 						window.webContents.send("host:event", { event, payload });
@@ -141,20 +144,24 @@ export function installContentIpc(context: {
 	context.handle("content:choose", undefined, () => requireContent().choose());
 	context.handle("content:retry", undefined, () => requireContent().retry());
 	context.handle("content:quit", undefined, () => app.quit());
-	context.handle("launcher:back", "client", (_event, diagnostic: unknown) => {
-		const localFailure = z.string().nullable().parse(diagnostic);
-		const phase = context.currentContent()?.snapshot.phase;
-		const contentFailure =
-			phase?.kind === "fatal" || phase?.kind === "restart_required"
-				? phase.message
-				: null;
-		if (localFailure !== null && localFailure !== contentFailure)
-			void context.saveAppFailure("session", localFailure);
-		void context
-			.getDesktop()
-			?.back(localFailure ?? contentFailure)
-			.catch(console.error);
-	});
+	context.handle(
+		"launcher:back",
+		["client", "explorer"],
+		(_event, diagnostic: unknown) => {
+			const localFailure = z.string().nullable().parse(diagnostic);
+			const phase = context.currentContent()?.snapshot.phase;
+			const contentFailure =
+				phase?.kind === "fatal" || phase?.kind === "restart_required"
+					? phase.message
+					: null;
+			if (localFailure !== null && localFailure !== contentFailure)
+				void context.saveAppFailure("session", localFailure);
+			void context
+				.getDesktop()
+				?.back(localFailure ?? contentFailure)
+				.catch(console.error);
+		},
+	);
 }
 
 function isHostCommandName(
@@ -173,9 +180,9 @@ function isHostCommandArguments(value: unknown): value is HostCommandArguments {
 
 export function installIpcBridge(context: {
 	readonly window: ApplicationWindow;
-	readonly mode: HostMode;
 	readonly handle: IpcHandleFn;
 	readonly isQuitting: () => boolean;
+	readonly requireActiveMode: () => HostMode;
 	readonly requireClientAttempt: () => {
 		readonly startup: Parameters<SidecarHostClient["startClient"]>[0];
 		readonly cancellation: AbortController;
@@ -183,61 +190,64 @@ export function installIpcBridge(context: {
 	};
 	readonly requireActiveHost: () => SidecarHostClient;
 }): void {
-	const { window, mode, handle } = context;
+	const { window, handle } = context;
 	handle("client:start", "client", async (event) => {
 		requireApplicationFrame(event, window);
 		if (context.isQuitting())
 			throw new Error(
 				"Client launch is unavailable while the application is closing.",
 			);
-		if (mode !== "client")
-			throw new Error("Client startup is unavailable in Explorer");
 		const attempt = context.requireClientAttempt();
 		if (attempt.cancellation.signal.aborted)
 			throw new Error("Client attempt is retiring");
 		attempt.launch ??= context.requireActiveHost().startClient(attempt.startup);
 		await attempt.launch;
 	});
-	handle("host:invoke", undefined, async (event, request: unknown) => {
-		requireApplicationFrame(event, window);
-		if (
-			typeof request !== "object" ||
-			request === null ||
-			!("command" in request) ||
-			typeof request.command !== "string"
-		) {
-			throw new Error("host request envelope is malformed");
-		}
-		if (!isHostCommandName(request.command, mode)) {
-			throw new Error(
-				`host command is not allowlisted for ${mode} mode: ${request.command}`,
-			);
-		}
-		const args = "args" in request ? request.args : undefined;
-		if (!isHostCommandArguments(args))
-			throw new Error("host command arguments must be an object");
+	handle(
+		"host:invoke",
+		["client", "explorer"],
+		async (event, request: unknown) => {
+			requireApplicationFrame(event, window);
+			if (
+				typeof request !== "object" ||
+				request === null ||
+				!("command" in request) ||
+				typeof request.command !== "string"
+			) {
+				throw new Error("host request envelope is malformed");
+			}
+			const mode = context.requireActiveMode();
+			if (!isHostCommandName(request.command, mode)) {
+				throw new Error(
+					`host command is not allowlisted for ${mode} mode: ${request.command}`,
+				);
+			}
+			const args = "args" in request ? request.args : undefined;
+			if (!isHostCommandArguments(args))
+				throw new Error("host command arguments must be an object");
 
-		// Renderer preparation withdraws input and drains construction/teardown RPC. The document
-		// retirement acknowledgement, not the cancellation signal, is the native admission cutoff.
+			// Renderer preparation withdraws input and drains construction/teardown RPC. The document
+			// retirement acknowledgement, not the cancellation signal, is the native admission cutoff.
 
-		const client = context.requireActiveHost();
-		try {
-			return {
-				kind: "ok",
-				value: await client.invoke(request.command, args),
-			} satisfies HostCommandResult;
-		} catch (error) {
-			if (!(error instanceof SidecarProtocolError)) throw error;
-			return {
-				kind: "failed",
-				error: {
-					code: error.code,
-					message: error.message,
-					resource: error.resource,
-				},
-			} satisfies HostCommandResult;
-		}
-	});
+			const client = context.requireActiveHost();
+			try {
+				return {
+					kind: "ok",
+					value: await client.invoke(request.command, args),
+				} satisfies HostCommandResult;
+			} catch (error) {
+				if (!(error instanceof SidecarProtocolError)) throw error;
+				return {
+					kind: "failed",
+					error: {
+						code: error.code,
+						message: error.message,
+						resource: error.resource,
+					},
+				} satisfies HostCommandResult;
+			}
+		},
+	);
 }
 
 export function installThemesAndDiagnosticsIpc(context: {
@@ -261,8 +271,11 @@ export function installThemesAndDiagnosticsIpc(context: {
 		const error = await shell.openPath(await themes.directory());
 		if (error) throw new Error(`Could not open themes directory: ${error}`);
 	});
-	handle("diagnostics:read-runtime-log", "client", (_event, since: unknown) =>
-		clientRuntimeLog.read(z.number().int().min(-1).parse(since)),
+	handle(
+		"diagnostics:read-runtime-log",
+		["client", "explorer"],
+		(_event, since: unknown) =>
+			clientRuntimeLog.read(z.number().int().min(-1).parse(since)),
 	);
 	handle("diagnostics:save-failure", undefined, (_event, input: unknown) => {
 		if (documents.role !== "client" && documents.role !== "explorer")

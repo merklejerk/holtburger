@@ -606,7 +606,7 @@ async fn handle_connection(mut stream: TcpStream, state: &DevHostState) -> anyho
                     .flat_map(|tick| tick.possession_event_outcomes.iter().copied())
                     .collect();
                 state.boom.publish_target(&ticks);
-                let boom = state.boom.advance(duration.as_secs_f32(), Ok)?;
+                let boom = state.boom.advance(duration.as_secs_f32());
                 let envelope =
                     state
                         .delivery
@@ -648,7 +648,7 @@ async fn handle_connection(mut stream: TcpStream, state: &DevHostState) -> anyho
                     .runtime
                     .tick_physical_collection(duration.as_secs_f32(), Instant::now())?;
                 state.boom.publish_target(&ticks);
-                let boom = state.boom.advance(duration.as_secs_f32(), Ok)?;
+                let boom = state.boom.advance(duration.as_secs_f32());
                 state
                     .delivery
                     .publish_fixed_tick(ticks.ticks, boom, duration, Ok)

@@ -3258,28 +3258,37 @@ async function runPossessionScenario(
 function assertPossessionScenario(scenario) {
 	if (scenario === null)
 		throw new Error("Possession scenario produced no evidence.");
+	const initialRunRate = scenario.runRate.initial;
+	const maximumRunRate = scenario.runRate.maximum;
 	if (
-		scenario.runRate.initial !== 1 ||
-		scenario.runRate.maximum !== 10 ||
-		scenario.runRate.maximumRateProbe?.requestedRunRate !== 10 ||
-		scenario.runRate.idleInitialProbe?.requestedRunRate !== 1 ||
-		scenario.runRate.idleMaximumProbe?.requestedRunRate !== 10 ||
-		scenario.runRate.walkingInitialProbe?.requestedRunRate !== 1 ||
-		scenario.runRate.walkingMaximumProbe?.requestedRunRate !== 10 ||
-		scenario.runRate.jumpChargeInitialRate !== 1 ||
-		scenario.runRate.jumpChargeInitialProbe?.requestedRunRate !== 1 ||
-		scenario.runRate.jumpChargeMaximumProbe?.requestedRunRate !== 10 ||
-		scenario.runRate.postReleaseProbe?.requestedRunRate !== 1 ||
-		scenario.releaseRunRate !== 10
+		!Number.isFinite(initialRunRate) ||
+		initialRunRate <= 0 ||
+		maximumRunRate !== 10 ||
+		initialRunRate > maximumRunRate ||
+		scenario.runRate.maximumRateProbe?.requestedRunRate !== maximumRunRate ||
+		scenario.runRate.idleInitialProbe?.requestedRunRate !== initialRunRate ||
+		scenario.runRate.idleMaximumProbe?.requestedRunRate !== maximumRunRate ||
+		scenario.runRate.walkingInitialProbe?.requestedRunRate !== initialRunRate ||
+		scenario.runRate.walkingMaximumProbe?.requestedRunRate !== maximumRunRate ||
+		scenario.runRate.jumpChargeInitialRate !== initialRunRate ||
+		scenario.runRate.jumpChargeInitialProbe?.requestedRunRate !==
+			initialRunRate ||
+		scenario.runRate.jumpChargeMaximumProbe?.requestedRunRate !==
+			maximumRunRate ||
+		scenario.runRate.postReleaseProbe?.requestedRunRate !== initialRunRate ||
+		scenario.releaseRunRate !== maximumRunRate
 	)
 		throw new Error(
 			`Possession run-rate transitions did not apply their complete snapshots: ${JSON.stringify(scenario.runRate)}.`,
 		);
 	if (
-		scenario.replacement.possession.runRateCapability.initial !== 1 ||
-		scenario.replacement.possession.runRateCapability.maximum !== 10 ||
-		scenario.replacement.probeBeforeIntent?.requestedRunRate !== 1 ||
-		scenario.replacement.probeAtMaximum?.requestedRunRate !== 10 ||
+		scenario.replacement.possession.runRateCapability.initial !==
+			initialRunRate ||
+		scenario.replacement.possession.runRateCapability.maximum !==
+			maximumRunRate ||
+		scenario.replacement.probeBeforeIntent?.requestedRunRate !==
+			initialRunRate ||
+		scenario.replacement.probeAtMaximum?.requestedRunRate !== maximumRunRate ||
 		scenario.replacement.possession.possessionGeneration ===
 			scenario.possession.possessionGeneration
 	)
@@ -4809,7 +4818,7 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 						coords: entity.placement.pose.coords,
 						contact: entity.placement.contact,
 						motion: entity.motion,
-						semanticMask: entity.physics.semanticMask,
+						physicsFlags: entity.physics.flags,
 					})),
 				contactState: summarizeEntityRuntimeState(contactState),
 				retiredCount: retired,

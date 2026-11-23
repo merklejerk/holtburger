@@ -2,9 +2,8 @@
 export type ClientLoadingPageState =
 	| {
 			readonly kind: "pending";
-			/** Frontend-owned activity distinguishes asset startup, session loading, character return, and shutdown. */
-			readonly activity:
-				"assets" | "connection" | "scene" | "disconnect" | "return";
+			/** Frontend-owned activity distinguishes session loading, character return, and shutdown. */
+			readonly activity: "connection" | "scene" | "disconnect" | "return";
 			readonly title: string;
 			readonly message: string;
 	  }

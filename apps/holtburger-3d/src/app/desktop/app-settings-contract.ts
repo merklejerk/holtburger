@@ -40,3 +40,16 @@ export interface AppSettingsSnapshot {
 	/** Failed GPU queries or unreadable preferences remain visible in the modal. */
 	readonly diagnostic: string | null;
 }
+
+/** Launcher projection of the saved default content directory preference. */
+export interface DefaultContentSnapshot {
+	/** Saved default content folder, or null when using automatic discovery. */
+	readonly location: string | null;
+	/** Recovery reason recorded after the last failed startup with this location. */
+	readonly attentionMessage: string | null;
+	/** Unreadable or malformed preference file diagnostic; saving replaces the file. */
+	readonly diagnostic: string | null;
+}
+
+/** Explicit default content directory mutation; null resets to automatic discovery. */
+export const defaultContentLocationSchema = z.string().trim().min(1).nullable();

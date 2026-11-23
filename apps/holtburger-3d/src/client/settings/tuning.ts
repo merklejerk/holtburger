@@ -367,14 +367,6 @@ export const CLIENT_ACTION_BAR_TUNING = {
 	initialCellSize: 36,
 } as const;
 
-/** CSS-pixel placement policy shared by HUD snapping and action-bar packing. */
-export const CLIENT_HUD_SNAP_TUNING = {
-	/** Maximum pointer-derived displacement on either axis that attracts a surface. */
-	distance: 8,
-	/** Spacing between adjacent surfaces, including cloned and reset action bars. */
-	gap: 4,
-} as const;
-
 /** Small connection badge presentation policy; transport health belongs to core. */
 export const CLIENT_CONNECTION_BADGE_TUNING = {
 	/** Text-relative footprint preserves proportions from the 13px HUD name row. */

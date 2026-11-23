@@ -2,9 +2,9 @@
 	import type { UiThemeSettings } from "../../app/theme/ui-theme-selection";
 	import UiTabs from "../../app/ui/UiTabs.svelte";
 	import UiTabPanel from "../../app/ui/UiTabPanel.svelte";
-	import ClientGraphicsSettingsControls from "../settings/ClientGraphicsSettingsControls.svelte";
-	import ClientAudioSettingsControls from "../settings/ClientAudioSettingsControls.svelte";
-	import ClientAppearanceSettingsControls from "../settings/ClientAppearanceSettingsControls.svelte";
+	import GraphicsSettingsControls from "../../app/settings/GraphicsSettingsControls.svelte";
+	import AudioSettingsControls from "../../app/settings/AudioSettingsControls.svelte";
+	import AppearanceSettingsControls from "../../app/settings/AppearanceSettingsControls.svelte";
 	import type {
 		ClientGraphicsSettings,
 		ClientAudioSettings,
@@ -63,15 +63,15 @@
 			active={selected === tab.value}
 		>
 			{#if tab.value === "graphics"}
-				<ClientGraphicsSettingsControls
+				<GraphicsSettingsControls
 					{graphics}
 					{textureFilteringCapabilities}
 					{onGraphicsChange}
 				/>
 			{:else if tab.value === "audio"}
-				<ClientAudioSettingsControls {audio} {onAudioChange} />
+				<AudioSettingsControls {audio} {onAudioChange} />
 			{:else}
-				<ClientAppearanceSettingsControls {theme} {ui} {onUiChange} />
+				<AppearanceSettingsControls {theme} {ui} {onUiChange} />
 			{/if}
 		</UiTabPanel>
 	{/each}

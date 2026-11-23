@@ -26,7 +26,7 @@
 	import UiTabPanel from "../../app/ui/UiTabPanel.svelte";
 	import { characterManagementPending } from "./character-selection";
 	import { creationNameSchema } from "./character-creation-name";
-	import ClientPregameScreen from "./ClientPregameScreen.svelte";
+	import PregameScreen from "../../app/desktop/PregameScreen.svelte";
 	import ClientPregameExpandableRow from "./ClientPregameExpandableRow.svelte";
 	import ClientPregameCharacter from "./ClientPregameCharacter.svelte";
 	import type { PregameCharacterPresentation } from "./pregame-character";
@@ -448,7 +448,7 @@
 	repository={null}
 	visible={true}
 >
-	<ClientPregameScreen branding="corner" showPortalLogo={true} backdrop={true}>
+	<PregameScreen branding="corner" showPortalLogo={true} backdrop={true}>
 		{#snippet footerAside()}{@render musicControls?.()}{/snippet}
 		{#snippet footer()}
 			<button
@@ -1068,7 +1068,7 @@
 				</div>
 			</section>
 		</div>
-	</ClientPregameScreen>
+	</PregameScreen>
 </ClientStatArtwork>
 
 <style>

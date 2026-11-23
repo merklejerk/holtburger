@@ -1,5 +1,5 @@
 import type { ActionBarDirection } from "../../lib/input/input-contract";
-import type { HudSurfaceId } from "./hud-geometry";
+import type { HudSurfaceId } from "../../app/hud/hud-geometry";
 import type {
 	ClientHudViewport,
 	ResolvedClientHudPlacement,

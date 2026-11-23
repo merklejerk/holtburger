@@ -1,12 +1,13 @@
 import type { ClientMouseConfiguration } from "../../lib/input/input-contract";
 import type { ViewportInputGate } from "../../lib/input/viewport-input-gate";
-import type { ClientForwardSource } from "./input-arbiter";
 import {
-	advanceClientViewportPointerGesture,
-	beginClientViewportPointerGesture,
-	type ClientViewportCameraController,
-	type ClientViewportPointerGesture,
-} from "./viewport-pointer-gesture";
+	advanceViewportPointerGesture,
+	beginViewportPointerGesture,
+	type ViewportCameraController,
+	type ViewportPointerGesture,
+} from "../../lib/input/viewport-pointer-gesture";
+import { PointerLockSession } from "../../lib/input/viewport-pointer-lock";
+import type { ClientForwardSource } from "./input-arbiter";
 
 /** Semantic mouse movement port composed by the client app. */
 export interface ClientMouseMovementInput {
@@ -31,7 +32,7 @@ interface ClientViewportMouseOptions {
 	/** Cold policy read at event time, without reconstructing the owner. */
 	readonly input: () => ClientMouseConfiguration;
 	/** Current presentation camera, absent while presentation is unavailable. */
-	readonly camera: () => ClientViewportCameraController | null;
+	readonly camera: () => ViewportCameraController | null;
 	/** Precise targeting retains click activation and suppresses forward in the arbiter. */
 	readonly precise: () => boolean;
 	/** Existing tuning, converted to AC yaw before it crosses the host boundary. */
@@ -53,14 +54,14 @@ const MIDDLE = 4;
 /** Sole client viewport mouse owner: clicks, orbit, held movement, lock, and cancellation. */
 export class ClientViewportMouseController {
 	readonly #options: ClientViewportMouseOptions;
-	readonly #document: Document;
 	readonly #window: Window;
+	readonly #pointerLock: PointerLockSession;
 	readonly #detachGate: () => void;
 	#buttons = 0;
 	#middleForward = false;
 	#bothForward = false;
 	#mode: "orbit" | "steer" | null = null;
-	#motion: ClientViewportPointerGesture | null = null;
+	#motion: ViewportPointerGesture | null = null;
 	#click: {
 		readonly button: number;
 		/** One release action; dragging or cancellation discards the entire candidate. */
@@ -68,24 +69,24 @@ export class ClientViewportMouseController {
 	} | null = null;
 	/** Only a completed ordinary selection can begin a double-click activation. */
 	#selectionClickAccepted = false;
-	#lockGeneration = 0;
-	/** Pending acquisition is distinct from held capture so a queued old unlock cannot cancel a new request. */
-	#lockState: "idle" | "pending" | "held" = "idle";
 
 	constructor(options: ClientViewportMouseOptions) {
 		this.#options = options;
-		this.#document = options.canvas.ownerDocument;
-		const view = this.#document.defaultView;
+		const view = options.canvas.ownerDocument.defaultView;
 		if (view === null)
 			throw new Error("Viewport mouse input requires a mounted document.");
 		this.#window = view;
+		this.#pointerLock = new PointerLockSession({
+			canvas: options.canvas,
+			onLost: () => this.#endCapture(),
+			onError: (message) => options.movement.onError(message),
+		});
 		// Mouse edges report every button, including chord changes emitted as pointermove.
 		view.addEventListener("mousedown", this.#down);
 		view.addEventListener("mousemove", this.#move);
 		view.addEventListener("mouseup", this.#up);
 		options.canvas.addEventListener("pointercancel", this.cancel);
 		options.canvas.addEventListener("auxclick", this.#preventMiddleDefault);
-		this.#document.addEventListener("pointerlockchange", this.#lockChanged);
 		this.#detachGate = options.gate.attach(this.cancel);
 	}
 
@@ -106,7 +107,7 @@ export class ClientViewportMouseController {
 			event.button === 0 ? LEFT : event.button === 1 ? MIDDLE : RIGHT;
 		if ((this.#buttons & mask) !== 0) return;
 		const wasActive = this.active;
-		if (!wasActive) this.#motion = beginClientViewportPointerGesture();
+		if (!wasActive) this.#motion = beginViewportPointerGesture();
 		this.#buttons |= mask;
 		event.preventDefault();
 		this.#click =
@@ -164,18 +165,18 @@ export class ClientViewportMouseController {
 		this.#mode = mode;
 		if (mode === null) {
 			this.#motion = null;
-			this.#unlock();
+			this.#pointerLock.unlock();
 			return;
 		}
 		if (!wasCameraGesture || this.#motion === null)
-			this.#motion = beginClientViewportPointerGesture();
+			this.#motion = beginViewportPointerGesture();
 		// Acquire on the button edge, before motion, and retain capture across steer/orbit handoffs.
-		this.#requestLock();
+		this.#pointerLock.request();
 	}
 
 	readonly #move = (event: MouseEvent): void => {
 		if (!this.#options.gate.allowed) return;
-		const locked = this.#document.pointerLockElement === this.#options.canvas;
+		const locked = this.#pointerLock.locked;
 		if (!this.active) return;
 		// Missing releases cannot resurrect a held source on a later movement sample.
 		if ((this.#buttons & event.buttons) !== this.#buttons) {
@@ -185,7 +186,7 @@ export class ClientViewportMouseController {
 		}
 		if (this.#mode !== null && !locked) {
 			// Unlocked events may include cursor restoration. Camera motion starts only after acquisition.
-			if (this.#motion !== null) this.#requestLock();
+			if (this.#motion !== null) this.#pointerLock.request();
 			return;
 		}
 		this.#advanceMotion(event);
@@ -194,7 +195,7 @@ export class ClientViewportMouseController {
 	#advanceMotion(event: MouseEvent): void {
 		const motion = this.#motion;
 		if (motion === null) return;
-		const advance = advanceClientViewportPointerGesture(
+		const advance = advanceViewportPointerGesture(
 			motion,
 			event.movementX,
 			event.movementY,
@@ -259,50 +260,6 @@ export class ClientViewportMouseController {
 		}
 	};
 
-	#requestLock(): void {
-		if (
-			this.#lockState !== "idle" ||
-			this.#document.pointerLockElement === this.#options.canvas
-		)
-			return;
-		const generation = this.#lockGeneration;
-		this.#lockState = "pending";
-		this.#options.canvas
-			.requestPointerLock()
-			.then(() => {
-				if (generation !== this.#lockGeneration) {
-					this.#lockState = "idle";
-					if (this.#document.pointerLockElement === this.#options.canvas)
-						this.#document.exitPointerLock();
-				}
-			})
-			.catch((error: unknown) => {
-				if (generation !== this.#lockGeneration) return;
-				this.#endCapture();
-				this.#options.movement.onError(
-					`Mouse camera controls could not capture the pointer: ${String(error)}`,
-				);
-			})
-			.finally(() => {
-				if (this.#lockState === "pending") this.#lockState = "idle";
-			});
-	}
-
-	readonly #lockChanged = (): void => {
-		if (this.#document.pointerLockElement === this.#options.canvas) {
-			this.#lockState = "held";
-			return;
-		}
-		if (this.#lockState === "held") this.#endCapture();
-	};
-
-	#unlock(): void {
-		this.#lockGeneration += 1;
-		if (this.#lockState === "held") this.#lockState = "idle";
-		if (this.#document.pointerLockElement === this.#options.canvas)
-			this.#document.exitPointerLock();
-	}
-
 	/** Retire capture and queued yaw while the physical forward buttons remain held.
 	 * Clearing motion prevents re-locking until a fresh camera hold starts.
 	 */
@@ -310,7 +267,7 @@ export class ClientViewportMouseController {
 		this.#options.camera()?.setOrbitHeld(false, performance.now());
 		this.#motion = null;
 		this.#click = null;
-		this.#unlock();
+		this.#pointerLock.unlock();
 		this.#options.movement.onCancelTurn();
 	}
 
@@ -340,6 +297,6 @@ export class ClientViewportMouseController {
 			"auxclick",
 			this.#preventMiddleDefault,
 		);
-		this.#document.removeEventListener("pointerlockchange", this.#lockChanged);
+		this.#pointerLock.destroy();
 	}
 }

@@ -13,7 +13,7 @@
 		characterDeletionNameMatches,
 		type CharacterSelectionActions,
 	} from "./character-selection";
-	import ClientPregameScreen from "./ClientPregameScreen.svelte";
+	import PregameScreen from "../../app/desktop/PregameScreen.svelte";
 	import { onMount } from "svelte";
 	import { useAppInputPolicy } from "../../lib/input/app-input-policy-context";
 	import SelectionMarker from "../../assets/icons/pregame-selection.svg?component";
@@ -234,7 +234,7 @@
 		onBack={() => (creating = false)}
 	/>
 {:else}
-	<ClientPregameScreen
+	<PregameScreen
 		branding="corner"
 		showPortalLogo={true}
 		backdrop={true}
@@ -467,7 +467,7 @@
 				</form>
 			</UiDialog>
 		{/if}
-	</ClientPregameScreen>
+	</PregameScreen>
 {/if}
 
 <style>

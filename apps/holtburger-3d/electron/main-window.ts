@@ -76,7 +76,6 @@ export function createWindow(
 		webPreferences: {
 			preload: context.preloadPath,
 			additionalArguments: [
-				`--holtburger-mode=${entry.mode}`,
 				...(entry.noLauncher ? ["--holtburger-launcher-disabled"] : []),
 				...(restoreWaylandPointer
 					? ["--holtburger-wayland-pointer-restore"]
@@ -138,10 +137,10 @@ export function createWindow(
 			if (level === "warning" || level === "error") {
 				if (frame === window.webContents.mainFrame) {
 					const role = context.getDocumentRole();
-					if (role === "client")
+					if (role === "client" || role === "explorer") {
 						context.clientRuntimeLog.record(level, message);
-					if (role === "client" || role === "explorer")
 						context.failureReports.recordWebGLWarning(message);
+					}
 				}
 				const severity = level === "error" ? "error" : "warn";
 				console[severity](
@@ -266,6 +265,26 @@ export async function chooseContentFolder(
 	const [path] = result.filePaths;
 	if (path === undefined)
 		throw new Error("Folder picker returned no selection");
+	return path;
+}
+
+/** Explorer launcher catalog override picker for compiled `weenies.hwc` files. */
+export async function chooseWeenieCatalogFile(
+	window: ApplicationWindow,
+	previous: string | null,
+): Promise<string | null> {
+	const result = await dialog.showOpenDialog(window.native, {
+		title: "Choose Weenie Catalog (weenies.hwc)",
+		properties: ["openFile"],
+		filters: [
+			{ name: "Holtburger Weenie Catalog", extensions: ["hwc"] },
+			{ name: "All Files", extensions: ["*"] },
+		],
+		...(previous === null ? {} : { defaultPath: previous }),
+	});
+	if (result.canceled) return null;
+	const [path] = result.filePaths;
+	if (path === undefined) throw new Error("File picker returned no selection");
 	return path;
 }
 

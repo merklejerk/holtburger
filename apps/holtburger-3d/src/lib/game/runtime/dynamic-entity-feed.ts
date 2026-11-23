@@ -118,6 +118,17 @@ export const dynamicEntityMotionSchema = z
 		message: "Motion playback must contain at least one clip.",
 	});
 
+const dynamicEntityPhysicsFlagsSchema = z.object({
+	reportCollisions: z.boolean(),
+	gravity: z.boolean(),
+	ethereal: z.boolean(),
+	ignoreCollisions: z.boolean(),
+	missile: z.boolean(),
+	inelastic: z.boolean(),
+	edgeSlide: z.boolean(),
+	frozen: z.boolean(),
+});
+
 const hostDynamicEntityViewSchema = z.object({
 	generation: nonNegativeInteger,
 	identity: z.object({
@@ -162,7 +173,7 @@ const hostDynamicEntityViewSchema = z.object({
 		}),
 	}),
 	physics: z.object({
-		semanticMask: guid,
+		flags: dynamicEntityPhysicsFlagsSchema,
 		participation: z.enum(["pose-only", "physical"]),
 		noDraw: z.boolean(),
 		hidden: z.boolean(),
@@ -256,6 +267,9 @@ const dynamicEntityEventSchema = z.discriminatedUnion("kind", [
 	}),
 ]);
 
+export type DynamicEntityPhysicsFlags = z.infer<
+	typeof dynamicEntityPhysicsFlagsSchema
+>;
 export type DynamicEntityView = z.infer<typeof dynamicEntityViewSchema>;
 export type DynamicEntitySnapshot = z.infer<typeof dynamicEntitySnapshotSchema>;
 export type DynamicEntityWorldPlacement = Extract<

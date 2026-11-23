@@ -20,6 +20,7 @@
 		type ColorGradeCurveChannel,
 	} from "../world/color-grade";
 	import ToggleField from "../../app/ui/ToggleField.svelte";
+	import { useExplorerToastPublisher } from "../explorer-toast-context";
 
 	interface Props {
 		readonly colorGrade: ColorGradeSettings;
@@ -27,6 +28,7 @@
 	}
 
 	const { colorGrade, updateColorGradeSettings }: Props = $props();
+	const publishToast = useExplorerToastPublisher();
 
 	/** Editor viewBox size. Larger than a unit box so stroke widths stay readable numbers. */
 	const EDITOR_SIZE = 200;
@@ -46,7 +48,6 @@
 
 	let channel = $state<ColorGradeCurveChannel>("master");
 	let draggingIndex = $state<number | null>(null);
-	let copyStatus = $state<string | null>(null);
 
 	const parameters = $derived(colorGrade.parameters);
 	const activeCurve = $derived(parameters.curves[channel]);
@@ -168,12 +169,18 @@
 		);
 		try {
 			await navigator.clipboard.writeText(fragment);
-			copyStatus =
-				"Copied. Paste over the colorGrade block in explorer-tuning.ts.";
+			publishToast({
+				message:
+					"Copied. Paste over the colorGrade block in explorer-tuning.ts.",
+				tone: "status",
+			});
 		} catch (cause) {
 			// Surfaced rather than swallowed: a silent no-op reads as a successful copy, and the
 			// author only finds out when they paste the previous clipboard into their source.
-			copyStatus = `Clipboard write failed: ${cause instanceof Error ? cause.message : String(cause)}`;
+			publishToast({
+				message: `Clipboard write failed: ${cause instanceof Error ? cause.message : String(cause)}`,
+				tone: "warning",
+			});
 		}
 	}
 </script>
@@ -187,10 +194,6 @@
 		onCheckedChange={(enabled) =>
 			updateColorGradeSettings({ ...colorGrade, enabled })}
 	/>
-	<p>
-		A deliberate departure from retail, which presents its output ungraded. Off
-		is bit-exact retail-faithful presentation.
-	</p>
 
 	<fieldset class="explorer-section" disabled={!colorGrade.enabled}>
 		<label class="explorer-environment-field">
@@ -283,20 +286,12 @@
 				/>
 			{/each}
 		</svg>
-		<p>
-			Click to add a point, drag to shape, double-click to remove. The first and
-			last points keep their positions on the input axis so every source level
-			stays defined.
-		</p>
 
 		<div class="explorer-grade-actions">
 			<button
 				type="button"
 				class="explorer-action ui-button"
-				onclick={() => {
-					copyStatus = null;
-					publish(DEFAULT_COLOR_GRADE_PARAMETERS);
-				}}
+				onclick={() => publish(DEFAULT_COLOR_GRADE_PARAMETERS)}
 			>
 				Reset
 			</button>
@@ -308,9 +303,6 @@
 				Copy tuning
 			</button>
 		</div>
-		{#if copyStatus}
-			<p>{copyStatus}</p>
-		{/if}
 	</fieldset>
 </div>
 

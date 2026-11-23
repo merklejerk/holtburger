@@ -10,9 +10,12 @@ import {
 } from "../scripts/entry-paths.mjs";
 import {
 	electronApplicationArguments,
-	isClientLaunchArgument,
+	isClientOnlyArgument,
+	isExplorerOnlyArgument,
 	parseClientLaunchArguments,
+	parseExplorerLaunchArguments,
 	type ClientLaunchConfiguration,
+	type ExplorerLaunchConfiguration,
 } from "./client-launch.js";
 import type { HostContentSelection } from "./content-startup.js";
 import { SidecarHostClient } from "./host-protocol.js";
@@ -34,6 +37,8 @@ export function entryArguments(): {
 	title: string;
 	mode: HostMode;
 	clientStartup?: ClientLaunchConfiguration;
+	explorerStartup?: ExplorerLaunchConfiguration;
+	initialLauncherView: "client" | "explorer";
 	noLauncher: boolean;
 	/** Process-only update lookup opt-out consumed by the native update owner. */
 	noUpdates: boolean;
@@ -58,18 +63,27 @@ export function entryArguments(): {
 	const entry = requireEntry(selectedEntryName);
 	const mode: HostMode = selectedEntryName === "client" ? "client" : "explorer";
 	let clientStartup: ClientLaunchConfiguration | undefined;
-	let noLauncher = false;
-	let noUpdates = false;
-	let ignorePersistedConfig = false;
-	let ignoreWorldMapCache = false;
-	let settingsFile: string | null = null;
-	let rendererArguments: readonly string[] = entryArgs;
+	let explorerStartup: ExplorerLaunchConfiguration | undefined;
+	let initialLauncherView: "client" | "explorer" = "client";
+	let noLauncher: boolean;
+	let noUpdates: boolean;
+	let ignorePersistedConfig: boolean;
+	let ignoreWorldMapCache: boolean;
+	let settingsFile: string | null;
+	let rendererArguments: readonly string[];
 	if (mode === "client") {
+		const explorerArgument = entryArgs.find(isExplorerOnlyArgument);
+		if (explorerArgument !== undefined) {
+			throw new Error(
+				`Explorer launch argument ${explorerArgument} is unavailable in Client mode`,
+			);
+		}
 		const parsed = parseClientLaunchArguments(entryArgs);
 		clientStartup =
 			parsed.startup === null
 				? undefined
 				: { ...parsed.startup, contentPath: extracted.contentPath };
+		initialLauncherView = parsed.initialLauncherView;
 		noLauncher = parsed.noLauncher;
 		noUpdates = parsed.noUpdates;
 		ignorePersistedConfig = parsed.ignorePersistedConfig;
@@ -77,12 +91,23 @@ export function entryArguments(): {
 		settingsFile = parsed.settingsFile;
 		rendererArguments = parsed.rendererArguments;
 	} else {
-		const clientArgument = entryArgs.find(isClientLaunchArgument);
+		const clientArgument = entryArgs.find(isClientOnlyArgument);
 		if (clientArgument !== undefined) {
 			throw new Error(
 				`client launch argument ${clientArgument} is unavailable in Explorer mode`,
 			);
 		}
+		const parsed = parseExplorerLaunchArguments(entryArgs);
+		explorerStartup = {
+			...parsed.startup,
+			contentPath: extracted.contentPath,
+		};
+		noLauncher = parsed.noLauncher;
+		noUpdates = parsed.noUpdates;
+		ignorePersistedConfig = parsed.ignorePersistedConfig;
+		ignoreWorldMapCache = parsed.ignoreWorldMapCache;
+		settingsFile = parsed.settingsFile;
+		rendererArguments = parsed.rendererArguments;
 	}
 	const launch = extractElectronLaunchArguments(rendererArguments);
 	for (const argument of launch.electronSwitches) {
@@ -101,6 +126,8 @@ export function entryArguments(): {
 		title: entry.title + (release ? " (release host)" : ""),
 		mode,
 		clientStartup,
+		explorerStartup,
+		initialLauncherView,
 		noLauncher,
 		noUpdates,
 		ignorePersistedConfig,
@@ -147,11 +174,15 @@ export function launchHost(
 	mode: HostMode,
 	ignoreWorldMapCache: boolean,
 	selection: HostContentSelection,
+	options?: { readonly weenieCatalogPath?: string | null },
 ): SidecarHostClient {
 	const args =
 		selection.kind === "explicit"
 			? ["--content", selection.path]
 			: ["--discovery-root", selection.root];
+	if (mode === "explorer" && options?.weenieCatalogPath) {
+		args.push("--weenie-catalog", options.weenieCatalogPath);
+	}
 	const child = spawn(hostBinaryPath(), [`--mode=${mode}`, ...args], {
 		env: hostEnvironment(ignoreWorldMapCache),
 		stdio: "pipe",

@@ -1,16 +1,14 @@
 <script lang="ts">
 	import { presentClientBinding } from "../settings/binding-catalog";
 	import { onMount, untrack } from "svelte";
+	import HudSelectedEntityBar from "../../app/hud/HudSelectedEntityBar.svelte";
 	import { formatQuantity } from "../../app/ui/quantity-format";
-	import { hudAttention } from "./hud-attention";
 	import { itemStructureDisplay } from "../widgets/item-structure";
 
 	import {
 		EMPTY_CLIENT_SELECTED_DISPLAY,
 		type ClientSelectedEntityDisplay,
 	} from "../world/selected-entity-tracking";
-	import PopupMenu from "../../app/ui/PopupMenu.svelte";
-	import MoreActionsIcon from "../../assets/icons/hud-more-actions.svg?component";
 	import ClientHudIcon, {
 		type ClientHudIconName,
 	} from "./ClientHudIcon.svelte";
@@ -234,18 +232,6 @@
 			});
 		return available;
 	});
-	let menuAnchor = $state<HTMLButtonElement | null>(null);
-	$effect(() => {
-		if (actions.length <= 1) menuAnchor = null;
-	});
-
-	function selectMenuAction(source: HTMLButtonElement) {
-		// Capture the mounted trigger before PopupMenu dismisses and clears menuAnchor.
-		return (id: SelectedAction["action"]): void => {
-			const action = actions.find((action) => action.action === id);
-			if (action !== undefined) action.activate(source);
-		};
-	}
 
 	const structureDisplay = $derived(itemStructureDisplay(display.structure));
 	const displayName = $derived(
@@ -263,7 +249,6 @@
 
 	$effect(() => {
 		const guid = selectedGuid;
-		menuAnchor = null;
 		// Selection identity is cold UI state; the runtime lookup must not own this effect's lifecycle.
 		untrack(() => {
 			display =
@@ -304,144 +289,43 @@
 	});
 </script>
 
-<section
-	class="selected-entity"
-	aria-label={`Selected entity: ${displayName}`}
-	use:hudAttention={selectedGuid}
+<HudSelectedEntityBar
+	selectedKey={selectedGuid}
+	{displayName}
+	nameColor={display.nameColor}
+	{actions}
+	examineLabel={examinePending ? "Examining selected entity" : "Examine"}
+	examineTitle={`${examinePending ? "Examining selected entity" : "Examine"} (${presentClientBinding(input, { kind: "client", action: "examine" }, displayPlatform).description})`}
+	{examinePending}
+	{onExamine}
 >
-	<div class="selected-entity__heading ui-hud-group">
-		{#if actions.length > 1}
-			<button
-				class="ui-hud-button ui-icon-button"
-				type="button"
-				aria-label="Selected entity actions"
-				title="Selected entity actions"
-				aria-haspopup="menu"
-				aria-expanded={menuAnchor !== null}
-				onclick={(event) => {
-					menuAnchor = menuAnchor === null ? event.currentTarget : null;
-				}}><MoreActionsIcon /></button
+	{#snippet actionIcon(action: SelectedAction)}
+		<ClientHudIcon name={action.icon} />
+	{/snippet}
+	{#snippet footer()}
+		{#if display.health.kind === "known" || display.health.kind === "awaiting-response"}
+			<div
+				class="selected-entity__health ui-hud-surface"
+				role="meter"
+				aria-label="Selected entity health"
+				aria-valuemin="0"
+				aria-valuemax="100"
+				aria-valuenow={healthPercent ?? undefined}
+				aria-valuetext={healthPercent === null
+					? "Unknown"
+					: `${Math.round(healthPercent)}%`}
 			>
-		{:else}
-			{#each actions as action (action.action)}
-				<button
-					class="ui-hud-button ui-icon-button"
-					type="button"
-					aria-label={action.label}
-					title={action.description ?? action.label}
-					onclick={(event) => action.activate(event.currentTarget)}
-					><ClientHudIcon name={action.icon} /></button
-				>
-			{/each}
+				{#if healthPercent !== null}<div
+						class="selected-entity__health-fill"
+						style:width={`${healthPercent}%`}
+					></div>{/if}
+			</div>
 		{/if}
-		<strong title={displayName} style:color={display.nameColor}
-			><span>{displayName}</span></strong
-		>
-		<button
-			class="ui-hud-button ui-icon-button"
-			type="button"
-			disabled={examinePending}
-			onclick={onExamine}
-			aria-label={examinePending ? "Examining selected entity" : "Examine"}
-			title={`${examinePending ? "Examining selected entity" : "Examine"} (${presentClientBinding(input, { kind: "client", action: "examine" }, displayPlatform).description})`}
-			aria-busy={examinePending}
-		>
-			<ClientHudIcon name="examine" />
-		</button>
-	</div>
-	{#if display.health.kind === "known" || display.health.kind === "awaiting-response"}
-		<div
-			class="selected-entity__health ui-hud-surface"
-			role="meter"
-			aria-label="Selected entity health"
-			aria-valuemin="0"
-			aria-valuemax="100"
-			aria-valuenow={healthPercent ?? undefined}
-			aria-valuetext={healthPercent === null
-				? "Unknown"
-				: `${Math.round(healthPercent)}%`}
-		>
-			{#if healthPercent !== null}<div
-					class="selected-entity__health-fill"
-					style:width={`${healthPercent}%`}
-				></div>{/if}
-		</div>
-	{/if}
-</section>
-
-{#if menuAnchor !== null && actions.length > 1}
-	{@const source = menuAnchor}
-	<PopupMenu
-		anchor={source}
-		label="Selected entity actions"
-		items={actions.map((action) => ({
-			...action,
-			label: action.description ?? action.label,
-		}))}
-		onselect={selectMenuAction(source)}
-		onclose={() => {
-			menuAnchor = null;
-		}}
-	>
-		{#snippet icon(action: SelectedAction)}
-			<ClientHudIcon name={action.icon} />
-		{/snippet}
-	</PopupMenu>
-{/if}
+	{/snippet}
+</HudSelectedEntityBar>
 
 <style>
 	@layer components {
-		.selected-entity {
-			/* Scale the shared pulse's growth down for this wider surface. */
-			--ui-hud-pulse-intensity: var(--ui-selected-entity-pulse-intensity);
-			/* Header priority stays local to this HUD. */
-			isolation: isolate;
-			/* One dimension keeps header controls and their reserved grid column aligned. */
-			--selected-action-size: 32px;
-			display: grid;
-			box-sizing: border-box;
-			width: 100%;
-			height: 100%;
-			grid-template-rows: auto 5px;
-			align-content: start;
-			gap: 3px;
-		}
-		.selected-entity__heading {
-			/* Header controls and their painted edges must stay above the following health row. */
-			z-index: 1;
-			display: grid;
-			grid-template-columns: auto minmax(0, 1fr) var(--selected-action-size);
-			min-height: var(--selected-action-size);
-			gap: 4px;
-			align-items: center;
-		}
-		.selected-entity__heading strong {
-			/* Keep the name centered when no left-side action is available. */
-			grid-column: 2;
-			font-weight: 600;
-			font-size: calc(var(--ui-font-size-heading-2) * var(--ui-text-scale));
-			line-height: 1.25;
-			text-align: center;
-			white-space: nowrap;
-			min-width: 0;
-		}
-		.selected-entity__heading strong span {
-			display: block;
-			overflow: hidden;
-			text-overflow: ellipsis;
-		}
-		.selected-entity__heading button {
-			display: grid;
-			width: var(--selected-action-size);
-			height: var(--selected-action-size);
-			padding: 6px;
-			place-items: center;
-			pointer-events: auto;
-		}
-		.selected-entity__heading button :global(svg) {
-			width: 20px;
-			height: 20px;
-		}
 		.selected-entity__health {
 			overflow: hidden;
 			background: var(--_ui-hud-background-color);

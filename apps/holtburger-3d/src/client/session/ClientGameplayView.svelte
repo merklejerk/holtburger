@@ -50,11 +50,12 @@
 	import ClientStatusTray from "../character/ClientStatusTray.svelte";
 	import ClientEnchantmentsPanel from "../magic/ClientEnchantmentsPanel.svelte";
 	import { presentEnchantmentTray } from "../magic/enchantments-view";
-	import ClientJumpPowerBar from "../combat/ClientJumpPowerBar.svelte";
+	import HudJumpPowerBar from "../../app/hud/HudJumpPowerBar.svelte";
+	import { MINIMUM_JUMP_POWER } from "./host-contract";
 	import ClientRuntimeConsole from "../hud/ClientRuntimeConsole.svelte";
 	import ClientChat from "../social/ClientChat.svelte";
 	import ClientActionBars from "../hud/ClientActionBars.svelte";
-	import { provideClientHudGeometry } from "../hud/hud-geometry-context";
+	import { provideHudGeometry as provideClientHudGeometry } from "../../app/hud/hud-geometry-context";
 	import ClientSocialPanel from "../social/ClientSocialPanel.svelte";
 	import ClientNearbyPanel from "../world/ClientNearbyPanel.svelte";
 	import ClientInventoryPanel from "../inventory/ClientInventoryPanel.svelte";
@@ -67,16 +68,16 @@
 	import ClientLocksWindow from "../inventory/ClientLocksWindow.svelte";
 	import ClientHudWindow from "../hud/ClientHudWindow.svelte";
 	import ClientWorldPanel from "../world/ClientWorldPanel.svelte";
-	import ClientFpsCounter from "../hud/ClientFpsCounter.svelte";
+	import HudFpsCounter from "../../app/hud/HudFpsCounter.svelte";
 	import ClientHudIcon from "../hud/ClientHudIcon.svelte";
-	import ClientHudPanel from "../hud/ClientHudPanel.svelte";
+	import ClientHudPanel from "../../app/hud/HudPanel.svelte";
 	import ClientSelectedEntityHud from "../hud/ClientSelectedEntityHud.svelte";
 	import ClientShortcutDock, {
 		createClientShortcuts,
 		PANEL_SHORTCUTS,
 		type ClientSystemPanel,
 	} from "../hud/ClientShortcutDock.svelte";
-	import ClientToastOverlay from "../hud/ClientToastOverlay.svelte";
+	import HudToastOverlay from "../../app/hud/HudToastOverlay.svelte";
 	import ClientCombatTargetIndicator from "../combat/ClientCombatTargetIndicator.svelte";
 	import ClientTargetIndicator from "../combat/ClientTargetIndicator.svelte";
 	import ClientSettingsPanel, {
@@ -101,7 +102,8 @@
 		ClientGameplayWorldSurface,
 	} from "./gameplay-surfaces";
 
-	import ClientSystemMenu from "../hud/ClientSystemMenu.svelte";
+	import HudCornerControls from "../../app/hud/HudCornerControls.svelte";
+	import { requestElectronClientClose } from "../../lib/host/electron-host-transport";
 
 	interface Props {
 		readonly shell: ClientGameplayShellSurface;
@@ -113,7 +115,9 @@
 		readonly social: ClientGameplaySocialSurface;
 	}
 
-	let systemMenu: ClientSystemMenu | undefined;
+	let systemMenu = $state<
+		HudCornerControls<"logout" | "disconnect" | "quit"> | undefined
+	>(undefined);
 	let {
 		shell,
 		settings,
@@ -123,6 +127,19 @@
 		world,
 		social,
 	}: Props = $props();
+	const systemMenuItems = $derived([
+		{
+			action: "logout",
+			label: "Return to main menu",
+			disabled: !shell.canReturnToMenu,
+		},
+		{
+			action: "disconnect",
+			label: "Disconnect",
+			disabled: !shell.canDisconnect,
+		},
+		{ action: "quit", label: "Quit application", disabled: false },
+	] as const);
 	provideClientHudGeometry();
 	const { viewport: inputGate, keyboard } = useAppInputPolicy();
 	const clientInput = useClientInput();
@@ -784,32 +801,24 @@
 		bind:this={uiElement}
 		use:applyUiScale={settings.ui.uiScale}
 	>
-		<ClientSystemMenu
+		<HudCornerControls
 			bind:this={systemMenu}
-			canReturn={shell.canReturnToMenu}
-			canDisconnect={shell.canDisconnect}
-			onReturnToMainMenu={shell.onReturnToMainMenu}
-			onDisconnect={shell.onDisconnect}
-		/>
-		<button
-			type="button"
-			class="client-ui-lock ui-hud-button ui-icon-button"
-			aria-label={shell.hudMode === "runtime"
-				? "Unlock UI layout"
-				: "Lock UI layout"}
-			aria-pressed={shell.hudMode === "layout"}
-			title={shell.hudMode === "runtime"
-				? "Unlock UI layout"
-				: "Lock UI layout"}
-			onclick={() =>
+			hudMode={shell.hudMode}
+			onToggleHudMode={() =>
 				shell.onHudModeChange(
 					shell.hudMode === "runtime" ? "layout" : "runtime",
 				)}
-		>
-			<ClientHudIcon
-				name={shell.hudMode === "runtime" ? "locked" : "unlocked"}
-			/>
-		</button>
+			menuItems={systemMenuItems}
+			canShowMenu={shell.canReturnToMenu || shell.canDisconnect}
+			onMenuSelect={(action) => {
+				if (action === "logout") shell.onReturnToMainMenu();
+				else if (action === "disconnect") shell.onDisconnect();
+				else
+					void requestElectronClientClose().catch((error) =>
+						console.error(error),
+					);
+			}}
+		/>
 
 		<Minimap
 			readFrame={world.readMinimapFrame}
@@ -995,7 +1004,7 @@
 				onPlacementChange={(placement) =>
 					changeHudPlacement("jumpPower", placement)}
 			>
-				<ClientJumpPowerBar
+				<HudJumpPowerBar
 					active={character.jumpChargeActive || character.preciseJumpActive}
 					previewExtent={previewHud ? HUD_PREVIEW_JUMP_EXTENT : null}
 					precise={character.preciseJumpActive}
@@ -1003,7 +1012,10 @@
 					powerKeys={character.jumpPowerKeys}
 					powerControl={shell.hudMode === "runtime" &&
 					character.preciseJumpActive
-						? { setPower: character.onPreciseJumpPowerSet }
+						? {
+								setPower: character.onPreciseJumpPowerSet,
+								minimumPower: MINIMUM_JUMP_POWER,
+							}
 						: null}
 				/>
 			</ClientHudPanel>
@@ -1021,7 +1033,7 @@
 				onPlacementChange={(placement) =>
 					changeHudPlacement("toast", placement)}
 			>
-				<ClientToastOverlay
+				<HudToastOverlay
 					toast={shell.toast}
 					persistentMessage={itemInteraction.kind === "acquiring"
 						? {
@@ -1079,7 +1091,10 @@
 				onPlacementChange={(placement) =>
 					changeHudPlacement("frameRate", placement)}
 			>
-				<ClientFpsCounter readFrameRates={shell.readFrameRates} />
+				<HudFpsCounter
+					readFrameRates={shell.readFrameRates}
+					diagnosticsTuning={CLIENT_TUNING.diagnostics}
+				/>
 			</ClientHudPanel>
 		{/if}
 		{#if world.selectedEntityGuid !== null || previewHud}
@@ -1677,17 +1692,6 @@
 			.nearby-alert-active {
 				animation: none;
 			}
-		}
-
-		.client-ui-lock {
-			position: fixed;
-			top: 8px;
-			right: 44px;
-			z-index: 500;
-			width: 28px;
-			height: 28px;
-			min-height: 0;
-			padding: 5px;
 		}
 	}
 </style>

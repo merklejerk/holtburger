@@ -1,6 +1,6 @@
 //! Explorer entity possession lifecycle, proposal, actuation, and motion probes.
 
-use holtburger_common::{Guid, RigidTransform, Vector3};
+use holtburger_common::{Guid, Quaternion, RigidTransform, Vector3};
 use holtburger_core::client::movement_types::CharacterDrive;
 use holtburger_core::{
     AdjustedForwardAxis, CharacterJumpReadiness, CharacterJumpRejection,
@@ -48,6 +48,7 @@ fn consume_nonphysical_possession_events(
         }
         let result = if matches!(pending.event, holtburger_core::CharacterMotionEvent::Reset) {
             active.controller.clear();
+            active.clear_manual_yaw();
             active.applied_intent = active.resolve_effective_intent(CharacterDrive::default())?;
             PossessionEventOutcomeKind::Reset
         } else {
@@ -104,6 +105,7 @@ pub(super) fn propose_possession_tick(
         let result = if !grounded_response {
             if matches!(pending.event, holtburger_core::CharacterMotionEvent::Reset) {
                 active.controller.clear();
+                active.clear_manual_yaw();
             }
             PossessionEventOutcomeKind::Rejected {
                 reason: PossessionEventRejection::NonphysicalResponse,
@@ -139,6 +141,7 @@ pub(super) fn propose_possession_tick(
             )?
         };
         if result == PossessionEventOutcomeKind::Reset {
+            active.clear_manual_yaw();
             active.applied_intent = active.resolve_effective_intent(CharacterDrive::default())?;
         }
         outcomes.push(PossessionEventOutcome {
@@ -157,26 +160,38 @@ pub(super) fn propose_possession_tick(
         .cloned()
         .unwrap_or_else(|| BodyMotionRuntime::new(table));
     let offset = playback.drive(table, order, delta_seconds).offset;
+    let manual_yaw_radians = active.take_manual_yaw();
     let actuation = if grounded_response {
         possession_grounded_actuation(
             &active,
-            offset,
-            body,
-            object_scale,
-            profile,
-            delta_seconds,
-            launch,
+            PossessionGroundedStep {
+                authored_offset: offset,
+                body,
+                object_scale,
+                profile,
+                delta_seconds,
+                launch,
+                manual_yaw_radians,
+            },
         )?
     } else if matches!(
         body.physical.as_ref().map(|physical| physical.definition),
         Some(PhysicalBodyDefinition::FixedPosition { .. })
     ) {
+        let mut rotation = body.pose.rotation.multiply(&offset.rotation);
+        if manual_yaw_radians != 0.0 {
+            let yaw = Quaternion::from_axis_angle(Vector3::new(0.0, 0.0, 1.0), -manual_yaw_radians)
+                .ok_or_else(|| {
+                    anyhow::anyhow!("manual possession yaw must produce a finite rotation")
+                })?;
+            rotation = rotation.multiply(&yaw);
+        }
         PhysicalBodyActuation::FixedPosition {
             translation: body
                 .pose
                 .rotation
                 .rotate_vector(offset.translation * object_scale),
-            rotation: body.pose.rotation.multiply(&offset.rotation),
+            rotation,
         }
     } else {
         crate::host_simulation_runtime::dynamic_entity_coasting_actuation(body)?
@@ -305,15 +320,30 @@ pub(super) fn possession_character_presentation(
     }
 }
 
+/// Inputs for computing one grounded possession actuation step.
+pub(super) struct PossessionGroundedStep<'a> {
+    pub(super) authored_offset: RigidTransform,
+    pub(super) body: &'a SpatialBody,
+    pub(super) object_scale: f32,
+    pub(super) profile: ExplorerPossessionControlProfile,
+    pub(super) delta_seconds: f32,
+    pub(super) launch: Option<GroundedLaunch>,
+    pub(super) manual_yaw_radians: f32,
+}
+
 pub(super) fn possession_grounded_actuation(
     active: &ActivePossession,
-    authored_offset: RigidTransform,
-    body: &SpatialBody,
-    object_scale: f32,
-    profile: ExplorerPossessionControlProfile,
-    delta_seconds: f32,
-    launch: Option<GroundedLaunch>,
+    step: PossessionGroundedStep<'_>,
 ) -> anyhow::Result<PhysicalBodyActuation> {
+    let PossessionGroundedStep {
+        authored_offset,
+        body,
+        object_scale,
+        profile,
+        delta_seconds,
+        launch,
+        manual_yaw_radians,
+    } = step;
     let effective = active.resolve_effective_intent(active.controller.effective_drive())?;
     let capability = active
         .capabilities
@@ -354,7 +384,7 @@ pub(super) fn possession_grounded_actuation(
     };
     let local_planar = Vector3::new(local_sidestep, local_forward, 0.0);
     let world_planar = body.pose.rotation.rotate_vector(local_planar);
-    let heading = match effective.axes.turn() {
+    let base_heading = match effective.axes.turn() {
         Some((_, _)) if capability.turn == PossessionLocomotionSource::TargetAuthored => {
             body.pose.rotation.multiply(&gated.rotation).to_heading()
         }
@@ -363,6 +393,7 @@ pub(super) fn possession_grounded_actuation(
         }
         None => body.pose.rotation.to_heading(),
     };
+    let heading = base_heading + manual_yaw_radians;
     Ok(grounded_character_actuation(
         world_planar,
         Some(heading),
@@ -533,6 +564,35 @@ impl ExplorerEntityRuntime {
                 .wake_dynamic_body(SpatialBodyId::Entity(active.guid));
         }
         Ok(result)
+    }
+
+    /// Accumulates one finite manual yaw displacement for the exact active possession epoch.
+    pub fn apply_possession_yaw(
+        &self,
+        possession_generation: u64,
+        delta_radians: f32,
+    ) -> Result<PossessionIntentReplaceResult, ExplorerEntityRuntimeError> {
+        if !delta_radians.is_finite() {
+            return Err(ExplorerEntityRuntimeError::PossessionIntent(
+                PossessionIntentError::InvalidManualYaw,
+            ));
+        }
+        let mut registry = self
+            .registry
+            .lock()
+            .expect("Explorer entity registry lock poisoned");
+        let Some(active) = registry.motion.active.as_mut() else {
+            return Ok(PossessionIntentReplaceResult::IgnoredStalePossession);
+        };
+        if active.generation != possession_generation {
+            return Ok(PossessionIntentReplaceResult::IgnoredStalePossession);
+        }
+        active.queue_manual_yaw(delta_radians)?;
+        if delta_radians != 0.0 {
+            self.simulation
+                .wake_dynamic_body(SpatialBodyId::Entity(active.guid));
+        }
+        Ok(PossessionIntentReplaceResult::Accepted)
     }
 
     /// Queues one non-coalescible lifecycle edge without allowing async reordering.

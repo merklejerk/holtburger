@@ -1,11 +1,11 @@
-import { SHARED_FRONTEND_TUNING } from "../lib/frontend-tuning";
-import { SHARED_FRAME_SETTINGS } from "../lib/frontend-frame-settings";
-import type { FrameSettings } from "../lib/game/renderer/renderer";
-import type { FrontendUiDiagnosticsTuning } from "../lib/frontend-tuning-contract";
+import { SHARED_FRONTEND_TUNING } from "../lib/frontend-tuning.js";
+import { SHARED_FRAME_SETTINGS } from "../lib/frontend-frame-settings.js";
+import type { FrameSettings } from "../lib/game/renderer/renderer.js";
+import type { FrontendUiDiagnosticsTuning } from "../lib/frontend-tuning-contract.js";
 import type {
 	ExplorerTuning,
 	ExplorerTuningOverrides,
-} from "./explorer-tuning-contract";
+} from "./explorer-tuning-contract.js";
 
 const EXPLORER_DIAGNOSTICS = {
 	/** Smoothing window used by the Explorer frame-time readout. */
@@ -110,6 +110,9 @@ const EXPLORER_TUNING_OVERRIDES = {
 		enabledByDefault:
 			SHARED_FRONTEND_TUNING.rendering.colorGrade.enabledByDefault,
 		parameters: SHARED_FRONTEND_TUNING.rendering.colorGrade.parameters,
+	},
+	entities: {
+		tabTargetMaxDistanceMeters: 96,
 	},
 } as const satisfies ExplorerTuningOverrides;
 

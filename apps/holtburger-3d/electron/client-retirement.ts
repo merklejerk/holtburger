@@ -2,7 +2,7 @@ import { formatError } from "../src/lib/format-error.js";
 import {
 	clientClosePreparationSchema,
 	type ClientClosePreparation,
-} from "../src/client/session/close-contract.js";
+} from "../src/lib/host/close-contract.js";
 
 /** Only a preparing close operation can accept a renderer acknowledgement. */
 type ClosePhase =

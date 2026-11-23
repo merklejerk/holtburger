@@ -564,6 +564,26 @@ describe("content startup", () => {
 			health: { kind: "needs_attention", failure: requiredFailure },
 		});
 	});
+
+	it("serializes load() behind in-flight select() and clear() writes", async () => {
+		const store = new ContentPreferenceStore(join(root, "serialized.json"));
+		const write = store.select("/first");
+		const readAfterSelect = store.load();
+		const cleared = store.clear();
+		const readAfterClear = store.load();
+		const [, selected, , unselected] = await Promise.all([
+			write,
+			readAfterSelect,
+			cleared,
+			readAfterClear,
+		]);
+		expect(selected).toEqual({
+			kind: "selected",
+			location: "/first",
+			health: { kind: "ready" },
+		});
+		expect(unselected).toEqual({ kind: "unselected" });
+	});
 });
 
 describe("default root evaluation", () => {

@@ -9,6 +9,9 @@
 	} from "../../lib/game/renderer/renderer";
 	import { PerformanceSession } from "../../app/performance/performance-session";
 	import { EXPLORER_TUNING } from "../../explorer/explorer-tuning";
+	import { provideExplorerToastPublisher } from "../../explorer/explorer-toast-context";
+
+	provideExplorerToastPublisher(() => {});
 
 	/** Optional real diagnostic facts with a controlled capability outcome for UI coverage. */
 	let {

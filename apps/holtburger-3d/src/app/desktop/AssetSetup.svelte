@@ -1,6 +1,6 @@
 <script lang="ts">
 	import PowerIcon from "../../assets/icons/hud-power.svg?component";
-	import ClientPregameScreen from "../../client/pregame/ClientPregameScreen.svelte";
+	import PregameScreen from "./PregameScreen.svelte";
 	import WarningIcon from "../../assets/icons/pregame-warning.svg?component";
 	import type { ContentStartupPhase } from "./content-startup-contract";
 
@@ -15,7 +15,7 @@
 		readonly onRetry: () => void;
 		/** Quit remains available before any game runtime exists. */
 		readonly onQuit: () => void;
-		/** Client startup may return to its launcher; Explorer has no launcher surface. */
+		/** Startup may return to the launcher unless launched with --no-launcher. */
 		readonly onBack: (() => void) | null;
 	}
 	const { state, temporary, onChoose, onRetry, onQuit, onBack }: Props =
@@ -24,7 +24,7 @@
 	const titleId = `${id}-asset-title`;
 </script>
 
-<ClientPregameScreen branding="hero" showPortalLogo={true} backdrop={false}>
+<PregameScreen branding="hero" showPortalLogo={true} backdrop={false}>
 	{#snippet footer()}
 		{#if onBack !== null}
 			<button
@@ -89,7 +89,7 @@
 			</div>
 		</section>
 	</div>
-</ClientPregameScreen>
+</PregameScreen>
 
 <style>
 	@layer components {

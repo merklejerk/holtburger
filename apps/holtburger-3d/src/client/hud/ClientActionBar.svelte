@@ -11,7 +11,7 @@
 	import { CLIENT_ACTION_BAR_TUNING } from "../settings/tuning";
 	import { onMount } from "svelte";
 	import ActionCell from "./ActionCell.svelte";
-	import ClientHudPanel from "./ClientHudPanel.svelte";
+	import ClientHudPanel from "../../app/hud/HudPanel.svelte";
 	import ShortcutBarLayoutControls from "./ShortcutBarLayoutControls.svelte";
 	import { useAppInputPolicy } from "../../lib/input/app-input-policy-context";
 	import {

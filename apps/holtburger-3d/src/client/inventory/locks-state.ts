@@ -1,5 +1,5 @@
 import type { ClientEntitySelection } from "../world/entity-selection";
-import type { ClientToastTone } from "../hud/toast-center";
+import type { HudToastTone as ClientToastTone } from "../../app/hud/toast-center";
 import type { AppraisalRequest } from "./appraisal-requests";
 import type {
 	ClientLifecycleSession,

@@ -1,16 +1,20 @@
 <script lang="ts">
-	import { onMount } from "svelte";
 	import type { StaticObjectRuntimeDiagnostics } from "../../lib/game/runtime/game-presentation-runtime";
 	import type { Texture2DReadback } from "../../lib/game/renderer/webgl2/webgl2-device";
 	import type { TextureAtlasPageDiagnostics } from "../../lib/game/textures/texture-manager";
 	import type { TexturePageId } from "../../lib/game/textures/texture-manager";
 	import type { ClosedWorkerPoolDiagnostics } from "../../lib/game/workers/closed-worker";
+	import InspectIcon from "../../assets/icons/explorer-inspect.svg?component";
+	import SortIcon from "../../assets/icons/explorer-sort.svg?component";
+	import { useExplorerToastPublisher } from "../explorer-toast-context";
 	import ExplorerTexturePageModal from "./ExplorerTexturePageModal.svelte";
 
 	type PageSort = "efficiency" | "entries" | "memory" | "page-id";
 
 	interface Props {
-		/** Read the latest expensive runtime snapshot while this inspector is mounted. */
+		/** Stop expensive runtime snapshot polling and dismiss modals while hidden. */
+		readonly visible: boolean;
+		/** Read the latest expensive runtime snapshot while this inspector is visible. */
 		readonly readDiagnostics: () => StaticObjectRuntimeDiagnostics | null;
 		/** Explicit one-off GPU page readback requested only when opening an inspector. */
 		readonly readTextureAtlasPage: (pageId: TexturePageId) => Texture2DReadback;
@@ -21,14 +25,18 @@
 		readonly preview: Texture2DReadback;
 	}
 
-	let { readDiagnostics, readTextureAtlasPage }: Props = $props();
+	let { visible, readDiagnostics, readTextureAtlasPage }: Props = $props();
+	const publishToast = useExplorerToastPublisher();
 	let diagnostics = $state<StaticObjectRuntimeDiagnostics | null>(null);
 	let query = $state("");
 	let sort = $state<PageSort>("efficiency");
 	let inspection = $state<TexturePageInspection | null>(null);
-	let inspectionError = $state<string | null>(null);
 
-	onMount(() => {
+	$effect(() => {
+		if (!visible) {
+			inspection = null;
+			return;
+		}
 		const sample = (): void => {
 			diagnostics = readDiagnostics();
 		};
@@ -63,7 +71,10 @@
 			(page) => page.pageId === currentInspection.page.pageId,
 		);
 		if (stillActive) return;
-		inspectionError = `Texture page ${currentInspection.page.pageId} was replaced or released.`;
+		publishToast({
+			message: `Texture page ${currentInspection.page.pageId} was replaced or released.`,
+			tone: "warning",
+		});
 		inspection = null;
 	});
 
@@ -135,14 +146,16 @@
 	}
 
 	function openInspector(page: TextureAtlasPageDiagnostics): void {
-		inspectionError = null;
 		try {
 			inspection = { page, preview: readTextureAtlasPage(page.pageId) };
 		} catch (error) {
-			inspectionError =
-				error instanceof Error
-					? error.message
-					: "Texture page readback failed.";
+			publishToast({
+				message:
+					error instanceof Error
+						? error.message
+						: "Texture page readback failed.",
+				tone: "warning",
+			});
 		}
 	}
 </script>
@@ -275,15 +288,17 @@
 					placeholder="Any word in the page ID"
 				/>
 			</label>
-			<button
-				type="button"
-				class="explorer-texture-sort ui-button"
-				aria-label={`Sort pages by ${sortDescription}; cycle sort mode`}
-				title={`Sort: ${sortDescription}. Click to cycle.`}
-				onclick={cycleSort}
-			>
-				⇅
-			</button>
+			<div class="ui-icon-actions">
+				<button
+					type="button"
+					class="ui-button ui-icon-button"
+					aria-label={`Sort pages by ${sortDescription}; cycle sort mode`}
+					title={`Sort: ${sortDescription}. Click to cycle.`}
+					onclick={cycleSort}
+				>
+					<SortIcon />
+				</button>
+			</div>
 		</div>
 
 		{#if filteredPages.length === 0}
@@ -307,23 +322,20 @@
 							>
 							<span>{formatBytes(page.byteLength)}</span>
 						</div>
-						<button
-							type="button"
-							class="explorer-texture-inspect ui-button"
-							aria-label={`Inspect ${page.pageId}`}
-							title="Inspect page pixels"
-							onclick={() => openInspector(page)}
-						>
-							🔍
-						</button>
+						<div class="ui-icon-actions ui-list-actions">
+							<button
+								type="button"
+								class="ui-button ui-icon-button"
+								aria-label={`Inspect ${page.pageId}`}
+								title="Inspect page pixels"
+								onclick={() => openInspector(page)}
+							>
+								<InspectIcon />
+							</button>
+						</div>
 					</article>
 				{/each}
 			</div>
-		{/if}
-		{#if inspectionError}
-			<p class="explorer-texture-readback-error" role="alert">
-				{inspectionError}
-			</p>
 		{/if}
 	{/if}
 </div>
@@ -360,6 +372,7 @@
 		.explorer-texture-page-row {
 			display: grid;
 			grid-template-columns: minmax(0, 1fr) auto;
+			align-items: start;
 			gap: 8px;
 			font-size: calc(var(--ui-font-size-caption) * var(--ui-text-scale));
 		}
@@ -374,15 +387,6 @@
 			color: var(--ui-color-accent);
 			font-family: var(--ui-font-mono);
 			overflow-wrap: anywhere;
-		}
-
-		.explorer-texture-sort,
-		.explorer-texture-inspect {
-			font-family: var(--ui-font-body);
-		}
-
-		.explorer-texture-readback-error {
-			color: var(--ui-color-danger);
 		}
 	}
 </style>

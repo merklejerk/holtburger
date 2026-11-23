@@ -9,6 +9,7 @@ import {
 	type ProjectionClearanceRevision,
 } from "../../lib/game/camera/projection-clearance";
 import type { CharacterInputController } from "../../lib/game/controls/character-input-controller";
+import type { CharacterForwardSource } from "../../lib/game/controls/character-movement-arbiter";
 import type { LandblockOwnerId } from "../../lib/game/game-types";
 import { resolveCameraLookAtAngles } from "../../lib/game/math/camera-orientation";
 import type { Vec3 } from "../../lib/game/math/types";
@@ -25,9 +26,19 @@ import {
 	SceneInterestRequestCoordinator,
 	type SceneInterestTarget,
 } from "../../lib/game/runtime/scene-target";
-import type { SceneInterestRadii } from "../../lib/game/runtime/types";
+import type {
+	PrimaryCameraView,
+	SceneInterestRadii,
+} from "../../lib/game/runtime/types";
 import type { HostTransport } from "../../lib/host/host-transport";
 import { AppInput } from "../../lib/input/app-input";
+import type {
+	CharacterAction,
+	ClientMouseConfiguration,
+	FlyAction,
+	InputBindings,
+	KeyBinding,
+} from "../../lib/input/input-contract";
 import { createInputDefaults } from "../../lib/input/input-defaults";
 import { detectInputPlatform } from "../../lib/input/input-platform";
 import type { KeyboardInputPolicy } from "../../lib/input/keyboard-input-policy";
@@ -36,6 +47,7 @@ import {
 	ExplorerCameraCoordinator,
 	type ExplorerCameraFocusStatus,
 	type ExplorerCameraResidencySync,
+	type ExplorerSceneInterestSnapshot,
 } from "./camera-coordinator";
 import {
 	ExplorerCameraInputController,
@@ -65,6 +77,9 @@ export interface ExplorerPossessionOwnershipSnapshot {
 	readonly possessionGeneration: number | null;
 }
 
+/** Active Explorer scene context classified from the current landblock profile. */
+export type ExplorerSceneContext = "outdoor" | "dungeon";
+
 export interface ExplorerCameraAuthorityDependencies {
 	readonly hostTransport: HostTransport;
 	readonly isRuntimeReady: () => boolean;
@@ -73,11 +88,24 @@ export interface ExplorerCameraAuthorityDependencies {
 	readonly readPossessionOwnership: () => ExplorerPossessionOwnershipSnapshot;
 	readonly readPossessedEntityFacingCameraYaw: () => number;
 	readonly onCharacterInput: (input: CharacterActionInput) => void;
+	readonly onPossessionForward?: (
+		source: Exclude<CharacterForwardSource, "keyboard">,
+		down: boolean,
+	) => void;
+	readonly onPossessionToggleAutoRun?: () => void;
+	readonly onPossessionTurn?: (deltaRadians: number) => void;
+	readonly onPossessionCancelTurn?: () => void;
+	readonly onFlyAutoRunChange?: (enabled: boolean) => void;
+	readonly onViewportClick?: (clientX: number, clientY: number) => void;
 	readonly onReleasePossession: () => Promise<unknown>;
 	readonly onCameraFocusStatusChange: (
 		status: ExplorerCameraFocusStatus,
 	) => void;
 	readonly onCameraResidencyLabelChange: (label: string | null) => void;
+	readonly onSceneContextChange: (context: ExplorerSceneContext | null) => void;
+	readonly onSceneInterestChange?: (
+		interest: ExplorerSceneInterestSnapshot | null,
+	) => void;
 	readonly onCameraModeChange: (mode: ExplorerCameraMode) => void;
 	readonly onCameraModePendingChange: (pending: boolean) => void;
 	readonly onPhysicalCameraErrorChange: (error: string | null) => void;
@@ -100,6 +128,8 @@ export class ExplorerCameraAuthorityController {
 	physicalCameraSession: PhysicalFlySession | undefined;
 	boomCameraSession: PossessionCameraController | undefined;
 	cameraProjection: ProjectionClearanceRevision | undefined;
+	private verticalFovDegrees: number = EXPLORER_TUNING.camera.framing.fov;
+	private flySpeed: number = EXPLORER_TUNING.camera.controls.moveSpeed;
 	cameraAuthorityReleaseForSceneChange: Promise<void> | undefined;
 	physicalSimulationAnchor: string | null = null;
 	cameraLocation: ExplorerCameraLocation | null = null;
@@ -110,6 +140,9 @@ export class ExplorerCameraAuthorityController {
 	private cameraModePending = false;
 	private interestFollowsCamera = false;
 	private lastPublishedResidencyLabel: string | null = null;
+	private lastPublishedSceneContext: ExplorerSceneContext | null = null;
+	private lastPublishedSceneInterest: ExplorerSceneInterestSnapshot | null =
+		null;
 	private canvasElement: HTMLCanvasElement | null = null;
 	private gameRuntime: GamePresentationRuntime | undefined;
 
@@ -149,11 +182,42 @@ export class ExplorerCameraAuthorityController {
 			},
 			onCharacterInput: (input) => this.deps.onCharacterInput(input),
 			onPhysicalWheel: (distance) => this.routeCameraWheel(distance),
+			onFlyAutoRunChange: (enabled) => {
+				this.deps.onFlyAutoRunChange?.(enabled);
+			},
+			onPossessionOrbitHeld: (held, nowMs) => {
+				this.boomCameraSession?.setOrbitHeld(held, nowMs);
+			},
+			onPossessionFollowRear: (nowMs) => {
+				this.boomCameraSession?.followRear(nowMs);
+			},
+			onPossessionPitch: (deltaY) => {
+				this.boomCameraSession?.pitch(deltaY);
+			},
 			onPossessionOrbit: (deltaX, deltaY) => {
 				this.boomCameraSession?.orbit(deltaX, deltaY, performance.now());
 			},
+			onPossessionTurn: (deltaRadians) => {
+				this.deps.onPossessionTurn?.(deltaRadians);
+			},
+			onPossessionCancelTurn: () => {
+				this.deps.onPossessionCancelTurn?.();
+			},
+			onPossessionForward: (source, down) => {
+				this.deps.onPossessionForward?.(source, down);
+			},
+			onPossessionToggleAutoRun: () => {
+				this.deps.onPossessionToggleAutoRun?.();
+			},
 			onPossessionWheel: (distance) => this.routeCameraWheel(distance),
+			onViewportClick: (clientX, clientY) => {
+				this.deps.onViewportClick?.(clientX, clientY);
+			},
+			onPointerLockError: (message) => {
+				this.deps.onPhysicalCameraErrorChange(message);
+			},
 		});
+		this.cameraController.setMoveSpeed(this.flySpeed);
 		this.cameraCoordinator = new ExplorerCameraCoordinator(
 			params.gameRuntime,
 			this.cameraController,
@@ -206,6 +270,24 @@ export class ExplorerCameraAuthorityController {
 		this.deps.onCameraModePendingChange(pending);
 	}
 
+	/** Apply saved/edited input bindings and mouse configuration live. */
+	applyInputSettings(settings: {
+		readonly flyBindings: InputBindings<FlyAction>;
+		readonly characterBindings: InputBindings<CharacterAction>;
+		readonly autoRunBindings: readonly KeyBinding[];
+		readonly mouseConfig: ClientMouseConfiguration;
+		readonly flyMouseConfig: {
+			readonly invertFlyHorizontal: boolean;
+			readonly invertFlyVertical: boolean;
+		};
+	}): void {
+		this.cameraController?.replaceFlyBindings(settings.flyBindings);
+		this.cameraController?.replaceCharacterBindings(settings.characterBindings);
+		this.cameraController?.replaceAutoRunBindings(settings.autoRunBindings);
+		this.cameraController?.setMouseConfiguration(settings.mouseConfig);
+		this.cameraController?.setFlyMouseConfiguration(settings.flyMouseConfig);
+	}
+
 	/** Publish one frame's camera location, deriving its label so the two never drift apart. */
 	publishCameraLocation(location: ExplorerCameraLocation | null): void {
 		this.cameraLocation = location;
@@ -217,6 +299,20 @@ export class ExplorerCameraAuthorityController {
 			this.lastPublishedResidencyLabel = label;
 			this.deps.onCameraResidencyLabelChange(label);
 		}
+		const sceneInterest =
+			location === null
+				? null
+				: (this.cameraCoordinator?.sceneInterest() ?? null);
+		const sceneContext: ExplorerSceneContext | null =
+			sceneInterest?.target.kind ?? null;
+		if (sceneContext !== this.lastPublishedSceneContext) {
+			this.lastPublishedSceneContext = sceneContext;
+			this.deps.onSceneContextChange(sceneContext);
+		}
+		if (sceneInterest !== this.lastPublishedSceneInterest) {
+			this.lastPublishedSceneInterest = sceneInterest;
+			this.deps.onSceneInterestChange?.(sceneInterest);
+		}
 	}
 
 	setInterestFollowsCamera(enabled: boolean): void {
@@ -225,6 +321,30 @@ export class ExplorerCameraAuthorityController {
 
 	setAudioFollowsCamera(enabled: boolean): void {
 		this.cameraCoordinator?.setAudioFollowsCamera(enabled);
+	}
+
+	/** Update outdoor streaming radii live without re-focusing or re-triggering portal transitions. */
+	updateSceneInterestRadii(radii: SceneInterestRadii): void {
+		const coordinator = this.cameraCoordinator;
+		const requestCoordinator = this.sceneInterestCoordinator;
+		const current = coordinator?.sceneInterest();
+		if (!coordinator || !requestCoordinator || !current) return;
+		const request = requestCoordinator.request(current.target.requested, radii);
+		void request.promise
+			.then((resolved) => {
+				if (!requestCoordinator.isCurrent(request.revision)) return;
+				if (!coordinator.applySceneInterestRadii(resolved)) return;
+				const next = coordinator.sceneInterest();
+				if (next !== this.lastPublishedSceneInterest) {
+					this.lastPublishedSceneInterest = next;
+					this.deps.onSceneInterestChange?.(next);
+				}
+			})
+			.catch((error: unknown) => {
+				if (requestCoordinator.isCurrent(request.revision)) {
+					this.deps.onPhysicalCameraErrorChange(errorMessage(error));
+				}
+			});
 	}
 
 	readPhysicalCameraStatus(): PhysicalFlyStatus | null {
@@ -237,6 +357,11 @@ export class ExplorerCameraAuthorityController {
 
 	presentedPlacement(): HostCameraPlacement | null {
 		return this.cameraCoordinator?.presentedPlacement() ?? null;
+	}
+
+	/** Exact camera/extent pair most recently presented to the renderer. */
+	lastPrimaryView(): PrimaryCameraView | null {
+		return this.cameraCoordinator?.lastPrimaryView() ?? null;
 	}
 
 	sceneInterestSnapshot() {
@@ -584,7 +709,7 @@ export class ExplorerCameraAuthorityController {
 		const worldVelocity = resolvePhysicalFlyVelocity(
 			movement as PhysicalFlyLocalMovement,
 			cameraBasis,
-			EXPLORER_TUNING.camera.controls.moveSpeed *
+			this.flySpeed *
 				(precision
 					? EXPLORER_TUNING.camera.controls.precisionSlowMultiplier
 					: 1),
@@ -901,7 +1026,11 @@ export class ExplorerCameraAuthorityController {
 		const presentation = boom.presentation(nowMs);
 		const acknowledgedProjection = boom.acknowledgedProjection(nowMs);
 		if (acknowledgedProjection === null) {
-			return { location: null, renderable: false };
+			return {
+				location: null,
+				renderable: false,
+				requiresFlatEnvCellRenderMode: false,
+			};
 		}
 		if (presentation === null) {
 			const placement = coordinator.presentedPlacement();
@@ -933,6 +1062,21 @@ export class ExplorerCameraAuthorityController {
 		);
 	}
 
+	setVerticalFovDegrees(fov: number): void {
+		if (!Number.isFinite(fov) || fov <= 0) return;
+		this.verticalFovDegrees = fov;
+	}
+
+	getFlySpeed(): number {
+		return this.flySpeed;
+	}
+
+	setFlySpeed(speed: number): void {
+		if (!Number.isFinite(speed) || speed <= 0) return;
+		this.flySpeed = speed;
+		this.cameraController?.setMoveSpeed(speed);
+	}
+
 	private resolveCameraProjection(
 		runtime: GamePresentationRuntime,
 		canvas: HTMLCanvasElement,
@@ -942,10 +1086,11 @@ export class ExplorerCameraAuthorityController {
 			canvas.clientHeight,
 		);
 		const framing = EXPLORER_TUNING.camera.framing;
+		const fov = this.verticalFovDegrees;
 		const current = this.cameraProjection;
 		if (
 			current !== undefined &&
-			current.fov === framing.fov &&
+			current.fov === fov &&
 			current.near === framing.near &&
 			current.extent.width === extent.width &&
 			current.extent.height === extent.height
@@ -958,7 +1103,7 @@ export class ExplorerCameraAuthorityController {
 		}
 		this.cameraProjection = createProjectionClearanceRevision(
 			revision,
-			framing,
+			{ ...framing, fov },
 			extent,
 		);
 		return this.cameraProjection;

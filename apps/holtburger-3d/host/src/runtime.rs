@@ -10,7 +10,7 @@ use crate::shared_host_content::SharedHostContent;
 
 pub use crate::client_runtime::ClientHostRuntime;
 pub use crate::explorer_host::ExplorerHostRuntime;
-pub use crate::host_mode::{ClientLaunchConfiguration, HostMode};
+pub use crate::host_mode::{ClientLaunchConfiguration, HostLaunchMode, HostMode};
 
 /// One selected host composition. Shared content is discovered once, then exactly one concrete
 /// mode root is built; an Explorer registry is never created for client mode.
@@ -22,17 +22,16 @@ pub enum HostRuntime {
 impl HostRuntime {
     /// Builds one mode root from injected content for tests and diagnostics.
     pub fn from_content(
-        mode: HostMode,
+        mode: HostLaunchMode,
         content: SharedHostContent,
         client_event_sink: Arc<dyn ClientEventSink>,
         explorer_event_sink: Arc<dyn ExplorerEventSink>,
     ) -> Result<Self> {
         Ok(match mode {
-            HostMode::Explorer => Self::Explorer(ExplorerHostRuntime::from_content(
-                content,
-                explorer_event_sink,
-            )?),
-            HostMode::Client => {
+            HostLaunchMode::Explorer { weenie_catalog } => Self::Explorer(
+                ExplorerHostRuntime::from_content(content, explorer_event_sink, weenie_catalog)?,
+            ),
+            HostLaunchMode::Client => {
                 Self::Client(ClientHostRuntime::from_content(content, client_event_sink))
             }
         })

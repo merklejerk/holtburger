@@ -3,10 +3,16 @@ import {
 	type CharacterDrive,
 	type CharacterInputEdge,
 } from "../../lib/game/controls/character-input-controller";
+import {
+	CharacterMovementArbiter,
+	type CharacterForwardSource,
+} from "../../lib/game/controls/character-movement-arbiter";
+import { FacingInputDispatch } from "../../lib/game/controls/facing-input-dispatch";
 import { createEntityFacingCameraYaw } from "../../lib/game/math/camera-orientation";
 import type { HostCameraPlacement } from "../../lib/game/motion/host-placed-path";
 import type {
 	DynamicEntityEvent,
+	DynamicEntityPhysicsFlags,
 	DynamicEntityView,
 } from "../../lib/game/runtime/dynamic-entity-feed";
 import type { GamePresentationRuntime } from "../../lib/game/runtime/game-presentation-runtime";
@@ -20,7 +26,10 @@ import {
 	type ExplorerFixedTickReceipt,
 } from "./dynamic-entity-session";
 import {
+	createExplorerLaunchRequest,
+	createExplorerRelocationRequest,
 	createExplorerSpawnRequest,
+	EXPLORER_SPAWN_DISTANCE,
 	type ExplorerWeenieSearchRequest,
 	type ExplorerWeenieSearchResult,
 } from "./entity-commands";
@@ -89,6 +98,8 @@ export interface ExplorerDynamicEntityControllerDependencies {
 	) => void;
 	readonly readSelectedEntity: () => ExplorerEntitySelection | null;
 	readonly onClearSelectedEntity: () => void;
+	readonly onJumpChargeActiveChange?: (active: boolean) => void;
+	readonly onAutoRunChange?: (enabled: boolean) => void;
 }
 
 /**
@@ -98,6 +109,8 @@ export interface ExplorerDynamicEntityControllerDependencies {
 export class ExplorerDynamicEntityController {
 	dynamicEntitySession: ExplorerDynamicEntitySession | undefined;
 	possessionInput: CharacterInputController | undefined;
+	private possessionArbiter: CharacterMovementArbiter | undefined;
+	private readonly facingDispatch: FacingInputDispatch;
 	possessionIntentRevision = 0;
 	dynamicEntityPresentationCompletion: Promise<void> = Promise.resolve();
 	sceneActivationPresentationConvergence: {
@@ -117,7 +130,29 @@ export class ExplorerDynamicEntityController {
 
 	constructor(
 		private readonly deps: ExplorerDynamicEntityControllerDependencies,
-	) {}
+	) {
+		this.facingDispatch = new FacingInputDispatch(
+			async (deltaRadians, current) => {
+				const session = this.dynamicEntitySession;
+				const held = this.explorerPossession;
+				if (!session || held === null || held.guid === null || !current()) {
+					return;
+				}
+				try {
+					await session.applyPossessionYaw(
+						held.possessionGeneration,
+						deltaRadians,
+					);
+				} catch (error) {
+					if (current()) {
+						this.deps.onSpawnedEntityPresentationErrorChange(
+							errorMessage(error),
+						);
+					}
+				}
+			},
+		);
+	}
 
 	async start(): Promise<void> {
 		const entitySession = new ExplorerDynamicEntitySession(
@@ -158,8 +193,12 @@ export class ExplorerDynamicEntityController {
 		this.dynamicEntityPresentationRevision += 1;
 		this.dynamicEntityPresentationCompletion = Promise.resolve();
 		this.sceneActivationPresentationConvergence = null;
+		this.facingDispatch.cancel();
+		this.possessionArbiter?.reset();
+		this.possessionArbiter = undefined;
 		this.possessionInput?.releaseOwnership();
 		this.possessionInput = undefined;
+		this.deps.onJumpChargeActiveChange?.(false);
 		this.possessionIntentRevision = 0;
 		this.possessedPlacement = null;
 		this.setExplorerPossession(null);
@@ -211,13 +250,41 @@ export class ExplorerDynamicEntityController {
 	}
 
 	handleCameraCharacterInput(input: CharacterActionInput): void {
-		const owner = this.possessionInput;
-		if (owner === undefined) return;
+		const arbiter = this.possessionArbiter;
+		if (arbiter === undefined) return;
 		if (input.kind === "reset") {
-			owner.reset();
+			this.facingDispatch.cancel();
+			arbiter.releaseHeldActions();
+			this.deps.onJumpChargeActiveChange?.(
+				this.possessionInput?.chargeExtent() !== null,
+			);
 			return;
 		}
-		owner.applyAction(input.action, input.pressed);
+		arbiter.applyAction(input.action, input.pressed);
+	}
+
+	applyPossessionForward(
+		source: Exclude<CharacterForwardSource, "keyboard">,
+		down: boolean,
+	): void {
+		this.possessionArbiter?.applyForward(source, down);
+	}
+
+	togglePossessionAutoRun(): void {
+		this.possessionArbiter?.toggleAutoRun();
+	}
+
+	applyPossessionTurn(deltaRadians: number): void {
+		if (this.explorerPossession?.guid == null) return;
+		this.facingDispatch.add(deltaRadians);
+	}
+
+	cancelPossessionTurn(): void {
+		this.facingDispatch.cancel();
+	}
+
+	readJumpChargeExtent(): number | null {
+		return this.possessionInput?.chargeExtent() ?? null;
 	}
 
 	syncPossessedPlacement(runtime: GamePresentationRuntime): void {
@@ -447,6 +514,7 @@ export class ExplorerDynamicEntityController {
 	}
 
 	private setPossessionTranslationIntent(drive: CharacterDrive): void {
+		this.facingDispatch.flush();
 		this.deps.onBoomTranslationIntent(
 			drive.longitudinal !== null || drive.lateral !== null,
 			performance.now(),
@@ -484,6 +552,9 @@ export class ExplorerDynamicEntityController {
 		}
 		if (outcome.result.kind !== "rejected") return;
 		this.possessionInput?.rejectBegin(outcome.sequence);
+		this.deps.onJumpChargeActiveChange?.(
+			this.possessionInput?.chargeExtent() !== null,
+		);
 		this.deps.onSpawnedEntityPresentationErrorChange(
 			`Possession ${outcome.sequence} rejected: ${outcome.result.reason}.`,
 		);
@@ -497,6 +568,12 @@ export class ExplorerDynamicEntityController {
 			return;
 		const controls = this.possessedControls;
 		if (controls === null) return;
+		this.facingDispatch.flush();
+		if (edge.kind === "begin-jump") {
+			this.deps.onJumpChargeActiveChange?.(true);
+		} else {
+			this.deps.onJumpChargeActiveChange?.(false);
+		}
 		this.possessionIntentRevision += 1;
 		const drive = edge.kind === "reset" ? input.drive() : edge.drive;
 		void session
@@ -542,8 +619,12 @@ export class ExplorerDynamicEntityController {
 	}
 
 	retireFrontendPossession(): void {
+		this.facingDispatch.cancel();
+		this.possessionArbiter?.reset();
+		this.possessionArbiter = undefined;
 		this.possessionInput?.releaseOwnership();
 		this.possessionInput = undefined;
+		this.deps.onJumpChargeActiveChange?.(false);
 		this.setExplorerPossession(null);
 		this.setPossessedControls(null);
 		this.possessionIntentRevision = 0;
@@ -567,10 +648,14 @@ export class ExplorerDynamicEntityController {
 		const possession = await session.possess(guid);
 		if (possession.guid === null) {
 			// Installing the next scheme first asks the outgoing character owner for its one reset.
+			this.facingDispatch.cancel();
+			this.possessionArbiter?.reset();
+			this.possessionArbiter = undefined;
 			this.deps.onRestoreNonPossessionControlScheme();
 			this.setExplorerPossession(null);
 			this.setPossessedControls(null);
 			this.possessionInput = undefined;
+			this.deps.onJumpChargeActiveChange?.(false);
 			this.possessionIntentRevision = 0;
 			await this.deps.onEndPossessionCamera();
 			return possession;
@@ -601,11 +686,16 @@ export class ExplorerDynamicEntityController {
 		// Transition before installing the new sink so held camera keys cannot leak into the new
 		// character ownership epoch; keys held across the cutover require a fresh browser press.
 		this.deps.onSetPossessedControlScheme();
-		this.possessionInput = new CharacterInputController({
+		const possessionInput = new CharacterInputController({
 			fullChargeDurationMs: capability.chargeDurationMs,
 			now: () => performance.now(),
 			onDrive: (drive) => this.setPossessionTranslationIntent(drive),
 			onEdge: (edge) => this.queuePossessedEdge(edge),
+		});
+		this.possessionInput = possessionInput;
+		this.possessionArbiter = new CharacterMovementArbiter({
+			ordinary: possessionInput,
+			onAutoRunChanged: (enabled) => this.deps.onAutoRunChange?.(enabled),
 		});
 		try {
 			await this.deps.onBeginPossessionCamera(possession);
@@ -706,6 +796,82 @@ export class ExplorerDynamicEntityController {
 			}
 			throw error;
 		}
+	}
+
+	/** Despawn all Explorer-local entities and clear possession/selection cleanly. */
+	async resetAllEntities(): Promise<void> {
+		const session = this.dynamicEntitySession;
+		if (!session)
+			throw new Error("Explorer entity reset requires an active runtime.");
+		if (this.explorerPossession !== null) {
+			await this.possessExplorerEntity(null);
+		}
+		await session.resetAll();
+		this.deps.onClearSelectedEntity();
+	}
+
+	/** Teleport an existing entity in front of the current camera pose. */
+	async relocateExplorerEntity(
+		entity: Pick<DynamicEntityView, "generation"> & {
+			readonly identity: { readonly guid: number };
+		},
+		distance: number = EXPLORER_SPAWN_DISTANCE.default,
+	): Promise<void> {
+		const session = this.dynamicEntitySession;
+		if (!session)
+			throw new Error("Explorer relocation requires an active runtime.");
+		const { placement, viewDirection } =
+			await this.deps.resolveSpawnAuthority();
+		await session.relocate(
+			createExplorerRelocationRequest(
+				entity.identity.guid,
+				entity.generation,
+				placement,
+				viewDirection,
+				distance,
+				"teleport",
+			),
+		);
+	}
+
+	/** Launch an existing entity along the current camera view direction. */
+	async launchExplorerEntity(
+		entity: Pick<DynamicEntityView, "generation"> & {
+			readonly identity: { readonly guid: number };
+		},
+	): Promise<void> {
+		const session = this.dynamicEntitySession;
+		if (!session)
+			throw new Error("Explorer launch requires an active runtime.");
+		const { viewDirection } = await this.deps.resolveSpawnAuthority();
+		await session.launch(
+			createExplorerLaunchRequest(
+				entity.identity.guid,
+				entity.generation,
+				viewDirection,
+			),
+		);
+	}
+
+	/** Replace an entity's typed simulation physics flags and realization mode. */
+	async replaceExplorerEntityPhysicsState(
+		entity: Pick<DynamicEntityView, "generation"> & {
+			readonly identity: { readonly guid: number };
+		},
+		flags: DynamicEntityPhysicsFlags,
+		physicalMode: "pose-only" | "integrated",
+	): Promise<void> {
+		const session = this.dynamicEntitySession;
+		if (!session)
+			throw new Error(
+				"Explorer physics state update requires an active runtime.",
+			);
+		await session.replacePhysicsState({
+			guid: entity.identity.guid,
+			generation: entity.generation,
+			flags,
+			physicalMode,
+		});
 	}
 
 	/** Pull one exact current generation for disclosure-scoped volatile diagnostics. */

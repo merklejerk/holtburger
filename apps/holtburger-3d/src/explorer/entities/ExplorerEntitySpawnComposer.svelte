@@ -1,5 +1,6 @@
 <script lang="ts">
-	import { useAppInputPolicy } from "../../lib/input/app-input-policy-context";
+	import ResetIcon from "../../assets/icons/hud-reset.svg?component";
+	import { useExplorerToastPublisher } from "../explorer-toast-context";
 	import {
 		EXPLORER_SPAWN_DISTANCE,
 		EXPLORER_WEENIE_SEARCH_RESULT_LIMIT,
@@ -8,69 +9,62 @@
 	} from "./entity-commands";
 	import {
 		classifyExplorerWeenieInput,
-		editExplorerWeeniePicker,
-		resolveExplorerWeenieSpawnTarget,
-		selectExplorerWeenie,
 		settleExplorerWeenieSearch,
-		type ExplorerWeeniePickerState,
 	} from "./weenie-picker-state";
 
-	const { keyboard } = useAppInputPolicy();
-
 	const SEARCH_DELAY_MS = 160;
-	const LISTBOX_ID = "explorer-weenie-results";
 
 	interface Props {
 		readonly enabled: boolean;
 		readonly busy: boolean;
 		readonly spawning: boolean;
-		readonly operationError: string | null;
+		readonly recordCount: number | null;
 		readonly search: (
 			request: ExplorerWeenieSearchRequest,
 		) => Promise<readonly ExplorerWeenieSearchResult[]>;
 		readonly spawn: (wcid: number, distance: number) => Promise<void>;
 	}
 
-	let { enabled, busy, spawning, operationError, search, spawn }: Props =
-		$props();
-	let picker = $state<ExplorerWeeniePickerState>(editExplorerWeeniePicker(""));
+	let { enabled, busy, spawning, recordCount, search, spawn }: Props = $props();
+	const publishToast = useExplorerToastPublisher();
+
+	let query = $state("");
 	let distance = $state(EXPLORER_SPAWN_DISTANCE.default);
 	let results = $state<readonly ExplorerWeenieSearchResult[]>([]);
-	let highlightedIndex = $state<number | null>(null);
-	let resultsVisible = $state(false);
 	let searchPending = $state(false);
-	let searchError = $state<string | null>(null);
-	let targetError = $state<string | null>(null);
+	let searchFailed = $state(false);
 	let queryRevision = 0;
 	let debounceTimer: ReturnType<typeof setTimeout> | undefined;
 	let inputElement: HTMLInputElement | undefined;
 
-	const intent = $derived(classifyExplorerWeenieInput(picker.input));
-	const numericError = $derived(
-		picker.kind === "editing" && intent.kind === "numeric"
-			? intent.result.kind === "invalid"
-				? intent.result.message
-				: null
+	const intent = $derived(classifyExplorerWeenieInput(query));
+	const numericWcid = $derived(
+		intent.kind === "numeric" && intent.result.kind === "valid"
+			? intent.result.value
 			: null,
 	);
-	const listOpen = $derived(
-		picker.kind === "editing" && resultsVisible && results.length > 0,
+	const numericError = $derived(
+		intent.kind === "numeric" && intent.result.kind === "invalid"
+			? intent.result.message
+			: null,
+	);
+	const placeholder = $derived(
+		recordCount !== null
+			? `Search ${recordCount.toLocaleString()} weenies…`
+			: "Search weenies…",
 	);
 
 	$effect(() => () => {
 		if (debounceTimer !== undefined) clearTimeout(debounceTimer);
 	});
 
-	function editInput(input: string): void {
-		picker = editExplorerWeeniePicker(input);
-		targetError = null;
-		searchError = null;
+	function updateQuery(nextQuery: string): void {
+		query = nextQuery;
+		searchFailed = false;
 		results = [];
-		highlightedIndex = null;
-		resultsVisible = false;
 		queryRevision += 1;
 		if (debounceTimer !== undefined) clearTimeout(debounceTimer);
-		const nextIntent = classifyExplorerWeenieInput(input);
+		const nextIntent = classifyExplorerWeenieInput(nextQuery);
 		if (nextIntent.kind !== "search" || !enabled) {
 			searchPending = false;
 			return;
@@ -83,10 +77,13 @@
 		);
 	}
 
-	async function runSearch(query: string, revision: number): Promise<void> {
+	async function runSearch(
+		searchQuery: string,
+		revision: number,
+	): Promise<void> {
 		try {
 			const nextResults = await search({
-				query,
+				query: searchQuery,
 				limit: EXPLORER_WEENIE_SEARCH_RESULT_LIMIT,
 			});
 			const settlement = settleExplorerWeenieSearch(
@@ -96,285 +93,219 @@
 			);
 			if (settlement.kind === "stale") return;
 			results = settlement.value;
-			highlightedIndex = settlement.value.length > 0 ? 0 : null;
-			resultsVisible = true;
-			searchError = null;
+			searchFailed = false;
 		} catch (error) {
 			const settlement = settleExplorerWeenieSearch(
 				queryRevision,
 				revision,
-				errorMessage(error),
+				error instanceof Error ? error.message : String(error),
 			);
 			if (settlement.kind === "stale") return;
 			results = [];
-			highlightedIndex = null;
-			resultsVisible = false;
-			searchError = settlement.value;
+			searchFailed = true;
+			publishToast({ message: settlement.value, tone: "warning" });
 		} finally {
 			if (revision === queryRevision) searchPending = false;
 		}
 	}
 
-	function selectResult(result: ExplorerWeenieSearchResult): void {
-		queryRevision += 1;
-		picker = selectExplorerWeenie(result);
-		results = [];
-		highlightedIndex = null;
-		resultsVisible = false;
-		searchPending = false;
-		searchError = null;
-		targetError = null;
-	}
-
-	function clearPicker(): void {
-		editInput("");
+	function resetSearch(): void {
+		updateQuery("");
 		inputElement?.focus();
-	}
-
-	function handleKeydown(event: KeyboardEvent): void {
-		if (event.key === "Escape") {
-			queryRevision += 1;
-			resultsVisible = false;
-			searchPending = false;
-			if (debounceTimer !== undefined) clearTimeout(debounceTimer);
-			return;
-		}
-		if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-			if (results.length === 0) return;
-			event.preventDefault();
-			resultsVisible = true;
-			const direction = event.key === "ArrowDown" ? 1 : -1;
-			const current = highlightedIndex ?? (direction > 0 ? -1 : 0);
-			const next = (current + direction + results.length) % results.length;
-			highlightedIndex = next;
-			queueMicrotask(() =>
-				document
-					.getElementById(resultId(next))
-					?.scrollIntoView({ block: "nearest" }),
-			);
-			return;
-		}
-		if (event.key === "Enter" && listOpen && highlightedIndex !== null) {
-			event.preventDefault();
-			selectResult(results[highlightedIndex]);
-		}
-	}
-
-	async function submit(event: SubmitEvent): Promise<void> {
-		event.preventDefault();
-		if (busy || !enabled) return;
-		try {
-			const wcid = resolveExplorerWeenieSpawnTarget(picker);
-			targetError = null;
-			await spawn(wcid, distance);
-		} catch (error) {
-			targetError = errorMessage(error);
-		}
-	}
-
-	function resultId(index: number): string {
-		return `${LISTBOX_ID}-${index}`;
-	}
-
-	function errorMessage(error: unknown): string {
-		return error instanceof Error ? error.message : String(error);
 	}
 </script>
 
-<form class="spawn-composer" onsubmit={submit}>
-	<fieldset class="explorer-section" disabled={!enabled || busy}>
-		<legend>Spawn entity</legend>
-		<label class="ui-label">
-			<span>Weenie</span>
-			<div class="weenie-picker">
-				<input
-					bind:this={inputElement}
-					class="ui-input weenie-input"
-					value={picker.input}
-					placeholder="Name, class, or WCID"
-					spellcheck="false"
-					autocomplete="off"
-					role="combobox"
-					aria-autocomplete="list"
-					aria-expanded={listOpen}
-					aria-controls={LISTBOX_ID}
-					aria-activedescendant={listOpen && highlightedIndex !== null
-						? resultId(highlightedIndex)
-						: undefined}
-					oninput={(event) => editInput(event.currentTarget.value)}
-					use:keyboard.scope={{ keydown: handleKeydown }}
-					onfocus={() => (resultsVisible = results.length > 0)}
-					onblur={() => (resultsVisible = false)}
-				/>
-				{#if picker.input.length > 0}
-					<button
-						type="button"
-						class="picker-clear ui-hud-button"
-						aria-label="Clear weenie"
-						title="Clear weenie"
-						onclick={clearPicker}>×</button
-					>
-				{/if}
-				{#if listOpen}
-					<ul id={LISTBOX_ID} class="weenie-results ui-well" role="listbox">
-						{#each results as result, index (`${result.wcid}-${result.className}`)}
-							<li
-								id={resultId(index)}
-								role="option"
-								aria-selected={index === highlightedIndex}
-								class="ui-option"
-								onpointerdown={(event) => {
-									event.preventDefault();
-									selectResult(result);
-								}}
-							>
-								<span class="result-heading">
-									<strong>{result.name}</strong>
-									<span>WCID {result.wcid}</span>
-								</span>
-								<span class="result-class">{result.className}</span>
-							</li>
-						{/each}
-					</ul>
-				{/if}
-			</div>
-		</label>
-
-		{#if picker.kind === "selected"}
-			<p class="picker-receipt">
-				WCID {picker.selection.wcid} · {picker.selection.className}
-			</p>
-		{:else if numericError !== null}
-			<p class="picker-message invalid">{numericError}</p>
-		{:else if searchPending}
-			<p class="picker-message">Searching catalog…</p>
-		{:else if intent.kind === "search" && resultsVisible && results.length === 0 && searchError === null}
-			<p class="picker-message">No matching weenies.</p>
-		{/if}
-		{#if searchError !== null}
-			<p class="picker-message invalid" role="alert">{searchError}</p>
-		{/if}
-
-		<div class="spawn-actions">
-			<label class="ui-label distance-field">
-				<span>Distance</span>
-				<input
-					class="ui-input"
-					bind:value={distance}
-					type="number"
-					min={EXPLORER_SPAWN_DISTANCE.minimum}
-					step={EXPLORER_SPAWN_DISTANCE.step}
-				/>
-			</label>
-			<button class="explorer-action ui-button" type="submit">
-				{spawning ? "Spawning…" : "Spawn in front"}
+<div class="spawn-composer">
+	<div class="spawn-controls">
+		<div class="search-line">
+			<input
+				bind:this={inputElement}
+				type="search"
+				class="ui-input"
+				value={query}
+				{placeholder}
+				aria-label="Search weenies by name, class, or WCID"
+				spellcheck="false"
+				autocomplete="off"
+				disabled={!enabled}
+				oninput={(event) => updateQuery(event.currentTarget.value)}
+			/>
+			<button
+				type="button"
+				class="ui-button ui-icon-button reset-search-button"
+				title="Reset search"
+				aria-label="Reset weenie search"
+				disabled={query.length === 0}
+				onclick={resetSearch}
+			>
+				<ResetIcon />
 			</button>
 		</div>
-		{#if targetError !== null}
-			<p class="picker-message invalid" role="alert">{targetError}</p>
+
+		<details class="spawn-options">
+			<summary>Options · {distance} m</summary>
+			<div class="spawn-options-body">
+				<label class="distance-field">
+					<span>Spawn distance (m)</span>
+					<input
+						class="ui-input"
+						bind:value={distance}
+						type="number"
+						min={EXPLORER_SPAWN_DISTANCE.minimum}
+						step={EXPLORER_SPAWN_DISTANCE.step}
+						disabled={!enabled || busy}
+					/>
+				</label>
+			</div>
+		</details>
+
+		{#if numericError !== null}
+			<p class="picker-message invalid">{numericError}</p>
+		{:else if searchPending}
+			<p class="picker-message" role="status">Searching catalog…</p>
+		{:else if intent.kind === "search" && results.length === 0 && !searchFailed}
+			<p class="picker-message">No matching weenies.</p>
 		{/if}
-		{#if operationError !== null}
-			<p class="picker-message invalid" role="alert">{operationError}</p>
+	</div>
+
+	<div class="spawn-results">
+		{#if numericWcid !== null}
+			<ul class="weenie-results">
+				<li class="ui-catalog-row weenie-result-row">
+					<div class="result-info">
+						<strong>WCID {numericWcid}</strong>
+						<span class="result-meta">Direct WCID</span>
+					</div>
+					<button
+						type="button"
+						class="ui-button result-spawn-button"
+						disabled={!enabled || busy}
+						onclick={() => void spawn(numericWcid, distance)}
+					>
+						{spawning ? "Spawning…" : "Spawn"}
+					</button>
+				</li>
+			</ul>
+		{:else if results.length > 0}
+			<ul class="weenie-results">
+				{#each results as result (`${result.wcid}-${result.className}`)}
+					<li class="ui-catalog-row weenie-result-row">
+						<div class="result-info">
+							<strong>{result.name}</strong>
+							<span class="result-meta"
+								>WCID {result.wcid} · {result.className}</span
+							>
+						</div>
+						<button
+							type="button"
+							class="ui-button result-spawn-button"
+							disabled={!enabled || busy}
+							onclick={() => void spawn(result.wcid, distance)}
+						>
+							{spawning ? "Spawning…" : "Spawn"}
+						</button>
+					</li>
+				{/each}
+			</ul>
 		{/if}
-	</fieldset>
-</form>
+	</div>
+</div>
 
 <style>
 	@layer components {
-		.spawn-composer,
-		.spawn-composer fieldset {
-			min-width: 0;
-		}
-
-		.weenie-picker {
-			position: relative;
-			min-width: 0;
-		}
-
-		.weenie-input {
-			width: 100%;
-			padding-right: 30px;
-		}
-
-		.picker-clear {
-			position: absolute;
-			top: 2px;
-			right: 2px;
-			width: 25px;
-			min-height: 24px;
-			padding: 0;
-			border: 0;
-			background: transparent;
-			color: var(--ui-color-muted);
-			font-size: 1.1rem;
-			z-index: 2;
-		}
-
-		.weenie-results {
-			position: absolute;
-			top: calc(100% + 3px);
-			left: 0;
-			right: 0;
-			z-index: 5;
+		.spawn-composer {
 			display: grid;
-			max-height: min(260px, 42dvh);
-			margin: 0;
-			padding: 3px;
+			grid-template-rows: auto minmax(0, 1fr);
+			gap: var(--ui-filter-gap);
+			height: 100%;
+			min-height: 0;
+			min-width: 0;
+		}
+		.spawn-controls {
+			display: grid;
+			gap: var(--ui-filter-gap);
+			padding-bottom: var(--ui-filter-gap);
+			border-bottom: 1px solid var(--ui-color-border);
+			min-width: 0;
+		}
+		.search-line {
+			display: flex;
+			gap: var(--ui-filter-gap);
+		}
+		.search-line input {
+			min-width: 0;
+			flex: 1;
+		}
+		.reset-search-button {
+			width: 30px;
+			height: 30px;
+			padding: 5px;
+		}
+		.spawn-options summary {
+			cursor: pointer;
+			padding-block: 2px;
+			font-size: calc(var(--ui-font-size-caption) * var(--ui-text-scale));
+			color: var(--ui-color-muted);
+		}
+		.spawn-options-body {
+			padding-top: 6px;
+			padding-left: 14px;
+		}
+		.distance-field {
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			gap: 8px;
+			font-size: calc(var(--ui-font-size-caption) * var(--ui-text-scale));
+			color: var(--ui-color-muted);
+		}
+		.distance-field input {
+			width: 5.5rem;
+		}
+		.spawn-results {
+			min-height: 0;
 			overflow-y: auto;
+		}
+		.weenie-results {
+			display: grid;
+			gap: 4px;
+			margin: 0;
+			padding: 0;
 			list-style: none;
 		}
-
-		.weenie-results li {
-			display: grid;
-			gap: 2px;
-			min-width: 0;
-			padding: 6px 7px;
-			border: 1px solid transparent;
-			cursor: pointer;
-		}
-
-		.result-heading {
+		.weenie-result-row {
 			display: grid;
 			grid-template-columns: minmax(0, 1fr) auto;
 			gap: 8px;
-			align-items: baseline;
+			align-items: center;
+			padding: 6px 8px;
+			min-width: 0;
 		}
-
-		.result-heading strong,
-		.result-class {
+		.result-info {
+			display: grid;
+			gap: 2px;
+			min-width: 0;
+		}
+		.result-info strong,
+		.result-meta {
 			overflow: hidden;
 			text-overflow: ellipsis;
 			white-space: nowrap;
 		}
-
-		.result-heading span,
-		.result-class,
-		.picker-message,
-		.picker-receipt {
+		.result-meta,
+		.picker-message {
 			color: var(--ui-color-muted);
 			font-size: calc(var(--ui-font-size-caption) * var(--ui-text-scale));
 		}
-
-		.picker-message,
-		.picker-receipt {
-			margin: 5px 0 0;
+		.picker-message {
+			margin: 0;
 			overflow-wrap: anywhere;
 		}
-
+		.result-spawn-button {
+			white-space: nowrap;
+		}
 		.invalid {
 			color: var(--ui-color-danger);
-		}
-
-		.spawn-actions {
-			display: grid;
-			grid-template-columns: minmax(0, 7rem) minmax(0, 1fr);
-			gap: 8px;
-			align-items: end;
-			margin-top: 9px;
-		}
-
-		.spawn-actions button {
-			width: 100%;
 		}
 	}
 </style>

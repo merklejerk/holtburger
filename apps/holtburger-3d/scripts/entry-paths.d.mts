@@ -38,18 +38,40 @@ export type ClientLaunchArgumentName =
 	| "account"
 	| "password"
 	| "melee-max-chase-distance"
+	| "launcher-view"
 	| "ignore-config"
 	| "ignore-world-map-cache"
 	| "settings-file"
 	| "no-launcher"
 	| "no-updates";
+export type ExplorerLaunchArgumentName =
+	| "ignore-config"
+	| "ignore-world-map-cache"
+	| "settings-file"
+	| "no-launcher"
+	| "no-updates"
+	| "weenie-catalog"
+	| "location";
 export function parseClientLaunchArgument(argument: string): {
 	readonly name: ClientLaunchArgumentName;
 	readonly value: string | undefined;
 } | null;
+export function parseExplorerLaunchArgument(argument: string): {
+	readonly name: ExplorerLaunchArgumentName;
+	readonly value: string | undefined;
+} | null;
+export function isClientOnlyLaunchArgument(argument: string): boolean;
+export function isExplorerOnlyLaunchArgument(argument: string): boolean;
 export function partitionClientLaunchArguments(
 	args: readonly string[],
 	settingsDirectory?: string,
+): {
+	launchArguments: string[];
+	rendererArguments: string[];
+};
+export function partitionExplorerLaunchArguments(
+	args: readonly string[],
+	baseDirectory?: string,
 ): {
 	launchArguments: string[];
 	rendererArguments: string[];

@@ -264,25 +264,28 @@ describe("HostKinematicBoomSession", () => {
 		]);
 	});
 
-	it("bounds fixed playback to current and successor and restarts from newest explicit input", async () => {
+	it("replaces active playback immediately at each receipt instant and counts sequence gaps", async () => {
 		const session = new HostKinematicBoomSession(new RecordingTransport());
 		await session.start(TARGET, DISTANCE, [0, 1, 0], PROJECTION);
 		session.receive(advance(1, 10, 11), 32, 100);
 		const firstX = session.presentation(100)!.placement.position.x;
-		session.receive(advance(2, 11, 12), 32, 101);
-		session.receive(advance(3, 20, 21), 32, 102);
+		session.receive(advance(2, 11, 12), 32, 120);
+		expect(session.presentation(120)?.placement.position.x).toBeCloseTo(
+			firstX + 1,
+		);
 
-		expect(session.presentation(102)?.placement.position.x).toBeCloseTo(
+		session.receive(advance(4, 20, 21), 32, 130);
+		expect(session.presentation(130)?.placement.position.x).toBeCloseTo(
 			firstX + 10,
 		);
 		expect(session.status()).toMatchObject({
 			kind: "active",
-			sequence: 3,
+			sequence: 4,
 			droppedPaths: 1,
 		});
 	});
 
-	it("activates a larger projection only when its matching path reaches playback", async () => {
+	it("activates a larger projection once a host path acknowledges it", async () => {
 		const session = new HostKinematicBoomSession(new RecordingTransport());
 		await session.start(TARGET, DISTANCE, [0, 1, 0], PROJECTION);
 		session.receive(advance(1, 10, 11), 32, 100);
@@ -292,6 +295,8 @@ describe("HostKinematicBoomSession", () => {
 			PROJECTION.extent,
 		);
 		await session.setClearance(wider);
+		expect(session.acknowledgedProjection(105)?.revision).toBe(1);
+
 		session.receive(
 			advance(2, 11, 12, IDENTITY, {
 				projectionRevision: wider.revision,
@@ -301,8 +306,7 @@ describe("HostKinematicBoomSession", () => {
 			110,
 		);
 
-		expect(session.acknowledgedProjection(110)?.revision).toBe(1);
-		expect(session.acknowledgedProjection(132)?.revision).toBe(2);
+		expect(session.acknowledgedProjection(110)?.revision).toBe(2);
 	});
 
 	it("flushes interpolation history and snaps to an explicit host reseed", async () => {
@@ -387,6 +391,56 @@ describe("HostKinematicBoomSession", () => {
 			command: "stop_kinematic_boom",
 			args: { request: IDENTITY },
 		});
+		expect(session.status()).toEqual({ kind: "stopped" });
+	});
+
+	it("retains in-flight intermediate projection revisions until acknowledged", async () => {
+		const session = new HostKinematicBoomSession(new RecordingTransport());
+		await session.start(TARGET, DISTANCE, [0, 1, 0], PROJECTION);
+		const rev2 = { ...PROJECTION, revision: 2, clearanceRadius: 0.3 };
+		const rev3 = { ...PROJECTION, revision: 3, clearanceRadius: 0.35 };
+		await session.setClearance(rev2);
+		await session.setClearance(rev3);
+
+		// Receiving a tick still acknowledging rev 1 must not prune in-flight rev 2.
+		session.receive(advance(1, 10, 11), 32, 0);
+		expect(session.acknowledgedProjection(0)?.revision).toBe(1);
+
+		const tickRev2 = {
+			...advance(2, 11, 12),
+			clearance: { projectionRevision: 2, radius: 0.3 },
+		};
+		session.receive(tickRev2, 32, 32);
+		expect(session.acknowledgedProjection(32)?.revision).toBe(2);
+	});
+
+	it("drains pre-registration outputs before follow-up clearance await without racing stop", async () => {
+		let releaseClearance!: () => void;
+		const clearanceGate = new Promise<void>((resolve) => {
+			releaseClearance = resolve;
+		});
+		const transport = new RecordingTransport();
+		const originalInvoke = transport.invoke.bind(transport);
+		transport.invoke = (command, args) => {
+			if (command === "set_kinematic_boom_clearance") {
+				return clearanceGate.then(() => originalInvoke(command, args));
+			}
+			return originalInvoke(command, args);
+		};
+		const session = new HostKinematicBoomSession(transport);
+		const starting = session.start(TARGET, DISTANCE, [0, 1, 0], PROJECTION);
+		// Queue a newer clearance + pre-registration tick while start_kinematic_boom is in flight.
+		void session.setClearance({
+			...PROJECTION,
+			revision: 2,
+			clearanceRadius: 0.3,
+		});
+		session.receive(advance(1, 10, 12), 32, 0);
+		await Promise.resolve();
+		// Stop while the follow-up setClearance await is pending; then release the gate.
+		await session.stop();
+		releaseClearance();
+		await starting;
 		expect(session.status()).toEqual({ kind: "stopped" });
 	});
 });

@@ -1,7 +1,6 @@
 <script lang="ts">
 	import PerformancePanel from "../../app/performance/PerformancePanel.svelte";
 	import type { PerformanceSession } from "../../app/performance/performance-session";
-	import { onMount } from "svelte";
 	import type { RendererFrameDiagnosticsSnapshot } from "../../lib/game/renderer/renderer";
 	import type { GamePresentationRuntime } from "../../lib/game/runtime/game-presentation-runtime";
 	import {
@@ -10,8 +9,11 @@
 		type ExplorerFrameDiagnosticReport,
 	} from "../world/frame-diagnostic-report";
 	import { EXPLORER_TUNING } from "../explorer-tuning";
+	import { useExplorerToastPublisher } from "../explorer-toast-context";
 
 	interface Props {
+		/** Stop background diagnostic polling while the panel or tab is hidden. */
+		readonly visible?: boolean;
 		/** Pull the latest atomic renderer diagnostic read. */
 		readonly readRendererFrameDiagnostics: () => RendererFrameDiagnosticsSnapshot | null;
 		/** Pull the latest authored-dynamic residency diagnostics. */
@@ -25,23 +27,25 @@
 	}
 
 	let {
+		visible = true,
 		readRendererFrameDiagnostics,
 		readAuthoredDynamicRuntimeDiagnostics,
 		readPerformanceSession,
 		captureReport,
 	}: Props = $props();
+	const publishToast = useExplorerToastPublisher();
 	let diagnostics = $state<RendererFrameDiagnosticsSnapshot | null>(null);
 	let dynamics = $state<ReturnType<
 		GamePresentationRuntime["getAuthoredDynamicRuntimeDiagnostics"]
 	> | null>(null);
-	let exportStatus = $state<string | null>(null);
 
 	function sampleDiagnostics(): void {
 		diagnostics = readRendererFrameDiagnostics();
 		dynamics = readAuthoredDynamicRuntimeDiagnostics();
 	}
 
-	onMount(() => {
+	$effect(() => {
+		if (!visible) return;
 		sampleDiagnostics();
 		const interval = window.setInterval(
 			sampleDiagnostics,
@@ -67,9 +71,15 @@
 			await navigator.clipboard.writeText(
 				serializeExplorerFrameDiagnosticReport(report),
 			);
-			exportStatus = "Copied scene inspection snapshot.";
+			publishToast({
+				message: "Copied scene inspection snapshot.",
+				tone: "status",
+			});
 		} catch (error) {
-			exportStatus = error instanceof Error ? error.message : String(error);
+			publishToast({
+				message: error instanceof Error ? error.message : String(error),
+				tone: "warning",
+			});
 		}
 	}
 
@@ -86,9 +96,15 @@
 			anchor.href = url;
 			anchor.click();
 			window.setTimeout(() => URL.revokeObjectURL(url), 0);
-			exportStatus = `Downloaded ${anchor.download}.`;
+			publishToast({
+				message: `Downloaded ${anchor.download}.`,
+				tone: "status",
+			});
 		} catch (error) {
-			exportStatus = error instanceof Error ? error.message : String(error);
+			publishToast({
+				message: error instanceof Error ? error.message : String(error),
+				tone: "warning",
+			});
 		}
 	}
 </script>
@@ -112,9 +128,6 @@
 			Download scene JSON
 		</button>
 	</div>
-	{#if exportStatus !== null}
-		<p class="explorer-frame-status" role="status">{exportStatus}</p>
-	{/if}
 
 	<PerformancePanel readSession={readPerformanceSession} />
 

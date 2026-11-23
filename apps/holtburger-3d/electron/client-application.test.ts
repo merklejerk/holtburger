@@ -11,11 +11,18 @@ function deferred<T>() {
 	return { promise, resolve };
 }
 const configuration = () => ({
+	kind: "client" as const,
 	contentPath: null,
 	host: "localhost",
 	port: 9000,
 	account: "test",
 	password: "secret",
+});
+const explorerConfiguration = () => ({
+	kind: "explorer" as const,
+	contentPath: null,
+	weenieCatalogPath: null,
+	initialLocation: null,
 });
 function setup(launcherEnabled: boolean) {
 	const dependencies = {
@@ -24,7 +31,12 @@ function setup(launcherEnabled: boolean) {
 		initialize: vi.fn(async () => {}),
 		retire: vi.fn(async () => {}),
 		showPicker: vi
-			.fn<(diagnostic: string | null) => Promise<void>>()
+			.fn<
+				(
+					diagnostic: string | null,
+					view: "client" | "explorer",
+				) => Promise<void>
+			>()
 			.mockResolvedValue(undefined),
 		flushLauncher: vi.fn(async () => {}),
 		exit: vi.fn(),
@@ -107,7 +119,21 @@ describe("single-window application attempt lifetime", () => {
 		native.resolve();
 		startup.resolve();
 		await back;
-		expect(app.showPicker).toHaveBeenCalledExactlyOnceWith("Disconnected");
+		expect(app.showPicker).toHaveBeenCalledExactlyOnceWith(
+			"Disconnected",
+			"client",
+		);
+	});
+	it("returns to the Explorer launcher view after retiring an Explorer attempt", async () => {
+		const app = setup(true);
+		await app.owner.play(async () => explorerConfiguration());
+		await vi.waitFor(() => expect(app.owner.phase).toBe("session"));
+		await app.owner.back(null);
+		expect(app.showPicker).toHaveBeenCalledExactlyOnceWith(null, "explorer");
+		await app.owner.play(async () => configuration());
+		await vi.waitFor(() => expect(app.owner.phase).toBe("session"));
+		await app.owner.back(null);
+		expect(app.showPicker).toHaveBeenLastCalledWith(null, "client");
 	});
 	it("Quit supersedes return navigation and drains the launcher even after native failure", async () => {
 		const app = setup(true);
@@ -131,7 +157,10 @@ describe("single-window application attempt lifetime", () => {
 		app.initialize.mockRejectedValue(new Error("Invalid game settings"));
 		await app.owner.play(async () => configuration());
 		await vi.waitFor(() =>
-			expect(app.showPicker).toHaveBeenCalledWith("Invalid game settings"),
+			expect(app.showPicker).toHaveBeenCalledWith(
+				"Invalid game settings",
+				"client",
+			),
 		);
 		expect(app.owner.canPlay).toBe(true);
 		app.initialize.mockResolvedValue();
@@ -154,7 +183,10 @@ it.each([true, false])(
 		await app.owner.back(diagnostic);
 		expect(app.retire).toHaveBeenCalledOnce();
 		if (launcher) {
-			expect(app.showPicker).toHaveBeenCalledExactlyOnceWith(diagnostic);
+			expect(app.showPicker).toHaveBeenCalledExactlyOnceWith(
+				diagnostic,
+				"client",
+			);
 			expect(app.owner.canPlay).toBe(true);
 		} else expect(app.exit).toHaveBeenCalledExactlyOnceWith([diagnostic]);
 	},

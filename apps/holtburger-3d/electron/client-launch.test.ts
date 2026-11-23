@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 import { resolve } from "node:path";
 import {
 	electronApplicationArguments,
+	isClientOnlyArgument,
+	isExplorerOnlyArgument,
 	parseClientLaunchArguments,
+	parseExplorerLaunchArguments,
 } from "./client-launch";
 
 describe("Electron application arguments", () => {
@@ -128,6 +131,7 @@ describe("parseClientLaunchArguments", () => {
 				account: "ash",
 				password: "secret",
 			},
+			initialLauncherView: "client",
 			noLauncher: false,
 			noUpdates: false,
 			ignorePersistedConfig: false,
@@ -155,6 +159,7 @@ describe("parseClientLaunchArguments", () => {
 				account: "ash",
 				password: "",
 			},
+			initialLauncherView: "client",
 			noLauncher: false,
 			noUpdates: false,
 			ignorePersistedConfig: false,
@@ -245,6 +250,7 @@ describe("parseClientLaunchArguments", () => {
 				account: "ash",
 				password: "secret",
 			},
+			initialLauncherView: "client",
 			ignorePersistedConfig: true,
 			ignoreWorldMapCache: false,
 			noLauncher: false,
@@ -263,5 +269,90 @@ describe("parseClientLaunchArguments", () => {
 		expect(() =>
 			parseClientLaunchArguments(["--account=ash", "-a", "other"]),
 		).toThrow(/specified more than once/);
+	});
+});
+
+describe("Explorer launch arguments", () => {
+	it("parses shared desktop flags alongside Explorer-only catalog and location flags", () => {
+		expect(
+			parseExplorerLaunchArguments([
+				"--no-launcher",
+				"--no-updates",
+				"-i",
+				"--ignore-world-map-cache",
+				"--settings-file",
+				"custom.json",
+				"--weenie-catalog=data/weenies.hwc",
+				"--location",
+				"0xA9B4FFFF",
+				"--dev",
+			]),
+		).toEqual({
+			startup: {
+				kind: "explorer",
+				contentPath: null,
+				weenieCatalogPath: resolve("data/weenies.hwc"),
+				initialLocation: "0xA9B4FFFF",
+			},
+			noLauncher: true,
+			noUpdates: true,
+			ignorePersistedConfig: true,
+			ignoreWorldMapCache: true,
+			settingsFile: resolve("custom.json"),
+			rendererArguments: ["--dev"],
+		});
+	});
+
+	it("partitions client-only and explorer-only flags cleanly", () => {
+		expect(isClientOnlyArgument("--account=ash")).toBe(true);
+		expect(isClientOnlyArgument("--launcher-view=explorer")).toBe(true);
+		expect(isClientOnlyArgument("-s")).toBe(true);
+		expect(isClientOnlyArgument("--no-launcher")).toBe(false);
+		expect(isClientOnlyArgument("--settings-file=a.json")).toBe(false);
+
+		expect(isExplorerOnlyArgument("--weenie-catalog=a.hwc")).toBe(true);
+		expect(isExplorerOnlyArgument("--location=0xA9B4")).toBe(true);
+		expect(isExplorerOnlyArgument("--no-launcher")).toBe(false);
+	});
+
+	it("rejects duplicate or empty Explorer launch arguments", () => {
+		expect(() =>
+			parseExplorerLaunchArguments([
+				"--weenie-catalog=a.hwc",
+				"--weenie-catalog=b.hwc",
+			]),
+		).toThrow(/specified more than once/);
+		expect(() => parseExplorerLaunchArguments(["--weenie-catalog="])).toThrow(
+			/cannot be empty/,
+		);
+		expect(() => parseExplorerLaunchArguments(["--location"])).toThrow(
+			/requires a value/,
+		);
+	});
+
+	it("supports selecting the initial launcher view without starting a direct session", () => {
+		expect(parseClientLaunchArguments([]).initialLauncherView).toBe("client");
+		expect(
+			parseClientLaunchArguments(["--launcher-view=explorer", "--debug"]),
+		).toMatchObject({
+			startup: null,
+			initialLauncherView: "explorer",
+			rendererArguments: ["--debug"],
+		});
+		expect(
+			parseClientLaunchArguments(["--launcher-view", "client"]),
+		).toMatchObject({
+			startup: null,
+			initialLauncherView: "client",
+		});
+		expect(() =>
+			parseClientLaunchArguments(["--launcher-view=invalid"]),
+		).toThrow(/must be "client" or "explorer"/);
+		expect(() =>
+			parseClientLaunchArguments(["--launcher-view=explorer", "--account=ash"]),
+		).toThrow(/cannot be combined/);
+		expect(() =>
+			parseClientLaunchArguments(["--launcher-view=explorer", "--no-launcher"]),
+		).toThrow(/cannot be combined/);
 	});
 });

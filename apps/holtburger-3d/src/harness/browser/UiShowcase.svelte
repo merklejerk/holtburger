@@ -86,7 +86,7 @@
 	} from "../../client/housing/housing-contract";
 	import { ClientHouseCrystalState } from "../../client/housing/house-crystal-state";
 	import { ClientHousingManagementState } from "../../client/housing/housing-management-state";
-	import { provideClientHudGeometry } from "../../client/hud/hud-geometry-context";
+	import { provideHudGeometry as provideClientHudGeometry } from "../../app/hud/hud-geometry-context";
 	import { provideClientInput } from "../../client/session/input-context";
 	import {
 		clientInputConfiguration,
@@ -148,10 +148,10 @@
 	} from "../../client/magic/spells";
 	import { ClientSummonPresentation } from "../../client/combat/summon-presentation";
 	import {
-		CLIENT_TOAST_DURATION_MS,
-		ClientToastCenter,
-		type ClientToast,
-	} from "../../client/hud/toast-center";
+		HUD_TOAST_DURATION_MS as CLIENT_TOAST_DURATION_MS,
+		HudToastCenter as ClientToastCenter,
+		type HudToast as ClientToast,
+	} from "../../app/hud/toast-center";
 	import { ClientTradeState } from "../../client/inventory/trade-state";
 	import {
 		CLIENT_NEARBY_TUNING,

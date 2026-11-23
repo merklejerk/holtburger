@@ -12,7 +12,7 @@
 		type ActionItemDisplay,
 	} from "./action-item";
 	import { onMount, tick } from "svelte";
-	import { useClientHudGeometry } from "./hud-geometry-context";
+	import { useHudGeometry as useClientHudGeometry } from "../../app/hud/hud-geometry-context";
 	import ClientActionBarView from "./ClientActionBar.svelte";
 	import type { ItemDragSession } from "../inventory/item-drag";
 	import type { ClientWorldContainerPanelState } from "../inventory/world-container-panel-state";
@@ -39,7 +39,8 @@
 		resetActionBarPlacements,
 		type ActionBarGeometry,
 	} from "./action-bar-layout";
-	import { CLIENT_TUNING, CLIENT_HUD_SNAP_TUNING } from "../settings/tuning";
+	import { HUD_SNAP_TUNING } from "../../app/hud/hud-snapping";
+	import { CLIENT_TUNING } from "../settings/tuning";
 	import type { ClientKeyboardConfiguration } from "../../lib/input/input-contract";
 	import type { InputPlatform } from "../../lib/input/input-platform";
 	interface Props {
@@ -117,7 +118,7 @@
 			bars,
 			readGeometry,
 			viewport,
-			CLIENT_HUD_SNAP_TUNING.gap,
+			HUD_SNAP_TUNING.gap,
 		);
 		if (reset === null) {
 			inventory.reportFailure(
@@ -157,7 +158,7 @@
 						bar.id === id ? sourceGeometry.bounds : readGeometry(bar.id).bounds,
 					),
 					viewport,
-					CLIENT_HUD_SNAP_TUNING.gap,
+					HUD_SNAP_TUNING.gap,
 				);
 				if (rectangle === null) {
 					inventory.reportFailure(

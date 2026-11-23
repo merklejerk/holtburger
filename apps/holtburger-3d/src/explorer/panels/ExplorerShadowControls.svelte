@@ -1,9 +1,7 @@
 <script lang="ts">
 	import {
-		ENTITY_SHADOW_MODES,
 		MAX_OUTDOOR_SHADOW_SELECTED_ROOTS,
 		type IndoorGroundingSettings,
-		type EntityShadowMode,
 		type EntityShadowSettings,
 		type OutdoorDirectionalShadowSettings,
 		type OutdoorShadowCasterBudget,
@@ -67,14 +65,6 @@
 		});
 	}
 
-	function updateMode(event: Event): void {
-		const mode = (event.currentTarget as HTMLSelectElement).value;
-		if (!ENTITY_SHADOW_MODES.includes(mode as EntityShadowMode)) {
-			throw new Error(`Explorer selected unknown entity-shadow mode ${mode}.`);
-		}
-		updateSettings({ ...settings, mode: mode as EntityShadowMode });
-	}
-
 	function updateOutdoorDirectional(
 		field: keyof OutdoorDirectionalShadowSettings,
 		event: Event,
@@ -88,15 +78,6 @@
 		});
 	}
 </script>
-
-<label class="ui-label">
-	<span>Entity shadows</span>
-	<select class="ui-input" value={settings.mode} onchange={updateMode}>
-		<option value="none">None</option>
-		<option value="simple">Simple</option>
-		<option value="shadow-maps">Shadow maps</option>
-	</select>
-</label>
 
 {#if settings.mode === "shadow-maps"}
 	<ExplorerControlGroup title="Outdoor PSSM">

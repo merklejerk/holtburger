@@ -1,8 +1,7 @@
-import type { ClientClosePreparation } from "../../client/session/close-contract";
+import type { ClientClosePreparation } from "../../lib/host/close-contract";
 
-/** Game construction and close delegation span the interval before ClientApp registers cleanup. */
+/** Game construction and close delegation span the interval before the app registers cleanup. */
 export class StartupGameLifecycle {
-	readonly #mode: "client" | "explorer";
 	readonly #cancellation = new AbortController();
 	readonly #registrationWaiters = new Set<{
 		resolve: () => void;
@@ -13,10 +12,6 @@ export class StartupGameLifecycle {
 	#mount: Promise<void> | null = null;
 	#close: Promise<ClientClosePreparation> | null = null;
 
-	constructor(mode: "client" | "explorer") {
-		this.#mode = mode;
-	}
-
 	/** Starts at most once; a close arriving before admission prevents construction entirely. */
 	start(mount: (signal: AbortSignal) => Promise<boolean>): Promise<void> {
 		if (this.#mount !== null) return this.#mount;
@@ -25,7 +20,7 @@ export class StartupGameLifecycle {
 			if (this.#cancellation.signal.aborted) return;
 			const mounted = await mount(this.#cancellation.signal);
 			if (this.#mountFailure !== null) throw this.#mountFailure;
-			if (mounted && this.#mode === "client" && this.#cleanup === null)
+			if (mounted && this.#cleanup === null)
 				await new Promise<void>((resolve, reject) => {
 					this.#registrationWaiters.add({ resolve, reject });
 				});

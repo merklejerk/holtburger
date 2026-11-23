@@ -6,6 +6,7 @@
 	import type {
 		AppSettings,
 		AppSettingsSnapshot,
+		DefaultContentSnapshot,
 	} from "../app/desktop/app-settings-contract";
 	import { launcherTransport } from "./launcher-transport";
 	import { probeLauncherHardware } from "./launcher-hardware-info";
@@ -25,6 +26,12 @@
 			panelId: `${id}-graphics-panel`,
 		},
 		{
+			value: "content",
+			label: "Content",
+			id: `${id}-content-tab`,
+			panelId: `${id}-content-panel`,
+		},
+		{
 			value: "diagnostics",
 			label: "Diagnostics",
 			id: `${id}-diagnostics-tab`,
@@ -33,30 +40,66 @@
 	] as const;
 	/** Selection changes visibility while the dialog keeps its draft. */
 	let selected = $state<(typeof tabs)[number]["value"]>("graphics");
-	/** Loaded preferences and their editable draft share one lifecycle. */
+	/** Loaded preferences and their editable drafts share one lifecycle. */
 	let loaded = $state<{
 		snapshot: AppSettingsSnapshot;
 		draft: AppSettings;
+		content: DefaultContentSnapshot;
+		contentDraft: string;
 	} | null>(null);
-	/** Loading is cancellable; accepted save/copy actions finish before the modal closes. */
-	let operation = $state<"loading" | "idle" | "saving">("loading");
+	/** Loading is cancellable; accepted save/copy/browse actions finish before the modal closes. */
+	let operation = $state<"loading" | "idle" | "saving" | "browsing">("loading");
 	/** Failure reports remain available while the native graphics query is pending. */
 	let copying = $state(false);
-	const busy = $derived(operation === "saving" || copying);
+	const busy = $derived(
+		operation === "saving" || operation === "browsing" || copying,
+	);
 	let failure = $state<string | null>(null);
 	/** Brief acknowledgement in the copy button after a successful clipboard write. */
 	let copied = $state<"hardware" | "failure" | null>(null);
 	let copyStatus = $state<string | null>(null);
-	const COPY_CONFIRMATION_MS = 2_000;
-	/** Replaced on each copy and cleared when the dialog closes. */
+	/** Brief acknowledgement after persisting the default content directory. */
+	let contentSaved = $state(false);
+	const CONFIRMATION_MS = 2_000;
+	/** Replaced on each confirmation and cleared when the dialog closes. */
 	let copyConfirmationTimer: ReturnType<typeof setTimeout> | null = null;
+	let contentSavedTimer: ReturnType<typeof setTimeout> | null = null;
+
+	const normalizedContentDraft = $derived(
+		loaded === null
+			? null
+			: loaded.contentDraft.trim() === ""
+				? null
+				: loaded.contentDraft.trim(),
+	);
+	const canSaveContent = $derived(
+		loaded !== null &&
+			(normalizedContentDraft !== loaded.content.location ||
+				loaded.content.diagnostic !== null ||
+				loaded.content.attentionMessage !== null),
+	);
+
+	function clearContentSaved(): void {
+		if (contentSavedTimer !== null) clearTimeout(contentSavedTimer);
+		contentSavedTimer = null;
+		contentSaved = false;
+	}
 
 	async function load(): Promise<void> {
 		operation = "loading";
 		failure = null;
+		clearContentSaved();
 		try {
-			const snapshot = await transport.appSettings();
-			loaded = { snapshot, draft: { ...snapshot.settings } };
+			const [snapshot, content] = await Promise.all([
+				transport.appSettings(),
+				transport.defaultContent(),
+			]);
+			loaded = {
+				snapshot,
+				draft: { ...snapshot.settings },
+				content,
+				contentDraft: content.location ?? "",
+			};
 		} catch (error) {
 			failure = error instanceof Error ? error.message : String(error);
 		} finally {
@@ -70,6 +113,42 @@
 		try {
 			await transport.saveAppSettings(loaded.draft);
 			await transport.restart();
+		} catch (error) {
+			failure = error instanceof Error ? error.message : String(error);
+		} finally {
+			operation = "idle";
+		}
+	}
+	async function browseDefaultContent(): Promise<void> {
+		if (loaded === null || operation !== "idle") return;
+		operation = "browsing";
+		failure = null;
+		try {
+			const picked = await transport.chooseContentPath(normalizedContentDraft);
+			if (picked !== null) {
+				loaded.contentDraft = picked;
+				clearContentSaved();
+			}
+		} catch (error) {
+			failure = error instanceof Error ? error.message : String(error);
+		} finally {
+			operation = "idle";
+		}
+	}
+	async function saveDefaultContent(): Promise<void> {
+		if (loaded === null || operation !== "idle" || !canSaveContent) return;
+		clearContentSaved();
+		operation = "saving";
+		failure = null;
+		try {
+			const saved = await transport.saveDefaultContent(normalizedContentDraft);
+			loaded.content = saved;
+			loaded.contentDraft = saved.location ?? "";
+			contentSaved = true;
+			contentSavedTimer = setTimeout(() => {
+				contentSaved = false;
+				contentSavedTimer = null;
+			}, CONFIRMATION_MS);
 		} catch (error) {
 			failure = error instanceof Error ? error.message : String(error);
 		} finally {
@@ -95,7 +174,7 @@
 			copyConfirmationTimer = setTimeout(() => {
 				copied = null;
 				copyConfirmationTimer = null;
-			}, COPY_CONFIRMATION_MS);
+			}, CONFIRMATION_MS);
 		} catch (error) {
 			failure = error instanceof Error ? error.message : String(error);
 		} finally {
@@ -107,6 +186,7 @@
 	});
 	onDestroy(() => {
 		if (copyConfirmationTimer !== null) clearTimeout(copyConfirmationTimer);
+		if (contentSavedTimer !== null) clearTimeout(contentSavedTimer);
 	});
 </script>
 
@@ -178,6 +258,69 @@
 		<UiTabPanel
 			id={tabs[1].panelId}
 			labelledBy={tabs[1].id}
+			active={selected === "content"}
+		>
+			<div class="settings-section">
+				{#if loaded}
+					<p role="status">
+						Applies to future Client and Explorer launches. No restart required.
+					</p>
+					<div class="content-field">
+						<label for={`${id}-default-content`}
+							>Default content directory</label
+						>
+						<div class="content-path-input">
+							<input
+								id={`${id}-default-content`}
+								class="ui-input"
+								bind:value={loaded.contentDraft}
+								oninput={clearContentSaved}
+								placeholder="Automatic discovery"
+								disabled={busy}
+							/>
+							<div class="content-path-actions">
+								{#if loaded.contentDraft}
+									<button
+										class="ui-button ui-icon-button pregame-quiet"
+										type="button"
+										aria-label="Clear default content directory"
+										title="Use automatic discovery"
+										disabled={busy}
+										onclick={() => {
+											if (loaded) loaded.contentDraft = "";
+											clearContentSaved();
+										}}>×</button
+									>
+								{/if}
+								<button
+									class="ui-button ui-icon-button pregame-quiet"
+									type="button"
+									aria-label="Browse content folder"
+									title="Browse content folder"
+									disabled={busy}
+									onclick={() => void browseDefaultContent()}>…</button
+								>
+							</div>
+						</div>
+						<small>
+							DAT or HBA folder used unless a server or Explorer override is
+							set. Leave blank for automatic discovery.
+						</small>
+					</div>
+					{#if loaded.content.attentionMessage}
+						<p role="alert">{loaded.content.attentionMessage}</p>
+					{/if}
+					{#if loaded.content.diagnostic}
+						<p role="alert">{loaded.content.diagnostic}</p>
+					{/if}
+				{:else if operation === "loading"}
+					<p role="status">Loading app settings…</p>
+				{/if}
+			</div>
+		</UiTabPanel>
+		<UiTabPanel
+			id={tabs[2].panelId}
+			labelledBy={tabs[2].id}
 			active={selected === "diagnostics"}
 		>
 			<div class="settings-section">
@@ -239,6 +382,21 @@
 					>Retry</button
 				>
 			{/if}
+		{:else if selected === "content"}
+			{#if loaded}
+				<button
+					class="ui-button"
+					disabled={busy || loaded.contentDraft === ""}
+					onclick={() => {
+						if (loaded) loaded.contentDraft = "";
+						clearContentSaved();
+					}}>Use automatic</button
+				>
+			{:else if operation !== "loading"}
+				<button class="ui-button" disabled={busy} onclick={() => void load()}
+					>Retry</button
+				>
+			{/if}
 		{/if}
 		<button class="ui-button" disabled={busy} onclick={onCancel}>Cancel</button>
 		{#if selected === "graphics"}
@@ -246,6 +404,14 @@
 				class="ui-button"
 				disabled={busy || loaded === null}
 				onclick={() => void saveAndRestart()}>Save and restart</button
+			>
+		{:else if selected === "content"}
+			<button
+				class="ui-button"
+				aria-live="polite"
+				disabled={busy || !canSaveContent}
+				onclick={() => void saveDefaultContent()}
+				>{contentSaved ? "Saved!" : "Save"}</button
 			>
 		{/if}
 	</div>
@@ -259,6 +425,29 @@
 		.settings-section {
 			display: grid;
 			gap: var(--ui-overlay-gap);
+		}
+		.content-field {
+			display: grid;
+			gap: 6px;
+		}
+		.content-field small {
+			color: var(--ui-color-muted);
+		}
+		.content-path-input {
+			position: relative;
+		}
+		.content-path-input .ui-input {
+			width: 100%;
+			padding-inline-end: 54px;
+		}
+		.content-path-actions {
+			display: flex;
+			position: absolute;
+			inset-block: 2px;
+			inset-inline-end: 2px;
+		}
+		.content-path-actions .ui-icon-button {
+			width: 24px;
 		}
 		.diagnostic-actions {
 			display: flex;

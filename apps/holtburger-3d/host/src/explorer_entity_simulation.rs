@@ -58,8 +58,9 @@ impl HostFixedTickParticipant for ExplorerEntitySimulation {
                 .flat_map(|tick| tick.possession_event_outcomes.iter().copied())
                 .collect();
             self.boom.publish_target(&collection);
+            let boom = self.boom.advance(delta.as_secs_f32());
             self.delivery
-                .publish_fixed_tick(collection.ticks, None, delta, |envelope| {
+                .publish_fixed_tick(collection.ticks, boom, delta, |envelope| {
                     // A delivery failure does not roll back accepted physics or unregister simulation.
                     if let Err(error) = self.sink.publish(envelope) {
                         eprintln!("failed to publish Explorer fixed-tick envelope: {error:#}");

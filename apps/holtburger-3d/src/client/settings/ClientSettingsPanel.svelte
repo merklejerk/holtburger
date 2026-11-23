@@ -18,10 +18,10 @@
 		replaceClientBinding,
 	} from "../../lib/input/client-keyboard-bindings";
 
-	import ClientGraphicsSettingsControls from "./ClientGraphicsSettingsControls.svelte";
-	import ClientAudioSettingsControls from "./ClientAudioSettingsControls.svelte";
-	import ClientAppearanceSettingsControls from "./ClientAppearanceSettingsControls.svelte";
-	import "./settings-controls.css";
+	import GraphicsSettingsControls from "../../app/settings/GraphicsSettingsControls.svelte";
+	import AudioSettingsControls from "../../app/settings/AudioSettingsControls.svelte";
+	import AppearanceSettingsControls from "../../app/settings/AppearanceSettingsControls.svelte";
+	import "../../app/settings/settings-controls.css";
 	import UiTabs from "../../app/ui/UiTabs.svelte";
 	import UiTabPanel from "../../app/ui/UiTabPanel.svelte";
 	import ClientEnvironmentSettings from "./ClientEnvironmentSettings.svelte";
@@ -31,8 +31,8 @@
 	} from "./environment-settings";
 	import type { ClientWeatherPreset } from "./environment";
 	import { onMount } from "svelte";
-	import ClientBindingDialog from "./ClientBindingDialog.svelte";
-	import ClientHudIcon from "../hud/ClientHudIcon.svelte";
+	import ClientBindingDialog from "../../app/settings/BindingDialog.svelte";
+	import BindingRow from "../../app/settings/BindingRow.svelte";
 	import {
 		CLIENT_BINDING_GROUPS,
 		captureClientBinding,
@@ -64,7 +64,6 @@
 		KeyBinding,
 	} from "../../lib/input/input-contract";
 	import {
-		formatInputBinding,
 		formatInputPill,
 		modifierName,
 	} from "../../lib/input/input-presentation";
@@ -436,7 +435,7 @@
 			active={selectedTab === "graphics"}
 		>
 			<div class="settings-section">
-				<ClientGraphicsSettingsControls
+				<GraphicsSettingsControls
 					{graphics}
 					{textureFilteringCapabilities}
 					{onGraphicsChange}
@@ -449,7 +448,7 @@
 			active={selectedTab === "audio"}
 		>
 			<div class="settings-section">
-				<ClientAudioSettingsControls {audio} {onAudioChange} />
+				<AudioSettingsControls {audio} {onAudioChange} />
 			</div>
 		</UiTabPanel>
 		<UiTabPanel
@@ -542,7 +541,7 @@
 						/>
 					</div>
 				</details>
-				<ClientAppearanceSettingsControls {theme} {ui} {onUiChange} />
+				<AppearanceSettingsControls {theme} {ui} {onUiChange} />
 				<details class="ui-disclosure ui-disclosure-section" open>
 					<summary>Vital warnings</summary>
 					<div class="settings-section ui-disclosure-body">
@@ -697,76 +696,50 @@
 					</div>
 				</details>
 				{#each CLIENT_BINDING_GROUPS as group}
-					<details class="binding-group" open={group.title === "Movement"}>
+					<details
+						class="ui-disclosure ui-disclosure-section"
+						open={group.title === "Movement"}
+					>
 						<summary>{group.title}</summary>
-						{#if group.title === "Action bars"}
-							<label
-								>Alternate action modifier
-								<select
-									value={input.actionBars.alternate}
-									onchange={(event) =>
-										onInputChange({
-											...input,
-											actionBars: {
-												...input.actionBars,
-												alternate: event.currentTarget
-													.value as ClientInputConfiguration["actionBars"]["alternate"],
-											},
-										})}
-								>
-									<option value="shift"
-										>{modifierName("shift", displayPlatform)}</option
-									><option value="ctrl"
-										>{modifierName("ctrl", displayPlatform)}</option
-									><option value="alt"
-										>{modifierName("alt", displayPlatform)}</option
-									><option value="meta"
-										>{modifierName("meta", displayPlatform)}</option
+						<div class="ui-disclosure-body">
+							{#if group.title === "Action bars"}
+								<label
+									>Alternate action modifier
+									<select
+										value={input.actionBars.alternate}
+										onchange={(event) =>
+											onInputChange({
+												...input,
+												actionBars: {
+													...input.actionBars,
+													alternate: event.currentTarget
+														.value as ClientInputConfiguration["actionBars"]["alternate"],
+												},
+											})}
 									>
-								</select>
-							</label>
-						{/if}
-						{#each group.rows as row (row.id)}
-							<div class="binding-row">
-								<span class="binding-label">{row.label}</span>
-								<div class="binding-keys">
-									{#each readClientBinding(input, row.reference) as binding, index}
-										<button
-											type="button"
-											class="binding-key ui-keycap"
-											aria-label={`Remove ${formatInputBinding(binding, displayPlatform)} from ${row.label}`}
-											title={`Remove binding: ${formatInputBinding(binding, displayPlatform)}`}
-											onclick={(event) =>
-												clearBinding(row, index, event.currentTarget)}
-											><kbd aria-hidden="true"
-												>{formatInputPill(binding, displayPlatform)}</kbd
-											><span class="binding-key-remove" aria-hidden="true"
-												>×</span
-											></button
+										<option value="shift"
+											>{modifierName("shift", displayPlatform)}</option
+										><option value="ctrl"
+											>{modifierName("ctrl", displayPlatform)}</option
+										><option value="alt"
+											>{modifierName("alt", displayPlatform)}</option
+										><option value="meta"
+											>{modifierName("meta", displayPlatform)}</option
 										>
-									{:else}<span class="ui-muted">Unbound</span>{/each}
-								</div>
-								<div class="binding-actions ui-icon-actions">
-									<button
-										type="button"
-										class="ui-button ui-icon-button"
-										aria-label={`Add key for ${row.label}`}
-										title={`Add key for ${row.label}`}
-										onclick={(event) => startCapture(row, event.currentTarget)}
-										><ClientHudIcon name="add" /></button
-									>
-									<button
-										type="button"
-										class="ui-button ui-icon-button"
-										aria-label={`Restore default keys for ${row.label}`}
-										title={`Restore default keys for ${row.label}`}
-										onclick={(event) =>
-											restoreBinding(row, event.currentTarget)}
-										><ClientHudIcon name="reset" /></button
-									>
-								</div>
-							</div>
-						{/each}
+									</select>
+								</label>
+							{/if}
+							{#each group.rows as row (row.id)}
+								<BindingRow
+									label={row.label}
+									bindings={readClientBinding(input, row.reference)}
+									platform={displayPlatform}
+									onRemove={(index, source) => clearBinding(row, index, source)}
+									onAdd={(source) => startCapture(row, source)}
+									onReset={(source) => restoreBinding(row, source)}
+								/>
+							{/each}
+						</div>
 					</details>
 				{/each}
 			</div>
@@ -800,75 +773,6 @@
 			/* Extreme scales can leave less room than the tabs need. Keep a usable body
 			 * and let the outer settings surface scroll instead of collapsing it to zero. */
 			grid-template-rows: auto minmax(3em, 1fr);
-		}
-		.binding-group {
-			display: block;
-		}
-		.binding-group summary {
-			cursor: pointer;
-			font-weight: 700;
-			padding: 6px 2px;
-		}
-		.binding-row {
-			display: grid;
-			grid-template-columns: minmax(0, 1fr) auto;
-			grid-template-areas: "label actions" "keys actions";
-			column-gap: 8px;
-			row-gap: 2px;
-			align-items: center;
-			padding: 5px 2px;
-			border-bottom: 1px solid var(--ui-color-border);
-		}
-		.binding-label {
-			grid-area: label;
-			font-weight: 600;
-		}
-		.binding-keys {
-			grid-area: keys;
-			min-width: 0;
-			display: flex;
-			align-items: center;
-			flex-wrap: wrap;
-			gap: 3px;
-		}
-		.binding-actions {
-			grid-area: actions;
-			flex-wrap: nowrap;
-			gap: 3px;
-		}
-		.binding-key {
-			cursor: pointer;
-		}
-
-		.binding-key kbd,
-		.binding-key-remove {
-			grid-area: 1 / 1;
-		}
-		.binding-key kbd {
-			font: inherit;
-		}
-		.binding-key-remove {
-			font-size: 1.25em;
-			line-height: 1;
-			opacity: 0;
-			pointer-events: none;
-		}
-		.binding-key:hover,
-		.binding-key:focus-visible {
-			border-color: var(--ui-color-accent);
-			color: var(--ui-color-accent);
-		}
-		.binding-key:focus-visible {
-			outline: 2px solid var(--ui-color-accent);
-			outline-offset: 2px;
-		}
-		.binding-key:hover kbd,
-		.binding-key:focus-visible kbd {
-			opacity: 0;
-		}
-		.binding-key:hover .binding-key-remove,
-		.binding-key:focus-visible .binding-key-remove {
-			opacity: 1;
 		}
 	}
 </style>

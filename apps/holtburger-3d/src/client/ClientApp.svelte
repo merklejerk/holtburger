@@ -23,7 +23,7 @@
 	} from "./combat/rest-posture-controller";
 	import { formatError } from "../lib/format-error";
 	import { clientMinimapLandmark } from "./hud/minimap-policy";
-	import { launcherTransport } from "../launcher/launcher-transport";
+	import { returnToLauncher as navigateToLauncher } from "../app/desktop/launcher-navigation";
 	import type {
 		ClientGameplayOption,
 		ClientGameplayPreferences,
@@ -32,10 +32,10 @@
 		UiThemeSelection,
 		UiThemeSettings,
 	} from "../app/theme/ui-theme-selection";
-	import { bindClientAudioForeground } from "./settings/audio-foreground";
+	import { bindClientAudioForeground } from "../app/desktop/audio-foreground";
 	import ClientMusicControls from "./settings/ClientMusicControls.svelte";
 	import { ClientTitleMusic, titleMusicUrl } from "./pregame/title-music";
-	import ClientDisplayConfirmation from "./settings/ClientDisplayConfirmation.svelte";
+	import DisplayConfirmation from "../app/settings/DisplayConfirmation.svelte";
 	import ClientPregameSettings from "./pregame/ClientPregameSettings.svelte";
 	import { choosePregameLocation } from "./pregame/pregame-tuning";
 	import PowerIcon from "../assets/icons/hud-power.svg?component";
@@ -43,7 +43,7 @@
 	import "./client-canvas.css";
 	import { persistPlayerVisualCapture } from "./character/visual-capture";
 	import type { ClientVisualCacheTransport } from "./character/visual-cache-transport";
-	import { ClientFacingInputDispatch } from "./session/facing-input-dispatch";
+	import { FacingInputDispatch as ClientFacingInputDispatch } from "../lib/game/controls/facing-input-dispatch";
 	import type { ClientMouseMovementInput } from "./session/viewport-mouse-controller";
 	import { loadSoulEmotes } from "./social/soul-emotes";
 	import { ClientEmoteController } from "./social/emote-controller";
@@ -117,7 +117,7 @@
 	} from "./world/selected-entity";
 	import { z } from "zod";
 	import ClientMessageDialog from "./hud/ClientMessageDialog.svelte";
-	import ClientToastOverlay from "./hud/ClientToastOverlay.svelte";
+	import HudToastOverlay from "../app/hud/HudToastOverlay.svelte";
 	import { ClientContractNotifications } from "./world/contract-notifications";
 	import { ClientDialogs, type ClientDialogPresentation } from "./hud/dialogs";
 	import { useAppInputPolicy } from "../lib/input/app-input-policy-context";
@@ -273,7 +273,7 @@
 		type ClientCharacterSettingsState,
 	} from "./settings/character-settings-owner";
 	import type { ClientSettingsTransport } from "./settings/settings-transport";
-	import { ClientSettingsPersistence } from "./settings/settings-persistence";
+	import { SettingsPersistence } from "../app/settings/settings-persistence";
 	import {
 		ClientAppLifecycle,
 		initialClientAppLifecycleState,
@@ -293,10 +293,10 @@
 	} from "./combat/target-acquisition";
 	import { ClientSelectionInput } from "./session/selection-input";
 	import {
-		CLIENT_TOAST_DURATION_MS,
-		ClientToastCenter,
-		type ClientToast,
-	} from "./hud/toast-center";
+		HUD_TOAST_DURATION_MS as CLIENT_TOAST_DURATION_MS,
+		HudToastCenter as ClientToastCenter,
+		type HudToast as ClientToast,
+	} from "../app/hud/toast-center";
 	import type { ClientTargetIndicatorFrame } from "./combat/target-indicator";
 	import {
 		ClientInspection,
@@ -822,7 +822,7 @@
 			tone: "warning",
 		});
 	const userSettingsPersistence =
-		new ClientSettingsPersistence<ClientUserSettingsPatch>({
+		new SettingsPersistence<ClientUserSettingsPatch>({
 			delayMs: 250,
 			save: (patch) => startupSettingsTransport.saveUserPatch(patch),
 			merge: (pending, next) => ({
@@ -1629,7 +1629,7 @@
 				? page.content.details
 				: null;
 		titleMusic?.setActive(false);
-		await launcherTransport().back(details);
+		await navigateToLauncher(details);
 	}
 	async function disconnect(): Promise<void> {
 		await appLifecycle.disconnect();
@@ -3416,7 +3416,7 @@
 >
 	{#if interactionRoot !== null}<UiTooltipHost root={interactionRoot} />{/if}
 	<div class="client-overlay-ui" use:applyUiScale={userSettings.ui.uiScale}>
-		<ClientDisplayConfirmation />
+		<DisplayConfirmation />
 		<!-- A mounted dialog receives a non-null item until teardown, including nested snippets. -->
 		{#each dialogPresentation === null ? [] : [dialogPresentation] as presentation}
 			<ClientMessageDialog
@@ -3439,7 +3439,7 @@
 	></canvas>
 	{#if pregameSelection !== null}
 		<div class="pregame-notices" use:applyUiScale={userSettings.ui.uiScale}>
-			<ClientToastOverlay {toast} persistentMessage={null} />
+			<HudToastOverlay {toast} persistentMessage={null} />
 		</div>
 	{/if}
 

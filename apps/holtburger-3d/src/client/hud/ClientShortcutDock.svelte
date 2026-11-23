@@ -75,14 +75,14 @@
 	import type { InputPlatform } from "../../lib/input/input-platform";
 
 	import ClientHudIcon from "./ClientHudIcon.svelte";
-	import ClientHudTray from "./ClientHudTray.svelte";
+	import ClientHudTray from "../../app/hud/HudTray.svelte";
 	import {
 		createClientHudPanelPlacement,
 		type ClientHudPlacement,
 		type ClientHudViewport,
 	} from "./hud-layout";
 	import { CLIENT_UI_DEFAULTS } from "./ui-defaults";
-	import { hudTrayOrientation } from "./hud-tray-layout";
+	import { hudTrayOrientation } from "../../app/hud/hud-tray-layout";
 
 	interface Props {
 		/** Saved anchor and orientation; old resized dimensions are normalized to tray defaults. */

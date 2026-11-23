@@ -5,6 +5,7 @@ import {
 import {
 	DynamicEntityMirror,
 	type DynamicEntityEvent,
+	type DynamicEntityPhysicsFlags,
 } from "../../lib/game/runtime/dynamic-entity-feed";
 import { DynamicEntitySession } from "../../lib/game/runtime/dynamic-entity-session";
 import {
@@ -236,6 +237,28 @@ export class ExplorerDynamicEntitySession {
 		return receipt;
 	}
 
+	/** Despawn all Explorer-local entities in one ordered host reset. */
+	async resetAll(): Promise<void> {
+		await this.#transport.invoke("reset_explorer_entities");
+	}
+
+	/** Replace an entity's typed simulation physics flags and realization mode. */
+	async replacePhysicsState(request: {
+		readonly guid: number;
+		readonly generation: number;
+		readonly flags: DynamicEntityPhysicsFlags;
+		readonly physicalMode: "pose-only" | "integrated";
+	}): Promise<ExplorerEntityMutationReceipt> {
+		const afterRevision = this.#acceptedRevision;
+		const receipt = decodeExplorerEntityMutationReceipt(
+			await this.#transport.invoke("replace_explorer_entity_physics_state", {
+				request,
+			}),
+		);
+		await this.#waitForCurrent(receipt, true, afterRevision);
+		return receipt;
+	}
+
 	/**
 	 * Possess one spawned entity so commands reach it, or release with `null`.
 	 *
@@ -268,6 +291,18 @@ export class ExplorerDynamicEntitySession {
 		return decodePossessionEventQueueReceipt(
 			await this.#transport.invoke("queue_explorer_possession_event", {
 				request,
+			}),
+		);
+	}
+
+	/** Apply one relative manual yaw displacement (radians) to the active possession epoch. */
+	async applyPossessionYaw(
+		possessionGeneration: number,
+		deltaRadians: number,
+	): Promise<PossessionIntentResult> {
+		return decodePossessionIntentResult(
+			await this.#transport.invoke("apply_explorer_possession_yaw", {
+				request: { possessionGeneration, deltaRadians },
 			}),
 		);
 	}

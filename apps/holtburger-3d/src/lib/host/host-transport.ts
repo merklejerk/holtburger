@@ -157,6 +157,7 @@ const EXPLORER_HOST_COMMAND_NAMES = [
 	"set_kinematic_boom_clearance",
 	"stop_kinematic_boom",
 	"reset_explorer_entities",
+	"apply_explorer_possession_yaw",
 ] as const;
 
 /** Client lifecycle and movement commands; startup remains private to Electron main. */

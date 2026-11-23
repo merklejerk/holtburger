@@ -10,7 +10,7 @@
 	import ClientSpellsPanel from "../magic/ClientSpellsPanel.svelte";
 	import UiQuantity from "../../app/ui/UiQuantity.svelte";
 	import UiDialog from "../../app/ui/UiDialog.svelte";
-	import { hudAttention } from "../hud/hud-attention";
+	import { hudAttention } from "../../app/hud/hud-attention";
 	import UiTabs from "../../app/ui/UiTabs.svelte";
 	import UiTabPanel from "../../app/ui/UiTabPanel.svelte";
 	import UpgradeTriangle from "../../assets/icons/character-upgrade-triangle.svg?component";

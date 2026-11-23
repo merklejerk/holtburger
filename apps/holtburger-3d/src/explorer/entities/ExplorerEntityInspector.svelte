@@ -1,11 +1,13 @@
 <script lang="ts">
-	import type { DynamicEntityView } from "../../lib/game/runtime/dynamic-entity-feed";
+	import type {
+		DynamicEntityPhysicsFlags,
+		DynamicEntityView,
+	} from "../../lib/game/runtime/dynamic-entity-feed";
 	import type { HostKinematicBoomStatus } from "../../lib/game/camera/host-kinematic-boom-session";
 	import {
 		explorerEntityOperationTargets,
 		explorerEntitySelection,
 		type ExplorerEntityOperation,
-		type ExplorerEntityOperationFailure,
 		type ExplorerEntitySelection,
 	} from "./entity-panel-state";
 	import {
@@ -23,11 +25,11 @@
 		| { readonly kind: "sampled"; readonly entity: DynamicEntityView };
 
 	interface Props {
+		readonly visible: boolean;
 		readonly runtimeReady: boolean;
 		readonly selected: DynamicEntityView;
 		readonly wearer: DynamicEntityView | null;
 		readonly pending: ExplorerEntityOperation | null;
-		readonly failure: ExplorerEntityOperationFailure | null;
 		readonly possession: ExplorerPossession | null;
 		readonly readExplorerEntity: (
 			selection: ExplorerEntitySelection,
@@ -36,6 +38,13 @@
 		readonly readPossessionMotionProbe: () => Promise<PossessionMotionProbe | null>;
 		readonly select: (selection: ExplorerEntitySelection) => void;
 		readonly despawn: (entity: DynamicEntityView) => Promise<void>;
+		readonly relocate: (entity: DynamicEntityView) => Promise<void>;
+		readonly launch: (entity: DynamicEntityView) => Promise<void>;
+		readonly replacePhysicsState: (
+			entity: DynamicEntityView,
+			flags: DynamicEntityPhysicsFlags,
+			physicalMode: "pose-only" | "integrated",
+		) => Promise<void>;
 		readonly possess: (
 			entity: DynamicEntityView,
 			guid: number | null,
@@ -49,17 +58,20 @@
 	}
 
 	let {
+		visible,
 		runtimeReady,
 		selected,
 		wearer,
 		pending,
-		failure,
 		possession,
 		readExplorerEntity,
 		readBoomCameraStatus,
 		readPossessionMotionProbe,
 		select,
 		despawn,
+		relocate,
+		launch,
+		replacePhysicsState,
 		possess,
 		setStance,
 		setRunRate,
@@ -79,15 +91,6 @@
 				) ?? null)
 			: null,
 	);
-	const applicableFailure = $derived.by(() => {
-		if (failure === null || failure.operation.kind === "spawn") return null;
-		return explorerEntityOperationTargets(
-			failure.operation,
-			explorerEntitySelection(selected),
-		)
-			? failure.message
-			: null;
-	});
 	const selectedOperationPending = $derived(
 		pending !== null &&
 			explorerEntityOperationTargets(
@@ -96,6 +99,23 @@
 			),
 	);
 	let diagnosticsOpen = $state(false);
+	const currentPhysicalMode = $derived<"pose-only" | "integrated">(
+		selected.physics.participation === "pose-only" ? "pose-only" : "integrated",
+	);
+
+	const PHYSICS_FLAG_FIELDS: readonly {
+		readonly key: keyof DynamicEntityPhysicsFlags;
+		readonly label: string;
+	}[] = [
+		{ key: "gravity", label: "Gravity" },
+		{ key: "ethereal", label: "Ethereal" },
+		{ key: "reportCollisions", label: "Report collisions" },
+		{ key: "ignoreCollisions", label: "Ignore collisions" },
+		{ key: "missile", label: "Missile" },
+		{ key: "inelastic", label: "Inelastic" },
+		{ key: "edgeSlide", label: "Edge slide" },
+		{ key: "frozen", label: "Frozen" },
+	];
 	let diagnosticEntityState = $state<DiagnosticEntityState>({
 		kind: "panel-snapshot",
 	});
@@ -109,13 +129,14 @@
 	);
 
 	$effect(() => {
-		if (!diagnosticsOpen) {
+		if (!visible || !diagnosticsOpen) {
 			diagnosticEntityState = { kind: "panel-snapshot" };
 			sampledBoomCameraStatus = null;
 			sampledPossessionMotionProbe = null;
 			sampledPossessionProbeError = null;
 			return;
 		}
+		let cancelled = false;
 		const selection = explorerEntitySelection(selected);
 		const sample = (): void => {
 			const current = readExplorerEntity(selection);
@@ -131,7 +152,7 @@
 			}
 			void readPossessionMotionProbe()
 				.then((probe) => {
-					if (!diagnosticsOpen) return;
+					if (cancelled) return;
 					if (
 						probe === null ||
 						probe.guid !== selected.identity.guid ||
@@ -144,7 +165,7 @@
 					sampledPossessionProbeError = null;
 				})
 				.catch((error: unknown) => {
-					if (!diagnosticsOpen) return;
+					if (cancelled) return;
 					sampledPossessionMotionProbe = null;
 					sampledPossessionProbeError =
 						error instanceof Error ? error.message : String(error);
@@ -152,7 +173,10 @@
 		};
 		sample();
 		const timer = window.setInterval(sample, DIAGNOSTIC_SAMPLE_INTERVAL_MS);
-		return () => window.clearInterval(timer);
+		return () => {
+			cancelled = true;
+			window.clearInterval(timer);
+		};
 	});
 
 	function formatGuid(guid: number): string {
@@ -190,13 +214,13 @@
 </script>
 
 <section class="entity-inspector" aria-labelledby="selected-entity-heading">
-	<p class="explorer-section-label">Selected</p>
 	<div class="selected-heading">
 		<h3 id="selected-entity-heading">{selected.display.name}</h3>
 		<span>WCID {selected.identity.wcid}</span>
 	</div>
 	<p class="selected-identity">
-		{formatGuid(selected.identity.guid)} · generation {selected.generation}
+		{formatGuid(selected.identity.guid)} · gen {selected.generation} · {selected
+			.physics.participation} · {selected.placement.kind}
 	</p>
 
 	{#if selected.placement.kind === "world"}
@@ -219,6 +243,26 @@
 							: "Possess"}
 				</button>
 			{/if}
+			<button
+				type="button"
+				class="explorer-action ui-button"
+				disabled={!runtimeReady || pending !== null}
+				onclick={() => relocate(selected)}
+			>
+				{pending?.kind === "relocate" && selectedOperationPending
+					? "Moving…"
+					: "Move here"}
+			</button>
+			<button
+				type="button"
+				class="explorer-action ui-button"
+				disabled={!runtimeReady || pending !== null}
+				onclick={() => launch(selected)}
+			>
+				{pending?.kind === "launch" && selectedOperationPending
+					? "Launching…"
+					: "Launch"}
+			</button>
 			<button
 				type="button"
 				class="explorer-action ui-button"
@@ -247,19 +291,6 @@
 			{/if}
 		</div>
 	{/if}
-
-	{#if applicableFailure !== null}
-		<p class="inspector-error" role="alert">{applicableFailure}</p>
-	{/if}
-
-	<div class="entity-facts">
-		<div class="ui-well">
-			<span>Placement</span><strong>{selected.placement.kind}</strong>
-		</div>
-		<div class="ui-well">
-			<span>Physical</span><strong>{selected.physics.participation}</strong>
-		</div>
-	</div>
 
 	{#if selectedIsPossessed && possession !== null && possession.guid !== null && possessionControls !== null}
 		<label class="ui-label">
@@ -298,12 +329,62 @@
 		</label>
 	{/if}
 
+	{#if selected.placement.kind === "world"}
+		<details class="ui-disclosure ui-disclosure-section">
+			<summary>Physics state</summary>
+			<div class="diagnostics ui-disclosure-body">
+				<label class="ui-label">
+					<span>Realization mode</span>
+					<select
+						class="ui-input"
+						value={currentPhysicalMode}
+						disabled={!runtimeReady || pending !== null}
+						onchange={(event) => {
+							const nextMode =
+								event.currentTarget.value === "pose-only"
+									? "pose-only"
+									: "integrated";
+							void replacePhysicsState(
+								selected,
+								selected.physics.flags,
+								nextMode,
+							);
+						}}
+					>
+						<option value="integrated">Integrated</option>
+						<option value="pose-only">Pose-only</option>
+					</select>
+				</label>
+				{#each PHYSICS_FLAG_FIELDS as flag (flag.key)}
+					<label class="ui-checkbox">
+						<input
+							type="checkbox"
+							checked={selected.physics.flags[flag.key]}
+							disabled={!runtimeReady || pending !== null}
+							onchange={(event) => {
+								void replacePhysicsState(
+									selected,
+									{
+										...selected.physics.flags,
+										[flag.key]: event.currentTarget.checked,
+									},
+									currentPhysicalMode,
+								);
+							}}
+						/>
+						{flag.label}
+					</label>
+				{/each}
+			</div>
+		</details>
+	{/if}
+
 	<details
-		class="inspector-disclosure"
+		class="ui-disclosure ui-disclosure-section"
 		ontoggle={(event) => (diagnosticsOpen = event.currentTarget.open)}
 	>
 		<summary>Diagnostics</summary>
-		<div class="diagnostics">
+		<div class="diagnostics ui-disclosure-body">
 			<div><span>Generation</span><code>{selected.generation}</code></div>
 			{#if diagnosticSelected.placement.kind === "world"}
 				<div>
@@ -385,13 +466,9 @@
 			display: grid;
 			gap: 8px;
 			min-width: 0;
-			padding-top: 2px;
-			border-top: 1px solid var(--ui-color-border);
 		}
 
-		.entity-inspector .explorer-section-label,
-		.selected-identity,
-		.inspector-error {
+		.selected-identity {
 			margin: 0;
 		}
 
@@ -414,8 +491,7 @@
 
 		.selected-heading span,
 		.selected-identity,
-		.wearer-context,
-		.inspector-error {
+		.wearer-context {
 			color: var(--ui-color-muted);
 			font-size: calc(var(--ui-font-size-caption) * var(--ui-text-scale));
 		}
@@ -430,57 +506,7 @@
 
 		.selected-actions .explorer-action {
 			flex: 1 1 0;
-		}
-
-		.inspector-error {
-			color: var(--ui-color-danger);
-		}
-
-		.entity-facts {
-			display: grid;
-			grid-template-columns: repeat(3, minmax(0, 1fr));
-			gap: 5px;
-		}
-
-		.entity-facts div,
-		.diagnostics div {
-			display: grid;
-			min-width: 0;
-		}
-
-		.entity-facts div {
-			gap: 2px;
-			padding: 6px;
-		}
-
-		.entity-facts span,
-		.diagnostics span {
-			color: var(--ui-color-muted);
-			font-size: calc(var(--ui-font-size-micro) * var(--ui-text-scale));
-		}
-
-		.entity-facts strong {
-			overflow: hidden;
-			color: var(--ui-color-text);
-			font-size: calc(var(--ui-font-size-caption) * var(--ui-text-scale));
-			font-weight: 400;
-			text-overflow: ellipsis;
 			white-space: nowrap;
-		}
-
-		.inspector-disclosure {
-			border-top: 1px solid var(--ui-color-border);
-			padding-top: 6px;
-		}
-
-		.inspector-disclosure summary {
-			color: var(--ui-color-text);
-			cursor: pointer;
-			font-size: calc(var(--ui-font-size-caption) * var(--ui-text-scale));
-		}
-
-		.inspector-disclosure > :not(summary) {
-			margin-top: 7px;
 		}
 
 		.diagnostics {
@@ -489,8 +515,15 @@
 		}
 
 		.diagnostics div {
+			display: grid;
+			min-width: 0;
 			grid-template-columns: minmax(6rem, 0.35fr) minmax(0, 1fr);
 			gap: 8px;
+		}
+
+		.diagnostics span {
+			color: var(--ui-color-muted);
+			font-size: calc(var(--ui-font-size-micro) * var(--ui-text-scale));
 		}
 
 		.diagnostics code {
@@ -498,12 +531,6 @@
 			color: var(--ui-color-text);
 			font-family: inherit;
 			font-size: calc(var(--ui-font-size-caption) * var(--ui-text-scale));
-		}
-
-		@media (max-width: 370px) {
-			.entity-facts {
-				grid-template-columns: minmax(0, 1fr);
-			}
 		}
 	}
 </style>

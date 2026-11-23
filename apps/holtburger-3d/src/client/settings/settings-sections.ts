@@ -166,7 +166,7 @@ export function readClientSettingsSection<Value>(
 }
 
 /** Validate the new value before constructing a durable section. */
-function clientSettingsEntry<Value>(
+export function clientSettingsEntry<Value>(
 	value: unknown,
 	schema: z.ZodType<Value>,
 ): ClientSettingsEntry<Value> {

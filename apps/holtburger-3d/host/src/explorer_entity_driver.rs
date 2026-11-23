@@ -685,21 +685,22 @@ impl ExplorerEntityDriver {
             .map_err(ExplorerEntityDriverError::from)
     }
 
-    /// Applies one complete effective physics-state mask through shared transition decisions.
-    pub fn replace_physics_state(
+    /// Applies typed simulation flags merged over the entity's current `PhysicsState`.
+    pub fn replace_physics_flags(
         &self,
         guid: Guid,
         generation: u64,
-        semantic: PhysicsState,
+        flags: holtburger_core::DynamicEntityPhysicsFlags,
         physical_mode: ExplorerPhysicalMode,
     ) -> Result<ExplorerEntityPhysicsStateOutcome, ExplorerEntityDriverError> {
         let _operation = self
             .operation
             .lock()
             .expect("Explorer entity driver lock poisoned");
+        let current = self.entities.instance(guid, generation)?;
+        let semantic = flags.apply_to(current.definition.physics.semantic);
         let next = resolve_effective_entity_physics_state(semantic);
         if !next.supports_local_simulation() {
-            let current = self.entities.instance(guid, generation)?;
             return Err(ExplorerEntityDriverError::Preparation(
                 DynamicEntityPhysicalPreparationError::UnsupportedPhysicsState {
                     wcid: current.definition.identity.wcid,
@@ -714,7 +715,7 @@ impl ExplorerEntityDriver {
             .entities
             .physical_preparation_required(guid, generation, demand)?;
         let replacement = if preparation_required {
-            let mut definition = self.entities.instance(guid, generation)?.definition;
+            let mut definition = current.definition;
             definition.physics = next;
             Some(self.content.prepare_physical(&definition)?)
         } else {
@@ -1942,31 +1943,42 @@ mod tests {
     }
 
     #[test]
-    fn complete_physics_state_replacement_enables_reconfigures_and_disables_participation() {
-        let (_entities, driver) = driver(vec![template(12)], FixturePhysical::Prepares);
+    fn physics_flags_replacement_enables_reconfigures_disables_and_preserves_unrelated_bits() {
+        let mut tpl = template(12);
+        tpl.physics.base_mask =
+            Some(tpl.physics.base_mask.unwrap_or(0) | PhysicsState::LIGHTING_ON.bits());
+        let (_entities, driver) = driver(vec![tpl], FixturePhysical::Prepares);
         let spawned = driver
             .spawn_by_wcid(request(12, ExplorerPhysicalMode::PoseOnly))
             .unwrap();
         let guid = spawned.instance.definition.identity.guid;
         let generation = spawned.instance.generation;
 
+        let gravity_only =
+            holtburger_core::DynamicEntityPhysicsFlags::from_physics_state(PhysicsState::GRAVITY);
         let enabled = driver
-            .replace_physics_state(
-                guid,
-                generation,
-                PhysicsState::GRAVITY,
-                ExplorerPhysicalMode::Integrated,
-            )
+            .replace_physics_flags(guid, generation, gravity_only, ExplorerPhysicalMode::Integrated)
             .unwrap();
         assert_eq!(
             enabled.body.physical_change.change,
             holtburger_world::PhysicalBodyReconfiguration::Installed
         );
+        assert!(
+            enabled
+                .instance
+                .definition
+                .physics
+                .semantic
+                .contains(PhysicsState::LIGHTING_ON)
+        );
+        let gravity_and_frozen = holtburger_core::DynamicEntityPhysicsFlags::from_physics_state(
+            PhysicsState::GRAVITY | PhysicsState::FROZEN,
+        );
         let reconfigured = driver
-            .replace_physics_state(
+            .replace_physics_flags(
                 guid,
                 generation,
-                PhysicsState::GRAVITY | PhysicsState::FROZEN,
+                gravity_and_frozen,
                 ExplorerPhysicalMode::Integrated,
             )
             .unwrap();
@@ -1974,11 +1986,19 @@ mod tests {
             reconfigured.body.physical_change.change,
             holtburger_world::PhysicalBodyReconfiguration::Reconfigured
         );
+        assert!(
+            reconfigured
+                .instance
+                .definition
+                .physics
+                .semantic
+                .contains(PhysicsState::LIGHTING_ON)
+        );
         let disabled = driver
-            .replace_physics_state(
+            .replace_physics_flags(
                 guid,
                 generation,
-                PhysicsState::GRAVITY | PhysicsState::FROZEN,
+                gravity_and_frozen,
                 ExplorerPhysicalMode::PoseOnly,
             )
             .unwrap();

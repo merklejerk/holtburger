@@ -21,7 +21,10 @@ import {
 	createDefaultClientCharacterSettings,
 	createDefaultClientUserSettings,
 } from "./settings-defaults";
-import { hudTrayOrientation, rotateHudTray } from "../hud/hud-tray-layout";
+import {
+	hudTrayOrientation,
+	rotateHudTray,
+} from "../../app/hud/hud-tray-layout";
 import {
 	createClientInputDefaults,
 	createClientKeyboardDefaults,

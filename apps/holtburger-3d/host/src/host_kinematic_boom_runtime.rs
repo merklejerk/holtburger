@@ -1,8 +1,6 @@
 //! Explorer-local lifecycle and transport adapter for the shared kinematic boom controller.
 
-use std::sync::{Arc, Mutex, mpsc};
-use std::thread::{self, JoinHandle};
-use std::time::{Duration, Instant};
+use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result, ensure};
 use holtburger_common::position::WorldPosition;
@@ -496,61 +494,12 @@ impl HostKinematicBoomRuntime {
         })
     }
 
-    /// Services the camera on its own thread; crowd work cannot occupy its clock.
-    pub fn spawn(
-        self: &Arc<Self>,
-        delivery: Arc<crate::explorer_entity_delivery::ExplorerEntityDelivery>,
-        sink: Arc<dyn crate::explorer_entity_simulation::DynamicEntityEventSink>,
-    ) -> Result<HostKinematicBoomWorker> {
-        let camera = Arc::clone(self);
-        let (stop, stopped) = mpsc::channel();
-        let thread = thread::Builder::new()
-            .name("explorer-camera".into())
-            .spawn(move || {
-                let interval = Duration::from_millis(16);
-                let mut previous = Instant::now();
-                loop {
-                    match stopped.recv_timeout(interval.saturating_sub(previous.elapsed())) {
-                        Ok(()) | Err(mpsc::RecvTimeoutError::Disconnected) => break,
-                        Err(mpsc::RecvTimeoutError::Timeout) => {}
-                    }
-                    let now = Instant::now();
-                    let duration = now.duration_since(previous);
-                    previous = now;
-                    let result = camera.advance(duration.as_secs_f32(), |tick| {
-                        delivery.publish_fixed_tick(
-                            Vec::new(),
-                            Some(tick),
-                            duration,
-                            |envelope| {
-                                // Accepted camera state survives a transport failure, just like body state.
-                                if let Err(error) = sink.publish(envelope) {
-                                    eprintln!(
-                                        "failed to publish Explorer camera envelope: {error:#}"
-                                    );
-                                }
-                                Ok(())
-                            },
-                        )?;
-                        Ok(())
-                    });
-                    if let Err(error) = result {
-                        eprintln!("Explorer camera stopped after a terminal tick error: {error:#}");
-                        break;
-                    }
-                }
-                camera
-                    .state
-                    .lock()
-                    .expect("kinematic boom lock poisoned")
-                    .active = None;
-            })
-            .context("starting Explorer camera worker")?;
-        Ok(HostKinematicBoomWorker {
-            stop,
-            thread: Mutex::new(Some(thread)),
-            camera: Arc::clone(self),
-        })
+    /// Retires active boom state during host shutdown without panicking on a poisoned lock.
+    pub fn shutdown(&self) {
+        self.state
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .active = None;
     }
 
     /// Composes a runtime with an explicit validated profile for finite-work recovery tests.
@@ -834,62 +783,17 @@ camera pivot rests on its collision geometry alone",
 
     /// Advances against the latest publication only; no entity registry or simulation lock is taken.
     /// Published travel is consumed once, including on controller failure, then held at its endpoint.
-    /// Push callers finish delivery in the callback, under camera and possession-lifetime locks.
-    /// The callback must not acquire the entity registry or reenter this camera.
-    pub fn advance<T>(
-        &self,
-        duration_seconds: f32,
-        publish: impl FnOnce(HostKinematicBoomTick) -> Result<T>,
-    ) -> Result<Option<T>> {
+    pub fn advance(&self, duration_seconds: f32) -> Option<HostKinematicBoomTick> {
         let mut state = self.state.lock().expect("kinematic boom lock poisoned");
-        let Some(active) = state.active.as_mut() else {
-            return Ok(None);
-        };
+        let active = state.active.as_mut()?;
         let lifetime = active.lifetime.clone();
-        match lifetime.while_live(|| publish(advance_camera(active, duration_seconds)).map(Some)) {
-            Some(result) => result,
+        match lifetime.while_live(|| advance_camera(active, duration_seconds)) {
+            Some(tick) => Some(tick),
             None => {
                 state.active = None;
-                Ok(None)
+                None
             }
         }
-    }
-}
-
-/// Owned camera worker; explicit shutdown and drop both join before retiring cached state.
-pub struct HostKinematicBoomWorker {
-    /// Wakes the worker immediately, including when it is waiting for its next interval.
-    stop: mpsc::Sender<()>,
-    /// Taken once so explicit shutdown and drop share one cancellation path.
-    thread: Mutex<Option<JoinHandle<()>>>,
-    /// Retires input and target state before shutdown returns.
-    camera: Arc<HostKinematicBoomRuntime>,
-}
-
-impl HostKinematicBoomWorker {
-    pub fn shutdown(&self) {
-        let _ = self.stop.send(());
-        if let Some(thread) = self
-            .thread
-            .lock()
-            .expect("camera worker lock poisoned")
-            .take()
-            && thread.join().is_err()
-        {
-            log::error!("Explorer camera worker panicked");
-        }
-        // Teardown after a panic must retire input without triggering a second panic.
-        self.camera
-            .state
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner())
-            .active = None;
-    }
-}
-
-impl Drop for HostKinematicBoomWorker {
-    fn drop(&mut self) {
-        self.shutdown();
     }
 }
 

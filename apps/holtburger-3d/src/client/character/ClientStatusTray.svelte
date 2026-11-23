@@ -1,11 +1,11 @@
 <script lang="ts">
-	import { hudAttention } from "../hud/hud-attention";
+	import { hudAttention } from "../../app/hud/hud-attention";
 	import type { EnchantmentTrayPresentation } from "../magic/enchantments-view";
 	import { untrack } from "svelte";
 	import { presentClientBurden } from "../inventory/burden-presentation";
 	import type { ClientInventoryState } from "../inventory/inventory-state";
 	import { CLIENT_TUNING } from "../settings/tuning";
-	import ClientHudTray from "../hud/ClientHudTray.svelte";
+	import ClientHudTray from "../../app/hud/HudTray.svelte";
 	import ClientHudIcon, {
 		type ClientHudIconName,
 	} from "../hud/ClientHudIcon.svelte";

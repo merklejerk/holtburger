@@ -71,11 +71,18 @@ export const PRECISE_JUMP_ACTIONS = ["increasePower", "decreasePower"] as const;
 export type PreciseJumpAction = (typeof PRECISE_JUMP_ACTIONS)[number];
 
 /** Explorer camera intent, independent of keyboard layout. */
-export type FlyAction =
-	| Exclude<CharacterAction, "jump" | "walk">
-	| "ascend"
-	| "descend"
-	| "precision";
+export const FLY_ACTIONS = [
+	"forward",
+	"backward",
+	"turnLeft",
+	"turnRight",
+	"strafeLeft",
+	"strafeRight",
+	"ascend",
+	"descend",
+	"precision",
+] as const;
+export type FlyAction = (typeof FLY_ACTIONS)[number];
 
 /** Rebindable main-panel toggles; diagnostics stay dock-only. */
 export const CLIENT_PANEL_SHORTCUT_ACTIONS = [

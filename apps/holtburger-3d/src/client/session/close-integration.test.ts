@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { ClientRetirement } from "../../../electron/client-retirement";
 import { APP_LIFECYCLE_TUNING } from "../../app/desktop/app-tuning.js";
-import { ClientSettingsPersistence } from "../settings/settings-persistence";
+import { SettingsPersistence } from "../../app/settings/settings-persistence";
 import { ClientAppLifecycle } from "../client-app-lifecycle";
 
 function deferred() {
@@ -28,7 +28,7 @@ describe("client renderer/native close composition", () => {
 		const saveA = deferred();
 		const saveB = deferred();
 		const sent: string[] = [];
-		const persistence = new ClientSettingsPersistence<string>({
+		const persistence = new SettingsPersistence<string>({
 			delayMs: 60_000,
 			report: vi.fn(),
 			save: async (patch) => {

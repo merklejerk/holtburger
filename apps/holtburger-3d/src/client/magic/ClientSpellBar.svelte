@@ -20,7 +20,7 @@
 		type ClientSpellServices,
 	} from "./spells";
 	import { CLIENT_ACTION_BAR_TUNING, CLIENT_TUNING } from "../settings/tuning";
-	import ClientHudPanel from "../hud/ClientHudPanel.svelte";
+	import ClientHudPanel from "../../app/hud/HudPanel.svelte";
 	import ShortcutBarLayoutControls from "../hud/ShortcutBarLayoutControls.svelte";
 	import {
 		resolveClientHudPlacement,

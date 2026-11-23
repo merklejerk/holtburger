@@ -1,7 +1,11 @@
 import { app, clipboard, ipcMain } from "electron";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { z } from "zod";
-import type { AppSettingsSnapshot } from "../src/app/desktop/app-settings-contract.js";
+import {
+	defaultContentLocationSchema,
+	type AppSettingsSnapshot,
+	type DefaultContentSnapshot,
+} from "../src/app/desktop/app-settings-contract.js";
 import {
 	APP_LIFECYCLE_TUNING,
 	APP_PERSISTENCE_TUNING,
@@ -15,6 +19,7 @@ import {
 	clientCharacterSectionsSchema,
 	clientUserSettingsPatchSchema,
 } from "../src/client/settings/settings-sections.js";
+import { explorerUserSettingsPatchSchema } from "../src/explorer/settings/explorer-settings-sections.js";
 import { formatError } from "../src/lib/format-error.js";
 import type {
 	AppFailureKind,
@@ -32,7 +37,15 @@ import {
 	type ApplicationAttempt,
 } from "./client-application.js";
 import { ClientEquipmentCacheStore } from "./client-equipment-cache-store.js";
-import type { ClientLaunchConfiguration } from "./client-launch.js";
+import {
+	explorerLaunchRequestSchema,
+	type ExplorerLaunchConfig,
+	type LauncherViewMode,
+} from "../src/launcher/launcher-contract.js";
+import type {
+	ClientLaunchConfiguration,
+	ExplorerLaunchConfiguration,
+} from "./client-launch.js";
 import { clientCharacterProfileKey } from "./client-profile-key.js";
 import { ClientRetirement } from "./client-retirement.js";
 import {
@@ -41,6 +54,10 @@ import {
 } from "./client-settings-store.js";
 import { clientSettingsFilePath } from "./client-user-data.js";
 import { ClientVisualCacheStore } from "./client-visual-cache-store.js";
+import {
+	CONTENT_PREFERENCE_FILENAME,
+	ContentPreferenceStore,
+} from "./content-preference-store.js";
 import type { ContentStartup } from "./content-startup.js";
 import type { DocumentAdmission, DocumentRole } from "./document-admission.js";
 import { copyHardwareInfo } from "./hardware-info.js";
@@ -56,6 +73,7 @@ import { createContentStartup } from "./main-sidecar-ipc.js";
 import {
 	changeWindowDisplay,
 	chooseContentFolder,
+	chooseWeenieCatalogFile,
 	initialGeometry,
 	reportTransitionFailure,
 	reportWindowSettingsFailure,
@@ -69,8 +87,9 @@ import {
 } from "./window-display.js";
 import { observeWindowGeometry } from "./window-geometry.js";
 
-/** Native resources are bound to exactly one admitted endpoint. */
-export interface NativeAttempt extends ApplicationAttempt {
+/** Native resources are bound to exactly one admitted client endpoint. */
+interface ClientNativeAttempt extends ApplicationAttempt {
+	readonly mode: "client";
 	/** Immutable endpoint plus transient credentials consumed by this attempt's private launch. */
 	readonly startup: ClientLaunchConfiguration;
 	/** Content admission and host lifetime are replaced together on another Play. */
@@ -93,29 +112,53 @@ export interface NativeAttempt extends ApplicationAttempt {
 	readonly detach: (() => void)[];
 }
 
+/** Native resources for an offline Explorer attempt; skips client caches and server startup. */
+interface ExplorerNativeAttempt extends ApplicationAttempt {
+	readonly mode: "explorer";
+	readonly startup: ExplorerLaunchConfiguration;
+	readonly content: ContentStartup<SidecarHostClient>;
+	resources:
+		| { readonly kind: "pending" }
+		| { readonly kind: "settings"; readonly settings: ClientSettingsStore };
+	opening: Promise<void>;
+	readonly detach: (() => void)[];
+}
+
+export type NativeAttempt = ClientNativeAttempt | ExplorerNativeAttempt;
+
 interface SettingsIpcContext {
 	readonly window: ApplicationWindow;
 	readonly ignorePersistedConfig: boolean;
 	readonly handle: IpcHandleFn;
 	readonly geometrySlot: WindowGeometrySlot;
 	readonly requireAttempt: () => NativeAttempt;
+	readonly requireClientAttempt: () => ClientNativeAttempt;
 	readonly requireSettings: () => ClientSettingsStore;
 }
 
 function installSettingsIpcBridge(context: SettingsIpcContext): void {
-	const { window, handle, geometrySlot, requireAttempt, requireSettings } =
-		context;
-	handle("window:display-snapshot", "client", () => {
+	const {
+		window,
+		handle,
+		geometrySlot,
+		requireAttempt,
+		requireClientAttempt,
+		requireSettings,
+	} = context;
+	handle("window:display-snapshot", ["client", "explorer"], () => {
 		if (geometrySlot.windowDisplay === null)
-			throw new Error("Client window controls are unavailable.");
+			throw new Error("Window display controls are unavailable.");
 		return geometrySlot.windowDisplay.read();
 	});
-	handle("window:display-change", "client", (_event, request: unknown) =>
-		changeWindowDisplay(
-			geometrySlot,
-			requireSettings,
-			windowDisplayRequestSchema.parse(request),
-		),
+	handle(
+		"window:display-change",
+		["client", "explorer"],
+		(_event, request: unknown) =>
+			changeWindowDisplay(
+				geometrySlot,
+				requireSettings,
+				windowDisplayRequestSchema.parse(request),
+			),
 	);
 	const readMode: ClientSettingsReadMode = context.ignorePersistedConfig
 		? "fresh"
@@ -147,13 +190,45 @@ function installSettingsIpcBridge(context: SettingsIpcContext): void {
 		return requireSettings().resetUser(settings);
 	});
 	handle(
+		"settings:load-explorer",
+		"explorer",
+		async (event, value: unknown) => {
+			requireApplicationFrame(event, window);
+			const attempt = requireAttempt();
+			try {
+				return await requireSettings().loadExplorerUser(value, readMode);
+			} catch (error) {
+				attempt.content.fail(formatError(error));
+				throw error;
+			}
+		},
+	);
+	handle(
+		"settings:save-explorer-patch",
+		"explorer",
+		async (event, patch: unknown) => {
+			requireApplicationFrame(event, window);
+			await requireSettings().saveExplorerUserPatch(
+				explorerUserSettingsPatchSchema.parse(patch),
+			);
+		},
+	);
+	handle(
+		"settings:reset-explorer",
+		"explorer",
+		async (event, settings: unknown) => {
+			requireApplicationFrame(event, window);
+			return requireSettings().resetExplorerUser(settings);
+		},
+	);
+	handle(
 		"settings:load-character",
 		"client",
 		(event, guid: unknown, defaults: unknown) => {
 			requireApplicationFrame(event, window);
 			return requireSettings().loadCharacter(
 				clientCharacterProfileKey(
-					requireAttempt().startup,
+					requireClientAttempt().startup,
 					requireCharacterGuid(guid),
 				),
 				defaults,
@@ -172,7 +247,7 @@ function installSettingsIpcBridge(context: SettingsIpcContext): void {
 				throw new Error("character settings request is incomplete");
 			const guid = requireCharacterGuid(request.characterGuid);
 			await requireSettings().saveCharacterPatch(
-				clientCharacterProfileKey(requireAttempt().startup, guid),
+				clientCharacterProfileKey(requireClientAttempt().startup, guid),
 				clientCharacterSectionsSchema.parse(request.patch),
 			);
 		},
@@ -210,7 +285,10 @@ export async function installClientSession(
 	context: ClientSessionContext,
 ): Promise<{
 	readonly owner: ClientApplication<NativeAttempt>;
-	readonly showPicker: (diagnostic: string | null) => Promise<void>;
+	readonly showPicker: (
+		diagnostic: string | null,
+		view?: LauncherViewMode,
+	) => Promise<void>;
 }> {
 	const {
 		window,
@@ -226,6 +304,7 @@ export async function installClientSession(
 	} = context;
 
 	let pickerFailure: string | null = null;
+	let pickerView: LauncherViewMode = "client";
 	let restartRequested = false;
 
 	const launcher = new LauncherStore(
@@ -236,17 +315,35 @@ export async function installClientSession(
 		),
 	);
 	await launcher.load();
+	const contentPreferences = new ContentPreferenceStore(
+		join(app.getPath("userData"), CONTENT_PREFERENCE_FILENAME),
+	);
+	const userSettings = new ClientSettingsStore(
+		entry.settingsFile ?? clientSettingsFilePath(app.getPath("userData")),
+		initialGeometry(
+			APP_WINDOW_TUNING.game.initialContentSize.width,
+			APP_WINDOW_TUNING.game.initialContentSize.height,
+		),
+	);
 	let clearContent = entry.clearContent;
-	const gamePath = entry.path;
+	const clientPath = entry.mode === "client" ? entry.path : "client/index.html";
+	const explorerPath =
+		entry.mode === "explorer" ? entry.path : "explorer/index.html";
 	// CLI content overrides only the first interactive attempt or the direct launch.
 	let initialContentPath =
-		entry.clientStartup === undefined ? entry.contentPath : null;
+		entry.clientStartup === undefined && entry.explorerStartup === undefined
+			? entry.contentPath
+			: null;
 
-	const showPicker = async (diagnostic: string | null) => {
+	const showPicker = async (
+		diagnostic: string | null,
+		view: LauncherViewMode = "client",
+	) => {
 		if (context.isQuitting()) return;
 		await stopWindowGeometry(geometrySlot);
 		if (context.isQuitting()) return;
 		pickerFailure = diagnostic;
+		pickerView = view;
 		context.setDocumentRetirement(undefined);
 		await restoreGeometry(window, launcher.window, "picker");
 		geometrySlot.stopGeometry = observeWindowGeometry(
@@ -280,14 +377,14 @@ export async function installClientSession(
 			attempt.resources.kind === "pending"
 				? Promise.resolve()
 				: attempt.resources.settings.flush(),
-			attempt.resources.kind === "ready"
+			attempt.mode === "client" && attempt.resources.kind === "ready"
 				? attempt.resources.cache.close()
 				: Promise.resolve(),
-			attempt.resources.kind === "ready"
+			attempt.mode === "client" && attempt.resources.kind === "ready"
 				? attempt.resources.equipmentCache.close()
 				: Promise.resolve(),
 		]);
-		attempt.startup.password = "";
+		if (attempt.mode === "client") attempt.startup.password = "";
 		const failures = results.filter(
 			(result): result is PromiseRejectedResult => result.status === "rejected",
 		);
@@ -300,12 +397,45 @@ export async function installClientSession(
 
 	const owner = new ClientApplication<NativeAttempt>({
 		launcherEnabled: !entry.noLauncher,
-		create: (startup) => {
+		create: (configuration) => {
 			pickerFailure = null;
 			const detach: (() => void)[] = [];
+			if (configuration.kind === "explorer") {
+				const content = createContentStartup({
+					window,
+					mode: "explorer",
+					entry,
+					store: contentPreferences,
+					clearContent,
+					overridePath: configuration.contentPath,
+					weenieCatalogPath: configuration.weenieCatalogPath,
+					isCurrent: () => owner.attempt?.content === content,
+					detach,
+					getDesktop: () => owner,
+					isQuitting: context.isQuitting,
+					saveAppFailure: context.saveAppFailure,
+				});
+				return {
+					mode: "explorer",
+					startup: configuration,
+					content,
+					resources: { kind: "pending" },
+					opening: Promise.resolve(),
+					detach,
+					cancellation: new AbortController(),
+				};
+			}
+			const {
+				kind,
+				...startup
+			}: { readonly kind: "client" } & ClientLaunchConfiguration =
+				configuration;
+			void kind;
 			const content = createContentStartup({
 				window,
+				mode: "client",
 				entry,
+				store: contentPreferences,
 				clearContent,
 				overridePath: startup.contentPath,
 				isCurrent: () => owner.attempt?.content === content,
@@ -315,6 +445,7 @@ export async function installClientSession(
 				saveAppFailure: context.saveAppFailure,
 			});
 			return {
+				mode: "client",
 				startup,
 				content,
 				resources: { kind: "pending" },
@@ -328,21 +459,12 @@ export async function installClientSession(
 			attempt.opening = (async () => {
 				await stopWindowGeometry(geometrySlot);
 				attempt.cancellation.signal.throwIfAborted();
-				const settings = new ClientSettingsStore(
-					entry.settingsFile ?? clientSettingsFilePath(app.getPath("userData")),
-					initialGeometry(
-						APP_WINDOW_TUNING.game.initialContentSize.width,
-						APP_WINDOW_TUNING.game.initialContentSize.height,
-					),
-				);
-				attempt.resources = { kind: "settings", settings };
-				const repaired = await settings.load();
+				attempt.resources = { kind: "settings", settings: userSettings };
+				const repaired = await userSettings.load();
 				if (repaired.length)
-					console.warn(
-						`Client window settings repaired: ${repaired.join("; ")}`,
-					);
+					console.warn(`Window settings repaired: ${repaired.join("; ")}`);
 				attempt.cancellation.signal.throwIfAborted();
-				const savedWindow = settings.readWindow();
+				const savedWindow = userSettings.readWindow();
 				const restoredWindow = await restoreGeometry(
 					window,
 					savedWindow,
@@ -360,33 +482,43 @@ export async function installClientSession(
 				geometrySlot.windowDisplay = controls;
 				geometrySlot.stopGeometry = observeWindowGeometry(
 					window,
-					(value) => settings.updateWindow(value),
+					(value) => userSettings.updateWindow(value),
 					(error) => reportWindowSettingsFailure(window, error),
 					() => controls.settings(),
 				);
-				const cache = new ClientVisualCacheStore(
-					join(app.getPath("userData"), "character-visuals"),
-					attempt.startup,
-					APP_PERSISTENCE_TUNING.visualCacheWriteDelayMs,
-					(message) => {
-						console.error(message);
-						if (owner.attempt === attempt && !window.native.isDestroyed())
-							window.webContents.send("visual-cache:failure", message);
-					},
-				);
-				const equipmentCache = new ClientEquipmentCacheStore(
-					join(app.getPath("userData"), "equipment-cache"),
-					attempt.startup,
-					APP_PERSISTENCE_TUNING.visualCacheWriteDelayMs,
-					(message) => {
-						console.error(message);
-						if (owner.attempt === attempt && !window.native.isDestroyed())
-							window.webContents.send("equipment-cache:failure", message);
-					},
-				);
-				attempt.resources = { kind: "ready", settings, cache, equipmentCache };
-				context.setDocumentRetirement(undefined);
-				await context.navigate("client", gamePath);
+				if (attempt.mode === "client") {
+					const cache = new ClientVisualCacheStore(
+						join(app.getPath("userData"), "character-visuals"),
+						attempt.startup,
+						APP_PERSISTENCE_TUNING.visualCacheWriteDelayMs,
+						(message) => {
+							console.error(message);
+							if (owner.attempt === attempt && !window.native.isDestroyed())
+								window.webContents.send("visual-cache:failure", message);
+						},
+					);
+					const equipmentCache = new ClientEquipmentCacheStore(
+						join(app.getPath("userData"), "equipment-cache"),
+						attempt.startup,
+						APP_PERSISTENCE_TUNING.visualCacheWriteDelayMs,
+						(message) => {
+							console.error(message);
+							if (owner.attempt === attempt && !window.native.isDestroyed())
+								window.webContents.send("equipment-cache:failure", message);
+						},
+					);
+					attempt.resources = {
+						kind: "ready",
+						settings: userSettings,
+						cache,
+						equipmentCache,
+					};
+					context.setDocumentRetirement(undefined);
+					await context.navigate("client", clientPath);
+				} else {
+					context.setDocumentRetirement(undefined);
+					await context.navigate("explorer", explorerPath);
+				}
 				attempt.cancellation.signal.throwIfAborted();
 			})();
 			try {
@@ -412,7 +544,7 @@ export async function installClientSession(
 				deadlineMs: APP_LIFECYCLE_TUNING.rendererClosePreparationTimeoutMs,
 				prepareRenderer: () => {
 					if (
-						documents.role !== "client" ||
+						(documents.role !== "client" && documents.role !== "explorer") ||
 						window.native.isDestroyed() ||
 						context.isFatalReported()
 					) {
@@ -431,13 +563,16 @@ export async function installClientSession(
 				if (context.isQuitting()) context.setExitCode(1);
 			}
 		},
-		showPicker: async (diagnostic) => {
+		showPicker: async (diagnostic, view) => {
 			const messages = new Set(
 				[diagnostic, pickerFailure].filter(
 					(value): value is string => value !== null,
 				),
 			);
-			await showPicker(messages.size === 0 ? null : [...messages].join("\n"));
+			await showPicker(
+				messages.size === 0 ? null : [...messages].join("\n"),
+				view,
+			);
 		},
 		flushLauncher: async () => {
 			// Independent writes must settle even when another persistence owner fails.
@@ -446,6 +581,8 @@ export async function installClientSession(
 					if (owner.attempt === null) await stopWindowGeometry(geometrySlot);
 					await launcher.flush();
 				})(),
+				userSettings.flush(),
+				contentPreferences.flush(),
 				appSettings.flush(),
 				failureReports.flush(),
 			]);
@@ -483,6 +620,18 @@ export async function installClientSession(
 		if (!attempt) throw new Error("No game attempt is active");
 		return attempt;
 	};
+	const requireClientAttempt = (): ClientNativeAttempt => {
+		const attempt = requireAttempt();
+		if (attempt.mode !== "client")
+			throw new Error("Client attempt is unavailable in Explorer mode");
+		return attempt;
+	};
+	const requireExplorerAttempt = (): ExplorerNativeAttempt => {
+		const attempt = requireAttempt();
+		if (attempt.mode !== "explorer")
+			throw new Error("Explorer attempt is unavailable in Client mode");
+		return attempt;
+	};
 	const requireSettings = (): ClientSettingsStore => {
 		const resources = requireAttempt().resources;
 		if (resources.kind === "pending")
@@ -490,13 +639,13 @@ export async function installClientSession(
 		return resources.settings;
 	};
 	const requireCache = (): ClientVisualCacheStore => {
-		const resources = requireAttempt().resources;
+		const resources = requireClientAttempt().resources;
 		if (resources.kind !== "ready")
 			throw new Error("Character visual cache is not ready");
 		return resources.cache;
 	};
 	const requireEquipmentCache = (): ClientEquipmentCacheStore => {
-		const resources = requireAttempt().resources;
+		const resources = requireClientAttempt().resources;
 		if (resources.kind !== "ready")
 			throw new Error("Equipment cantrip cache is not ready");
 		return resources.equipmentCache;
@@ -508,9 +657,13 @@ export async function installClientSession(
 		handle,
 		geometrySlot,
 		requireAttempt,
+		requireClientAttempt,
 		requireSettings,
 	});
 
+	handle("explorer:launch-config", "explorer", (): ExplorerLaunchConfig => ({
+		initialLocation: requireExplorerAttempt().startup.initialLocation,
+	}));
 	handle("visual-cache:read", "client", (_event, guid: unknown) =>
 		requireCache().read(requireCharacterGuid(guid)),
 	);
@@ -524,7 +677,7 @@ export async function installClientSession(
 		requireEquipmentCache().stage(equipmentCacheStageSchema.parse(capture)),
 	);
 	handle("launcher:snapshot", "picker", () =>
-		launcher.snapshot(pickerFailure, owner.canPlay),
+		launcher.snapshot(pickerFailure, owner.canPlay, pickerView),
 	);
 	handle(
 		"launcher:app-settings",
@@ -562,6 +715,50 @@ export async function installClientSession(
 	handle("launcher:save-app-settings", "picker", (_event, input: unknown) =>
 		appSettings.save(input),
 	);
+	handle(
+		"launcher:default-content",
+		"picker",
+		async (): Promise<DefaultContentSnapshot> => {
+			try {
+				const selection = await contentPreferences.load();
+				if (selection.kind === "unselected") {
+					return { location: null, attentionMessage: null, diagnostic: null };
+				}
+				return {
+					location: selection.location,
+					attentionMessage:
+						selection.health.kind === "needs_attention"
+							? selection.health.failure.message
+							: null,
+					diagnostic: null,
+				};
+			} catch (error) {
+				return {
+					location: null,
+					attentionMessage: null,
+					diagnostic: formatError(error),
+				};
+			}
+		},
+	);
+	handle(
+		"launcher:save-default-content",
+		"picker",
+		async (_event, input: unknown): Promise<DefaultContentSnapshot> => {
+			const location = defaultContentLocationSchema.parse(input);
+			if (location === null) {
+				await contentPreferences.clear();
+				return { location: null, attentionMessage: null, diagnostic: null };
+			}
+			const resolvedLocation = resolve(location);
+			await contentPreferences.select(resolvedLocation);
+			return {
+				location: resolvedLocation,
+				attentionMessage: null,
+				diagnostic: null,
+			};
+		},
+	);
 	handle("launcher:copy-last-failure", "picker", async () => {
 		const report = await failureReports.read();
 		if (report === null) return false;
@@ -590,6 +787,14 @@ export async function installClientSession(
 		async (_event, previous: unknown) => {
 			const path = z.string().min(1).nullable().parse(previous);
 			return chooseContentFolder(window, path);
+		},
+	);
+	handle(
+		"launcher:choose-weenie-catalog",
+		"picker",
+		async (_event, previous: unknown) => {
+			const path = z.string().min(1).nullable().parse(previous);
+			return chooseWeenieCatalogFile(window, path);
 		},
 	);
 	handle("launcher:directory", "picker", async (_event, refresh: unknown) => {
@@ -621,7 +826,24 @@ export async function installClientSession(
 			const startup = await launcher.select(selection);
 			const contentPath = initialContentPath ?? startup.contentPath;
 			initialContentPath = null;
-			return { ...startup, contentPath };
+			return { kind: "client", ...startup, contentPath };
+		}),
+	);
+	handle("launcher:explorer-settings", "picker", () =>
+		userSettings.loadExplorerLauncher(),
+	);
+	handle("launcher:launch-explorer", "picker", (_event, request: unknown) =>
+		owner.play(async () => {
+			const parsed = explorerLaunchRequestSchema.parse(request);
+			await userSettings.saveExplorerLauncher(parsed);
+			const contentPath = initialContentPath ?? parsed.contentPath;
+			initialContentPath = null;
+			return {
+				kind: "explorer",
+				contentPath,
+				weenieCatalogPath: parsed.weenieCatalogPath,
+				initialLocation: parsed.initialLocation,
+			};
 		}),
 	);
 	ipcMain.handle("client:request-close", (event, identity: unknown) => {
@@ -629,9 +851,13 @@ export async function installClientSession(
 		documents.requireIdentity(identity);
 		app.quit();
 	});
-	handle("client:prepared-close", "client", (_event, payload: unknown) => {
-		context.getDocumentRetirement()?.acceptPreparation(payload);
-	});
+	handle(
+		"client:prepared-close",
+		["client", "explorer"],
+		(_event, payload: unknown) => {
+			context.getDocumentRetirement()?.acceptPreparation(payload);
+		},
+	);
 	window.on("close", (event: Electron.Event) => {
 		event.preventDefault();
 		updates.stop();

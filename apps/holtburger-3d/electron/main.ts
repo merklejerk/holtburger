@@ -20,7 +20,6 @@ import { entryArguments, type EntryArguments } from "./main-entry.js";
 import { createIpcHandle } from "./main-ipc-guard.js";
 import { installClientSession, type NativeAttempt } from "./main-session.js";
 import {
-	createContentStartup,
 	installContentIpc,
 	installIpcBridge,
 	installThemesAndDiagnosticsIpc,
@@ -60,7 +59,6 @@ const applicationIconPath = app.isPackaged
 
 /** Exact application contents admit IPC independently of native surface replacement. */
 let applicationWindow: ApplicationWindow | null = null;
-let explorerContent: ContentStartup<SidecarHostClient> | undefined;
 /** The selected desktop profile owns one latest failure report. */
 const failureReports = new AppFailureReportStore(
 	join(app.getPath("userData"), "last-failure.json"),
@@ -125,9 +123,9 @@ const handle = createIpcHandle({
 	getDesktopCanPlay: () => desktop?.canPlay,
 });
 
-/** Client content belongs to its attempt; only Explorer keeps an application-lived content host. */
+/** Content startup belongs to the currently active client or Explorer attempt. */
 function currentContent(): ContentStartup<SidecarHostClient> | undefined {
-	return desktop === undefined ? explorerContent : desktop.attempt?.content;
+	return desktop?.attempt?.content;
 }
 
 function requireActiveHost(): SidecarHostClient {
@@ -217,12 +215,17 @@ void (async () => {
 	});
 	installIpcBridge({
 		window,
-		mode: entry.mode,
 		handle,
 		isQuitting: () => quitting,
-		requireClientAttempt: () => {
+		requireActiveMode: () => {
 			const attempt = desktop?.attempt;
 			if (!attempt) throw new Error("No game attempt is active");
+			return attempt.mode;
+		},
+		requireClientAttempt: () => {
+			const attempt = desktop?.attempt;
+			if (!attempt || attempt.mode !== "client")
+				throw new Error("No client attempt is active");
 			return attempt;
 		},
 		requireActiveHost,
@@ -245,22 +248,6 @@ void (async () => {
 		documents.navigate(role, path);
 		await loadEntry(window, path, entry.mode);
 	};
-	if (entry.mode === "explorer") {
-		explorerContent = createContentStartup({
-			window,
-			entry,
-			clearContent: entry.clearContent,
-			overridePath: entry.contentPath,
-			isCurrent: () => !quitting,
-			detach: [],
-			getDesktop: () => desktop,
-			isQuitting: () => quitting,
-			saveAppFailure,
-		});
-		await navigate("explorer", entry.path);
-		await explorerContent.start();
-		return;
-	}
 
 	const updates = installAppUpdates({
 		window,
@@ -301,10 +288,16 @@ void (async () => {
 	});
 	desktop = session.owner;
 
-	const directStartup = entry.clientStartup;
-	if (directStartup !== undefined)
-		await session.owner.play(async () => directStartup);
-	else await session.showPicker(null);
+	const directClientStartup = entry.clientStartup;
+	const directExplorerStartup = entry.explorerStartup;
+	if (directClientStartup !== undefined)
+		await session.owner.play(async () => ({
+			kind: "client",
+			...directClientStartup,
+		}));
+	else if (directExplorerStartup !== undefined)
+		await session.owner.play(async () => directExplorerStartup);
+	else await session.showPicker(null, entry.initialLauncherView);
 })().catch((error: unknown) =>
 	fatalError("Holtburger 3D failed to start", error),
 );
@@ -316,19 +309,5 @@ app.on("before-quit", (event) => {
 		event.preventDefault();
 		quitting = true;
 		void desktop.quit();
-		return;
 	}
-	if (quitting || !explorerContent) return;
-	event.preventDefault();
-	quitting = true;
-	void explorerContent
-		.close()
-		.catch((error: unknown) => {
-			console.error(error);
-			exitCode = 1;
-		})
-		.finally(async () => {
-			await failureReports.flush();
-			app.exit(exitCode);
-		});
 });

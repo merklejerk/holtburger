@@ -97,11 +97,6 @@ interface ReceivedBoomTick {
 	readonly receivedAtMs: number;
 }
 
-interface PlaybackPath {
-	readonly tick: HostKinematicBoomTick;
-	readonly durationMs: number;
-}
-
 const MAX_PRE_REGISTRATION_OUTPUTS = 2;
 
 /** Owns exact host lifecycle, latest-wins intent, and phase-aligned camera presentation. */
@@ -112,9 +107,7 @@ export class HostKinematicBoomSession {
 	#identity: HostKinematicBoomIdentity | null = null;
 	#preRegistrationOutputs = new Map<number, ReceivedBoomTick>();
 	#highestSequence = 0;
-	#active: PlaybackPath | null = null;
-	#pending: PlaybackPath | null = null;
-	#activeStartedAtMs = 0;
+	#active: ReceivedBoomTick | null = null;
 	#droppedPaths = 0;
 	#latestPath: HostKinematicBoomTick | null = null;
 	#nextInputSequence = 1;
@@ -190,13 +183,8 @@ export class HostKinematicBoomSession {
 			}
 			this.#identity = identity;
 			this.#registrationPending = false;
-			const latestProjection = [...this.#projectionRevisions.values()].at(-1);
-			if (
-				latestProjection !== undefined &&
-				latestProjection.revision > projection.revision
-			) {
-				await this.#submitClearance(latestProjection, identity);
-			}
+			// Drain pre-registration ticks synchronously before any follow-up clearance await so
+			// live ticks arriving during that await cannot overtake buffered sequences or race stop().
 			const pending = [...this.#preRegistrationOutputs.values()].sort(
 				(left, right) => left.tick.sequence - right.tick.sequence,
 			);
@@ -205,6 +193,14 @@ export class HostKinematicBoomSession {
 				if (sameHostKinematicBoomIdentity(output.tick, identity)) {
 					this.#receiveCurrentOutput(output);
 				}
+			}
+			const latestProjection = [...this.#projectionRevisions.values()].at(-1);
+			if (
+				latestProjection !== undefined &&
+				latestProjection.revision > projection.revision
+			) {
+				await this.#submitClearance(latestProjection, identity);
+				if (revision !== this.#lifecycleRevision) return;
 			}
 		} catch (error) {
 			if (revision === this.#lifecycleRevision) this.#resetSession();
@@ -256,7 +252,6 @@ export class HostKinematicBoomSession {
 		if (!Number.isFinite(nowMs)) {
 			throw new Error("Boom projection sample time must be finite.");
 		}
-		this.#advancePlayback(nowMs);
 		return this.#activeProjection();
 	}
 
@@ -355,13 +350,12 @@ export class HostKinematicBoomSession {
 	presentation(nowMs: number): HostKinematicBoomPresentation | null {
 		if (!Number.isFinite(nowMs))
 			throw new Error("Boom sample time must be finite.");
-		this.#advancePlayback(nowMs);
 		const active = this.#active;
 		if (active === null) return null;
 		return evaluateHostKinematicBoomPath(
 			active.tick.path,
 			active.durationMs,
-			nowMs - this.#activeStartedAtMs,
+			nowMs - active.receivedAtMs,
 		);
 	}
 
@@ -413,82 +407,19 @@ export class HostKinematicBoomSession {
 	#acceptOutput(received: ReceivedBoomTick): void {
 		const tick = received.tick;
 		this.#latestPath = tick;
-		if (tick.kind === "fallback") {
-			this.#acceptPath(tick, received.durationMs, received.receivedAtMs);
-			this.#pruneProjectionRevisions();
-			return;
-		}
-		const projection = this.#projectionRevisions.get(
-			tick.clearance.projectionRevision,
-		);
-		if (projection === undefined) {
-			throw new Error(
-				`Host acknowledged unknown camera projection revision ${tick.clearance.projectionRevision}.`,
+		if (tick.kind !== "fallback") {
+			const projection = this.#projectionRevisions.get(
+				tick.clearance.projectionRevision,
 			);
-		}
-		this.#acceptPath(tick, received.durationMs, received.receivedAtMs);
-		this.#pruneProjectionRevisions();
-	}
-
-	#acceptPath(
-		tick: HostKinematicBoomTick,
-		durationMs: number,
-		receivedAtMs: number,
-	): void {
-		const path = { tick, durationMs };
-		if (tick.kind !== "advanced" || this.#active?.tick.kind === "fallback") {
-			this.#active = path;
-			this.#pending = null;
-			this.#activeStartedAtMs = receivedAtMs;
-			return;
-		}
-		if (this.#active === null) {
-			this.#active = path;
-			this.#activeStartedAtMs = receivedAtMs;
-			return;
-		}
-		const activeEndsAt = this.#activeStartedAtMs + this.#active.durationMs;
-		if (receivedAtMs >= activeEndsAt) {
-			const pending = this.#pending;
-			if (pending === null) {
-				this.#active = path;
-				this.#activeStartedAtMs = receivedAtMs;
-				return;
+			if (projection === undefined) {
+				throw new Error(
+					`Host acknowledged unknown camera projection revision ${tick.clearance.projectionRevision}.`,
+				);
 			}
-			const pendingEndsAt = activeEndsAt + pending.durationMs;
-			if (receivedAtMs >= pendingEndsAt) {
-				this.#active = path;
-				this.#pending = null;
-				this.#activeStartedAtMs = receivedAtMs;
-				return;
-			}
-			this.#active = pending;
-			this.#pending = path;
-			this.#activeStartedAtMs = activeEndsAt;
-			return;
 		}
-		if (this.#pending === null) {
-			this.#pending = path;
-			return;
-		}
-		this.#droppedPaths += 1;
-		this.#active = path;
-		this.#pending = null;
-		this.#activeStartedAtMs = receivedAtMs;
-	}
-
-	#advancePlayback(nowMs: number): void {
-		const active = this.#active;
-		if (
-			active === null ||
-			nowMs - this.#activeStartedAtMs < active.durationMs ||
-			this.#pending === null
-		) {
-			return;
-		}
-		this.#activeStartedAtMs += active.durationMs;
-		this.#active = this.#pending;
-		this.#pending = null;
+		// Match DynamicEntityPlacementSystem and ClientCameraSession: start each accepted path
+		// from its shared receipt instant so camera and entity playback stay phase-locked.
+		this.#active = received;
 		this.#pruneProjectionRevisions();
 	}
 
@@ -502,15 +433,18 @@ export class HostKinematicBoomSession {
 	}
 
 	#pruneProjectionRevisions(): void {
-		const retained = new Set([this.#lastRequestedProjectionRevision]);
-		for (const playback of [this.#active, this.#pending]) {
-			const tick = playback?.tick;
-			if (tick !== undefined && tick.kind !== "fallback") {
-				retained.add(tick.clearance.projectionRevision);
-			}
-		}
+		const tick = this.#active?.tick;
+		// Retain the acknowledged revision and every newer in-flight revision so rapid
+		// consecutive clearance updates cannot drop an intermediate revision before the host acks it.
+		const minRetained =
+			tick !== undefined && tick.kind !== "fallback"
+				? Math.min(
+						this.#lastRequestedProjectionRevision,
+						tick.clearance.projectionRevision,
+					)
+				: this.#lastRequestedProjectionRevision;
 		for (const revision of this.#projectionRevisions.keys()) {
-			if (!retained.has(revision)) this.#projectionRevisions.delete(revision);
+			if (revision < minRetained) this.#projectionRevisions.delete(revision);
 		}
 	}
 
@@ -528,8 +462,6 @@ export class HostKinematicBoomSession {
 		this.#preRegistrationOutputs.clear();
 		this.#highestSequence = 0;
 		this.#active = null;
-		this.#pending = null;
-		this.#activeStartedAtMs = 0;
 		this.#droppedPaths = 0;
 		this.#latestPath = null;
 		this.#nextInputSequence = 1;

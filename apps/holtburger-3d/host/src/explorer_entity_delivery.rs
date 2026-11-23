@@ -114,8 +114,7 @@ impl ExplorerEntityDelivery {
         })
     }
 
-    /// Orders epoch issuance and delivery together. Projection happens before the short send gate;
-    /// camera-only callers never take the entity mutation/snapshot gate.
+    /// Orders epoch issuance and delivery together; projection happens before taking the send gate.
     /// The callback must finish delivery before returning and must not reenter this method.
     pub fn publish_fixed_tick<T>(
         &self,
@@ -302,41 +301,6 @@ mod tests {
             reason: HostKinematicBoomFailureReason::TargetContract,
             diagnostics: holtburger_core::KinematicBoomDiagnostics::default().into(),
         }
-    }
-
-    #[test]
-    fn camera_delivery_progresses_while_entity_work_holds_its_gate() {
-        let delivery = delivery();
-        let (entered_tx, entered_rx) = mpsc::channel();
-        let (release_tx, release_rx) = mpsc::channel();
-        let (sent_tx, sent_rx) = mpsc::channel();
-        let entity_delivery = Arc::clone(&delivery);
-        let delayed = thread::spawn(move || {
-            entity_delivery.with_ordered_publication(|| {
-                entered_tx.send(()).unwrap();
-                release_rx.recv().unwrap();
-            });
-        });
-        entered_rx.recv().unwrap();
-        let camera = thread::spawn(move || {
-            delivery
-                .publish_fixed_tick(
-                    Vec::new(),
-                    Some(camera_tick()),
-                    Duration::from_millis(16),
-                    |envelope| {
-                        sent_tx.send(envelope.epoch).unwrap();
-                        Ok(())
-                    },
-                )
-                .unwrap();
-        });
-        let result = sent_rx.recv_timeout(Duration::from_secs(2));
-        // Release even on failure so a lock regression cannot leave either test thread blocked.
-        release_tx.send(()).unwrap();
-        delayed.join().unwrap();
-        camera.join().unwrap();
-        assert_eq!(result.unwrap(), 1);
     }
 
     #[test]

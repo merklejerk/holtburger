@@ -323,9 +323,9 @@
 		</div>
 		<button
 			type="button"
-			class="ui-button"
+			class="ui-button hud-window-close texture-page-modal-close"
 			aria-label="Close texture page"
-			onclick={onClose}>✕</button
+			onclick={onClose}>×</button
 		>
 	</header>
 
@@ -391,20 +391,23 @@
 			</div>
 
 			<p class="explorer-section-label">Placements</p>
-			<div class="explorer-selectable-list texture-page-modal-entry-list">
+			<ul class="texture-page-modal-entry-list">
 				{#each page.entries as entry}
-					<button
-						type="button"
-						aria-pressed={entry.key === selectedEntry?.key}
-						class="explorer-selectable-row ui-button"
-						onclick={() => (selectedEntryKey = entry.key)}
-					>
-						<strong>Resident</strong>
-						<span>{entry.key}</span>
-						<code>{entry.x}, {entry.y} · {entry.width} × {entry.height}</code>
-					</button>
+					{@const isSelected = entry.key === selectedEntry?.key}
+					<li class="ui-catalog-row" class:selected={isSelected}>
+						<button
+							type="button"
+							aria-pressed={isSelected}
+							class="ui-catalog-trigger texture-page-modal-entry-trigger"
+							onclick={() => (selectedEntryKey = entry.key)}
+						>
+							<strong>Resident</strong>
+							<span>{entry.key}</span>
+							<code>{entry.x}, {entry.y} · {entry.width} × {entry.height}</code>
+						</button>
+					</li>
 				{/each}
-			</div>
+			</ul>
 
 			{#if selectedEntry}
 				<p class="texture-page-modal-selected">Selected resident placement.</p>
@@ -438,6 +441,12 @@
 		}
 		.texture-page-modal-header .explorer-section-label {
 			margin-bottom: 4px;
+		}
+		.texture-page-modal-close {
+			width: max(28px, calc(1em + 10px));
+			height: max(26px, calc(1.35em + 6px));
+			min-height: 26px;
+			flex: none;
 		}
 		.texture-page-modal-body {
 			display: grid;
@@ -476,11 +485,20 @@
 			margin: 16px 0 7px;
 		}
 		.texture-page-modal-entry-list {
+			list-style: none;
+			margin: 0;
+			padding: 0;
 			max-height: 360px;
 			overflow: auto;
 		}
-		.texture-page-modal-entry-list button {
+		.texture-page-modal-entry-list li.selected {
+			background: var(--ui-color-selection);
+		}
+		.texture-page-modal-entry-trigger {
+			display: grid;
 			gap: 3px;
+			width: 100%;
+			text-align: left;
 			font-size: calc(var(--ui-font-size-caption) * var(--ui-text-scale));
 		}
 		.texture-page-modal-entry-list strong {

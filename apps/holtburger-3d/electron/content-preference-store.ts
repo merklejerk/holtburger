@@ -25,6 +25,9 @@ const contentPreferenceSchema = z.object({
 	selection: savedContentSchema,
 });
 
+/** Persisted filename inside Electron's userData directory. */
+export const CONTENT_PREFERENCE_FILENAME = "content-selection.json";
+
 /** Last successful selection and its recovery reason, independent of character settings. */
 export type SavedContent = z.infer<typeof savedContentSchema>;
 
@@ -40,28 +43,39 @@ export class ContentPreferenceStore {
 	}
 
 	/** Missing preferences are expected on first launch; malformed/unreadable files are errors. */
-	async load(): Promise<SavedContent> {
-		let contents: string;
-		try {
-			contents = await readFile(this.#path, "utf8");
-		} catch (error) {
-			if (error instanceof Error && "code" in error && error.code === "ENOENT")
-				return this.#selection;
-			throw new Error(`Could not read content preference at ${this.#path}`, {
-				cause: error,
-			});
-		}
-		try {
-			this.#selection = contentPreferenceSchema.parse(
-				JSON.parse(contents),
-			).selection;
-		} catch (error) {
-			throw new Error(
-				`Invalid content preference at ${this.#path}; choose an asset location to replace it.`,
-				{ cause: error },
-			);
-		}
-		return this.#selection;
+	load(): Promise<SavedContent> {
+		const operation = this.#pending.then(async (): Promise<SavedContent> => {
+			let contents: string;
+			try {
+				contents = await readFile(this.#path, "utf8");
+			} catch (error) {
+				if (
+					error instanceof Error &&
+					"code" in error &&
+					error.code === "ENOENT"
+				)
+					return this.#selection;
+				throw new Error(`Could not read content preference at ${this.#path}`, {
+					cause: error,
+				});
+			}
+			try {
+				this.#selection = contentPreferenceSchema.parse(
+					JSON.parse(contents),
+				).selection;
+			} catch (error) {
+				throw new Error(
+					`Invalid content preference at ${this.#path}; choose an asset location to replace it.`,
+					{ cause: error },
+				);
+			}
+			return this.#selection;
+		});
+		this.#pending = operation.then(
+			() => undefined,
+			() => undefined,
+		);
+		return operation;
 	}
 
 	/** Explicit launch action replaces any saved path and attention marker, even if unreadable. */

@@ -10,7 +10,6 @@
 		"node": "^22.13.0 || >=24.0.0"
 	},
 	"scripts": {
-		"dev": "npm run dev:client",
 		"dev:explorer": "npm run build:electron:main && node scripts/electron-dev-entry.mjs explorer",
 		"dev:client": "npm run build:electron:main && node scripts/electron-dev-entry.mjs client",
 		"dev:ui": "npm run dev:vite -- --open /harness/browser/?ui-showcase=1",

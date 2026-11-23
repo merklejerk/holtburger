@@ -148,6 +148,9 @@ export interface LauncherProfileView {
 	/** Main-owned decryption result; consumers never infer readiness from ciphertext. */
 	readonly credentialStatus: "absent" | "saved" | "unavailable";
 }
+/** Active Launcher screen; returning from Explorer lands directly on the Explorer view. */
+export type LauncherViewMode = "client" | "explorer";
+
 /** Launcher state after automatic settings repair, with persistence diagnostics. */
 export interface LauncherSnapshot {
 	/** Most recently launched servers first; metadata edits preserve order and dependent profiles. */
@@ -162,6 +165,8 @@ export interface LauncherSnapshot {
 	readonly failure: string | null;
 	/** Combined application admission and catalog health, decided by native owners. */
 	readonly canPlay: boolean;
+	/** Initial launcher screen selected by native navigation state. */
+	readonly initialView: LauncherViewMode;
 }
 /** Explicit preset saves always store both credentials in one encrypted payload. */
 export const profileSaveSchema = z
@@ -178,5 +183,18 @@ export const launcherPlaySchema = launcherSelectionSchema
 		credentials: launcherCredentialsSchema,
 	})
 	.strict();
+/** Explorer launch request submitted from the Explorer Launcher view. */
+export const explorerLaunchRequestSchema = z
+	.object({
+		contentPath: z.string().min(1).nullable(),
+		weenieCatalogPath: z.string().min(1).nullable(),
+		initialLocation: z.string().trim().min(1).nullable(),
+	})
+	.strict();
+/** Bootstrap configuration read by the Explorer renderer on mount. */
+export interface ExplorerLaunchConfig {
+	readonly initialLocation: string | null;
+}
 export type ProfileSave = z.infer<typeof profileSaveSchema>;
 export type LauncherPlay = z.infer<typeof launcherPlaySchema>;
+export type ExplorerLaunchRequest = z.infer<typeof explorerLaunchRequestSchema>;

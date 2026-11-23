@@ -13,7 +13,7 @@
 	} from "../../lib/input/input-contract";
 	import type { InputPlatform } from "../../lib/input/input-platform";
 
-	import ClientHudPanel from "../hud/ClientHudPanel.svelte";
+	import ClientHudPanel from "../../app/hud/HudPanel.svelte";
 	import EquipmentSlotIcon from "../inventory/EquipmentSlotIcon.svelte";
 	import { AMMUNITION_SLOT } from "../inventory/inventory-equipment";
 	import { CLIENT_UI_DEFAULTS } from "../hud/ui-defaults";

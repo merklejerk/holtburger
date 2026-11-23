@@ -88,11 +88,11 @@ import type {
 	ClientCombatTargetFrame,
 	ClientTargetIndicatorFrame,
 } from "../combat/target-indicator";
-import type { ClientToast } from "../hud/toast-center";
+import type { HudToast as ClientToast } from "../../app/hud/toast-center";
 import type { ClientTradeState } from "../inventory/trade-state";
 import type { ClientVendorState } from "../inventory/vendor-state";
 import type { ClientMouseMovementInput } from "./viewport-mouse-controller";
-import type { ClientViewportCameraController } from "./viewport-pointer-gesture";
+import type { ViewportCameraController as ClientViewportCameraController } from "../../lib/input/viewport-pointer-gesture";
 import type { ClientWorldContainerPanelState } from "../inventory/world-container-panel-state";
 
 /** App-shell lifecycle, viewport DOM roots, layout editing mode, diagnostics, and debug overrides. */

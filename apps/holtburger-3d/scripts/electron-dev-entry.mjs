@@ -11,7 +11,10 @@ import {
 	collapseRendererArguments,
 	extractElectronLaunchArguments,
 	extractVitePortArguments,
+	isClientOnlyLaunchArgument,
+	isExplorerOnlyLaunchArgument,
 	partitionClientLaunchArguments,
+	partitionExplorerLaunchArguments,
 	requireEntry,
 } from "./entry-paths.mjs";
 import { resolveVitePort } from "./dev-port.mjs";
@@ -44,12 +47,27 @@ try {
 					entryArgs,
 					process.env.INIT_CWD ?? process.cwd(),
 				)
-			: { launchArguments: [], rendererArguments: entryArgs };
+			: partitionExplorerLaunchArguments(
+					entryArgs,
+					process.env.INIT_CWD ?? process.cwd(),
+				);
 	const electronLaunch = extractElectronLaunchArguments(
 		partitioned.rendererArguments,
 	);
 	electronSwitches = electronLaunch.electronSwitches;
 	const rendererArgs = electronLaunch.args;
+	for (const arg of rendererArgs) {
+		if (entryName === "client" && isExplorerOnlyLaunchArgument(arg)) {
+			throw new Error(
+				`Explorer-only argument is not valid in client mode: ${arg}`,
+			);
+		}
+		if (entryName === "explorer" && isClientOnlyLaunchArgument(arg)) {
+			throw new Error(
+				`Client-only argument is not valid in explorer mode: ${arg}`,
+			);
+		}
+	}
 	const initialPath =
 		entryName === "client" &&
 		parseClientLaunchArguments(partitioned.launchArguments).startup === null

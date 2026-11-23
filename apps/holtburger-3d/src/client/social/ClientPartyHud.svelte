@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { CLIENT_HUD_VITALS } from "../hud/hud-vitals";
 	import ClientHudIcon from "../hud/ClientHudIcon.svelte";
-	import ClientHudPanel from "../hud/ClientHudPanel.svelte";
+	import ClientHudPanel from "../../app/hud/HudPanel.svelte";
 	import type {
 		ClientHudPlacement,
 		ClientHudViewport,

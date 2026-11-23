@@ -1,15 +1,30 @@
 <script lang="ts">
-	import { launcherTransport } from "../../launcher/launcher-transport";
 	import PowerIcon from "../../assets/icons/hud-power.svg?component";
 	import { getAllContexts, onMount } from "svelte";
 	import AssetSetup from "./AssetSetup.svelte";
-	import ClientLoadingPage from "../../client/pregame/ClientLoadingPage.svelte";
-	import type { ClientLoadingPageState } from "../../client/pregame/loading-page";
+	import LoadingScreen from "./LoadingScreen.svelte";
+	import {
+		isLauncherReturnAvailable,
+		returnToLauncher,
+	} from "./launcher-navigation";
 	import { provideAppInputPolicy } from "../../lib/input/app-input-policy-context";
 	import type { ContentStartupSnapshot } from "./content-startup-contract";
 	import { createContentStartupTransport } from "./content-startup-transport";
 	import { StartupGameLifecycle } from "./startup-game-lifecycle";
 	import { registerElectronStartupClose } from "../../lib/host/electron-host-transport";
+
+	type StartupPageState =
+		| {
+				readonly kind: "pending";
+				readonly title: string;
+				readonly message: string;
+		  }
+		| {
+				readonly kind: "failed";
+				readonly title: string;
+				readonly message: string;
+				readonly details: string;
+		  };
 
 	interface Props {
 		/** The selected game entry remains unconstructed until native content admission. */
@@ -38,7 +53,8 @@
 			phase?.kind === "fatal" ||
 			failure !== null,
 	);
-	const page = $derived.by((): ClientLoadingPageState | null => {
+	const modeLabel = $derived(mode === "explorer" ? "Explorer" : "client");
+	const page = $derived.by((): StartupPageState | null => {
 		if (failure !== null)
 			return {
 				kind: "failed",
@@ -61,7 +77,7 @@
 			case "restart_required":
 				return {
 					kind: "failed",
-					title: "Client assets need attention",
+					title: "Game assets need attention",
 					message:
 						"Restart Holtburger to retry this location or choose another folder.",
 					details: phase.message,
@@ -76,23 +92,20 @@
 			case "ready":
 				return {
 					kind: "pending",
-					activity: "assets",
-					title: "Preparing client",
+					title: `Preparing ${modeLabel}`,
 					message: "Starting the application…",
 				};
 			case "loading":
 				return {
 					kind: "pending",
-					activity: "assets",
-					title: "Preparing client assets",
+					title: `Preparing ${modeLabel} assets`,
 					message: phase.message,
 				};
 			case undefined:
 				return {
 					kind: "pending",
-					activity: "assets",
-					title: "Preparing client assets",
-					message: "Locating client assets…",
+					title: `Preparing ${modeLabel} assets`,
+					message: "Locating game assets…",
 				};
 		}
 	});
@@ -116,7 +129,7 @@
 
 	onMount(() => {
 		const unmountKeyboard = input.keyboard.mount(document);
-		const lifecycle = new StartupGameLifecycle(mode);
+		const lifecycle = new StartupGameLifecycle();
 		const failedEffect = (event: ErrorEvent) => {
 			const error =
 				event.error instanceof Error ? event.error : new Error(event.message);
@@ -133,8 +146,7 @@
 		};
 		window.addEventListener("error", failedEffect);
 		window.addEventListener("unhandledrejection", failedPromise);
-		const unregisterClose =
-			mode === "client" ? registerElectronStartupClose(lifecycle) : null;
+		const unregisterClose = registerElectronStartupClose(lifecycle);
 		const unsubscribe = transport.subscribe((next) => {
 			snapshot = next;
 			if (next.phase.kind === "ready") {
@@ -173,28 +185,40 @@
 				onChoose={() => run(transport.choose)}
 				onRetry={() => run(transport.retry)}
 				onQuit={() => run(transport.quit)}
-				onBack={mode === "client" &&
-				window.holtburgerLauncher?.enabled !== false
-					? () => run(() => launcherTransport().back(failure))
+				onBack={isLauncherReturnAvailable()
+					? () => run(() => returnToLauncher(failure))
 					: null}
 			/>
 		{:else if page !== null}
-			<ClientLoadingPage
-				state={page}
-				toast={null}
+			{@const pending = page.kind === "pending"}
+			<LoadingScreen
+				branding="hero"
+				showPortalLogo={!pending}
+				{pending}
+				failed={!pending}
+				headingIcon={pending ? "portal" : "warning"}
+				title={page.title}
+				statusKind={pending ? "real" : "failed"}
+				statusMessage={pending
+					? `${page.title} · ${page.message}`
+					: page.message}
+				details={page.kind === "failed" ? page.details : null}
+				detailsKey={JSON.stringify([page.kind, page.title, page.message])}
 				contentLocation={phase !== undefined && "location" in phase
 					? phase.location
 					: null}
 			>
 				{#snippet footer()}
-					{#if mode === "client" && window.holtburgerLauncher?.enabled !== false}
+					{#if isLauncherReturnAvailable()}
 						<button
 							class="pregame-action pregame-quiet ui-button"
 							type="button"
-							onclick={() => run(() => launcherTransport().back(failure))}
-							>{page?.kind === "pending"
+							onclick={() => run(() => returnToLauncher(failure))}
+							>{pending
 								? "Cancel"
-								: "Back to launcher"}</button
+								: mode === "explorer"
+									? "Back to Explorer launcher"
+									: "Back to launcher"}</button
 						>
 					{/if}
 					<button
@@ -222,7 +246,7 @@
 						</p>
 					{/if}
 				{/snippet}
-			</ClientLoadingPage>
+			</LoadingScreen>
 		{/if}
 	</div>
 {/if}

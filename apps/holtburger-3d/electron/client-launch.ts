@@ -1,5 +1,10 @@
 import type { ClientHostAppraisalTuningConfig } from "../src/client/settings/tuning-contract.js";
-import { parseClientLaunchArgument } from "../scripts/entry-paths.mjs";
+import {
+	isClientOnlyLaunchArgument,
+	isExplorerOnlyLaunchArgument,
+	parseClientLaunchArgument,
+	parseExplorerLaunchArgument,
+} from "../scripts/entry-paths.mjs";
 import { resolve } from "node:path";
 
 /** Session content, credentials, and endpoint resolved by Electron main. */
@@ -16,8 +21,36 @@ export interface ClientLaunchConfiguration {
 	appraisalTuning?: ClientHostAppraisalTuningConfig;
 }
 
+/** Offline Explorer session configuration resolved by Electron main or the Explorer Launcher. */
+export interface ExplorerLaunchConfiguration {
+	readonly kind: "explorer";
+	/** Session asset selection; null uses the application default. */
+	contentPath: string | null;
+	/** Optional explicit path to a weenies.hwc catalog file; null uses sibling discovery. */
+	weenieCatalogPath: string | null;
+	/** Optional initial residence target string; null uses the Explorer default starting location. */
+	initialLocation: string | null;
+}
+
+/** Discriminated launch configuration consumed by the unified desktop application owner. */
+export type DesktopLaunchConfiguration =
+	| ({ readonly kind: "client" } & ClientLaunchConfiguration)
+	| ExplorerLaunchConfiguration;
+
+export interface ParsedExplorerLaunchArguments {
+	readonly startup: ExplorerLaunchConfiguration;
+	readonly noLauncher: boolean;
+	readonly noUpdates: boolean;
+	readonly ignorePersistedConfig: boolean;
+	readonly ignoreWorldMapCache: boolean;
+	readonly settingsFile: string | null;
+	readonly rendererArguments: readonly string[];
+}
+
 export interface ParsedClientLaunchArguments {
 	readonly startup: ClientLaunchConfiguration | null;
+	/** Initial launcher tab when no direct connection is requested. */
+	readonly initialLauncherView: "client" | "explorer";
 	/** Direct sessions exit on disconnect/cancellation instead of returning to the picker. */
 	readonly noLauncher: boolean;
 	/** Disable update lookups for this process without changing persisted settings. */
@@ -50,9 +83,109 @@ export function electronApplicationArguments(
 	return argv.slice(appIndex + 1);
 }
 
-/** Identifies flags reserved for the client launch contract before entry-query construction. */
-export function isClientLaunchArgument(argument: string): boolean {
-	return parseClientLaunchArgument(argument) !== null;
+/** Identifies client-only connection flags invalid in Explorer mode. */
+export function isClientOnlyArgument(argument: string): boolean {
+	return isClientOnlyLaunchArgument(argument);
+}
+
+/** Identifies Explorer-only flags invalid in Client mode. */
+export function isExplorerOnlyArgument(argument: string): boolean {
+	return isExplorerOnlyLaunchArgument(argument);
+}
+
+/**
+ * Resolves shared desktop flags and Explorer-only flags (`--weenie-catalog`, `--location`).
+ */
+export function parseExplorerLaunchArguments(
+	arguments_: readonly string[],
+): ParsedExplorerLaunchArguments {
+	let weenieCatalogPath: string | null = null;
+	let initialLocation: string | null = null;
+	let ignorePersistedConfig = false;
+	let noLauncher = false;
+	let noUpdates = false;
+	let ignoreWorldMapCache = false;
+	let settingsFile: string | null = null;
+	const rendererArguments: string[] = [];
+	const seen = new Set<string>();
+
+	for (let index = 0; index < arguments_.length; index += 1) {
+		const argument = arguments_[index];
+		const parsed = parseExplorerLaunchArgument(argument);
+		if (parsed === null) {
+			rendererArguments.push(argument);
+			continue;
+		}
+		const { name } = parsed;
+		if (seen.has(name))
+			throw new Error(
+				`Explorer launch argument --${name} was specified more than once`,
+			);
+		seen.add(name);
+		if (name === "no-launcher") {
+			if (parsed.value !== undefined)
+				throw new Error("--no-launcher does not accept a value");
+			noLauncher = true;
+			continue;
+		}
+		if (name === "no-updates") {
+			if (parsed.value !== undefined)
+				throw new Error("--no-updates does not accept a value");
+			noUpdates = true;
+			continue;
+		}
+		if (name === "ignore-config") {
+			if (parsed.value !== undefined)
+				throw new Error(
+					"Explorer launch argument --ignore-config/-i does not accept a value",
+				);
+			ignorePersistedConfig = true;
+			continue;
+		}
+		if (name === "ignore-world-map-cache") {
+			if (parsed.value !== undefined)
+				throw new Error("--ignore-world-map-cache does not accept a value");
+			ignoreWorldMapCache = true;
+			continue;
+		}
+
+		let value = parsed.value;
+		if (value === undefined) {
+			value = arguments_[index + 1];
+			if (value === undefined || value.startsWith("-"))
+				throw new Error(`Explorer launch argument --${name} requires a value`);
+			index += 1;
+		}
+		if (value.length === 0)
+			throw new Error(`Explorer launch argument --${name} cannot be empty`);
+
+		switch (name) {
+			case "settings-file":
+				settingsFile = resolve(value);
+				break;
+			case "weenie-catalog":
+				weenieCatalogPath = resolve(value);
+				break;
+			case "location":
+				initialLocation = value.trim() || null;
+				break;
+		}
+	}
+
+	return {
+		startup: {
+			kind: "explorer",
+			contentPath: null,
+			weenieCatalogPath,
+			initialLocation,
+		},
+		ignorePersistedConfig,
+		noLauncher,
+		noUpdates,
+		ignoreWorldMapCache,
+		settingsFile,
+		rendererArguments,
+	};
 }
 
 const DEFAULT_HOST = "127.0.0.1";
@@ -71,6 +204,7 @@ export function parseClientLaunchArguments(
 	let account: string | undefined;
 	let password = "";
 	let meleeMaxChaseDistance: number | undefined;
+	let initialLauncherView: "client" | "explorer" = "client";
 	let ignorePersistedConfig = false;
 	let noLauncher = false;
 	let noUpdates = false;
@@ -155,6 +289,14 @@ export function parseClientLaunchArguments(
 					"--melee-max-chase-distance",
 				);
 				break;
+			case "launcher-view":
+				if (value !== "client" && value !== "explorer") {
+					throw new Error(
+						'client launch argument --launcher-view must be "client" or "explorer"',
+					);
+				}
+				initialLauncherView = value;
+				break;
 		}
 	}
 
@@ -166,6 +308,11 @@ export function parseClientLaunchArguments(
 		"password",
 		"melee-max-chase-distance",
 	].some((name) => seen.has(name));
+	if (seen.has("launcher-view") && (noLauncher || connectionSupplied)) {
+		throw new Error(
+			"--launcher-view cannot be combined with a direct connection or --no-launcher",
+		);
+	}
 	if (noLauncher && account === undefined)
 		throw new Error("--no-launcher requires --account");
 	if (connectionSupplied && account === undefined)
@@ -189,6 +336,7 @@ export function parseClientLaunchArguments(
 							? {}
 							: { meleeMaxChaseDistance }),
 					},
+		initialLauncherView,
 		ignorePersistedConfig,
 		noLauncher,
 		noUpdates,

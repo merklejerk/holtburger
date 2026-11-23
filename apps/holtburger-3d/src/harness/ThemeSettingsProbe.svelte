@@ -10,7 +10,7 @@
 	import { createElectronClientSettingsTransport } from "../client/settings/settings-transport";
 	import { createDefaultClientUserSettings } from "../client/settings/settings-defaults";
 	import { createClientShortcuts } from "../client/hud/ClientShortcutDock.svelte";
-	import { ClientSettingsPersistence } from "../client/settings/settings-persistence";
+	import { SettingsPersistence } from "../app/settings/settings-persistence";
 	import type { ClientUserSettingsPatch } from "../client/settings/settings-sections";
 	import ClientPregameSettings from "../client/pregame/ClientPregameSettings.svelte";
 	import ClientSettingsPanel from "../client/settings/ClientSettingsPanel.svelte";
@@ -32,7 +32,7 @@
 	let ready = $state(false);
 	let gameplay = $state(false);
 	let issue = $state<string | null>(null);
-	const persistence = new ClientSettingsPersistence<ClientUserSettingsPatch>({
+	const persistence = new SettingsPersistence<ClientUserSettingsPatch>({
 		delayMs: 1,
 		save: (patch) => transport.saveUserPatch(patch),
 		report: (error) => {

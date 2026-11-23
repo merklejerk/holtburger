@@ -108,3 +108,15 @@ await import(
 	new URL("../dist-electron/electron/client-settings-store.js", import.meta.url)
 		.href
 );
+await import(
+	new URL(
+		"../dist-electron/src/explorer/settings/explorer-settings-contract.js",
+		import.meta.url,
+	).href
+);
+await import(
+	new URL(
+		"../dist-electron/src/explorer/settings/explorer-settings-defaults.js",
+		import.meta.url,
+	).href
+);

@@ -1,8 +1,10 @@
 <script lang="ts">
 	import { onMount } from "svelte";
 	import { submitPregameOnEnter } from "../client/pregame/pregame-submit";
-	import ClientPregameScreen from "../client/pregame/ClientPregameScreen.svelte";
+	import PregameScreen from "../app/desktop/PregameScreen.svelte";
 	import UiDialog from "../app/ui/UiDialog.svelte";
+	import UiTabPanel from "../app/ui/UiTabPanel.svelte";
+	import UiTabs from "../app/ui/UiTabs.svelte";
 	import { navigateVerticalButtons } from "../app/ui/vertical-button-navigation";
 	import EditIcon from "../assets/icons/hud-edit.svg?component";
 	import DeleteIcon from "../assets/icons/character-delete.svg?component";
@@ -10,15 +12,18 @@
 	import EyeIcon from "../assets/icons/hud-eye.svg?component";
 	import SettingsIcon from "../assets/icons/hud-settings.svg?component";
 	import AppSettingsDialog from "./AppSettingsDialog.svelte";
+	import ExplorerLauncherView from "./ExplorerLauncherView.svelte";
 	import ServerDirectoryDialog from "./ServerDirectoryDialog.svelte";
 	import { provideAppInputPolicy } from "../lib/input/app-input-policy-context";
 	import { requestElectronClientClose } from "../lib/host/electron-host-transport";
 	import { launcherTransport } from "./launcher-transport";
 	import type {
+		ExplorerLaunchRequest,
 		LauncherSnapshot,
 		LauncherServer,
 		LauncherProfileView,
 		LauncherCredentials,
+		LauncherViewMode,
 	} from "./launcher-contract";
 
 	const transport = launcherTransport();
@@ -36,7 +41,24 @@
 				: snapshot?.failure) ??
 			null,
 	);
+	const LAUNCHER_MODE_TABS = [
+		{
+			value: "client" as const,
+			label: "Client",
+			id: "launcher-client-tab",
+			panelId: "launcher-client-panel",
+		},
+		{
+			value: "explorer" as const,
+			label: "Explorer",
+			id: "launcher-explorer-tab",
+			panelId: "launcher-explorer-panel",
+		},
+	] as const;
+
 	let busy = $state(false);
+	let viewMode = $state<LauncherViewMode>("client");
+	let explorerDefaults = $state<ExplorerLaunchRequest | null>(null);
 	/** Primary submit control keeps keyboard entry on the validated form path. */
 	let playButton = $state<HTMLButtonElement>();
 	let browsingServers = $state(false);
@@ -214,10 +236,40 @@
 			password = "";
 		});
 	}
+	async function launchExplorer(request: ExplorerLaunchRequest): Promise<void> {
+		if (busy || snapshot?.canPlay !== true) return;
+		await run(async () => {
+			await transport.launchExplorer(request);
+		});
+	}
+	async function browseExplorerContent(
+		previous: string | null,
+	): Promise<string | null> {
+		let selected: string | null = null;
+		await run(async () => {
+			selected = await transport.chooseContentPath(previous);
+		});
+		return selected;
+	}
+	async function browseExplorerWeenieCatalog(
+		previous: string | null,
+	): Promise<string | null> {
+		let selected: string | null = null;
+		await run(async () => {
+			selected = await transport.chooseWeenieCatalog(previous);
+		});
+		return selected;
+	}
 	onMount(() => {
 		const unmount = keyboard.mount(document);
 		void run(async () => {
 			await refresh();
+			if (snapshot?.initialView === "explorer") viewMode = "explorer";
+			try {
+				explorerDefaults = await transport.explorerSettings();
+			} catch (error) {
+				failure = diagnostic(error);
+			}
 			selectedServerId =
 				snapshot?.lastSelection?.serverId ?? snapshot?.servers[0]?.id ?? "";
 			await chooseProfile(
@@ -252,12 +304,26 @@
 	</div>
 {/snippet}
 
-<ClientPregameScreen
+{#snippet modeSwitcher()}
+	<div class="launcher-mode-tabs">
+		<UiTabs
+			label="Launcher mode"
+			tabs={LAUNCHER_MODE_TABS.map((tab) => ({ ...tab, disabled: busy }))}
+			selected={viewMode}
+			onSelect={(value) => {
+				if (!busy) viewMode = value;
+			}}
+		/>
+	</div>
+{/snippet}
+
+<PregameScreen
 	branding="corner"
 	showPortalLogo={true}
 	backdrop={false}
 	onDefaultKeydown={(event) => {
 		if (
+			viewMode === "client" &&
 			editor === null &&
 			!browsingServers &&
 			!editingAppSettings &&
@@ -270,219 +336,245 @@
 					event.target.classList.contains("launcher-server-choice"),
 			);
 	}}
-	headerAside={notice !== null ? errorNotice : undefined}
+	headerCenter={notice !== null ? errorNotice : undefined}
+	headerAside={modeSwitcher}
 >
-	<section
-		class="launcher"
-		aria-label="Server and profile launcher"
-		aria-busy={busy}
+	<UiTabPanel
+		id="launcher-explorer-panel"
+		labelledBy="launcher-explorer-tab"
+		active={viewMode === "explorer"}
+		scroll={true}
 	>
-		{#if !snapshot}{@render heading()}{/if}
-		{#if snapshot}
-			<div class="launcher-columns">
-				<section class="launcher-list" aria-label="Servers">
-					{@render heading()}
-					<h2>Servers</h2>
-					<div
-						class="launcher-rows"
-						use:keyboard.scope={{
-							nativeControls: true,
-							keydown: navigateServers,
+		<div class="launcher-explorer-panel">
+			<ExplorerLauncherView
+				{busy}
+				canPlay={snapshot?.canPlay === true}
+				initialDefaults={explorerDefaults}
+				onBrowseContent={browseExplorerContent}
+				onBrowseWeenieCatalog={browseExplorerWeenieCatalog}
+				onLaunch={launchExplorer}
+			/>
+		</div>
+	</UiTabPanel>
+	<UiTabPanel
+		id="launcher-client-panel"
+		labelledBy="launcher-client-tab"
+		active={viewMode === "client"}
+		scroll={false}
+	>
+		<section class="launcher" aria-busy={busy}>
+			{#if !snapshot}{@render heading()}{/if}
+			{#if snapshot}
+				<div class="launcher-columns">
+					<section class="launcher-list" aria-label="Servers">
+						{@render heading()}
+						<h2>Servers</h2>
+						<div
+							class="launcher-rows"
+							use:keyboard.scope={{
+								nativeControls: true,
+								keydown: navigateServers,
+							}}
+						>
+							{#each snapshot.servers as item, index (item.id)}
+								{@const selected = selectedServerId === item.id}
+								<div class="launcher-server-row" data-selected={selected}>
+									<button
+										class="ui-button pregame-quiet launcher-server-choice"
+										type="button"
+										aria-pressed={selected}
+										aria-disabled={busy}
+										tabindex={selected ||
+										(selectedServerId === "" && index === 0)
+											? 0
+											: -1}
+										onclick={() => chooseServer(item.id)}
+									>
+										<span class="launcher-selection-marker" aria-hidden="true"
+											><SelectionMarker /></span
+										>
+										<span class="launcher-server-label"
+											><strong>{item.name}</strong><small
+												>{item.endpoint.host}:{item.endpoint.port}</small
+											></span
+										>
+									</button>
+									<div class="ui-icon-actions launcher-server-actions">
+										<button
+											class="ui-button ui-icon-button pregame-quiet"
+											type="button"
+											disabled={busy}
+											aria-label={`Edit ${item.name}`}
+											title={`Edit ${item.name}`}
+											onclick={() =>
+												(editor = {
+													kind: "server",
+													mode: "edit",
+													id: item.id,
+													name: item.name,
+													contentPath: item.contentPath ?? "",
+													...item.endpoint,
+												})}
+											><span class="pregame-icon" aria-hidden="true"
+												><EditIcon /></span
+											></button
+										>
+										<button
+											class="ui-button ui-icon-button pregame-quiet"
+											type="button"
+											disabled={busy}
+											aria-label={`Delete ${item.name}`}
+											title={`Delete ${item.name}`}
+											onclick={() =>
+												(editor = { kind: "delete-server", value: item })}
+											><span class="pregame-icon" aria-hidden="true"
+												><DeleteIcon /></span
+											></button
+										>
+									</div>
+								</div>
+							{:else}<p>Add a server to get started.</p>{/each}
+						</div>
+						<div class="launcher-actions">
+							<button
+								class="pregame-action ui-button"
+								disabled={busy}
+								onclick={() =>
+									(editor = {
+										kind: "server",
+										mode: "add",
+										id: crypto.randomUUID(),
+										name: "",
+										host: "",
+										port: 9000,
+										contentPath: "",
+									})}>Add server</button
+							>
+							<button
+								class="pregame-action ui-button"
+								disabled={busy}
+								onclick={() => (browsingServers = true)}
+								>Import from TreeStats</button
+							>
+						</div>
+					</section>
+					<form
+						class="launcher-profile"
+						aria-label="Launch options"
+						onsubmit={(event) => {
+							event.preventDefault();
+							void play();
 						}}
 					>
-						{#each snapshot.servers as item, index (item.id)}
-							{@const selected = selectedServerId === item.id}
-							<div class="launcher-server-row" data-selected={selected}>
-								<button
-									class="ui-button pregame-quiet launcher-server-choice"
-									type="button"
-									aria-pressed={selected}
-									aria-disabled={busy}
-									tabindex={selected || (selectedServerId === "" && index === 0)
-										? 0
-										: -1}
-									onclick={() => chooseServer(item.id)}
+						<header>
+							<h2>Launch options</h2>
+						</header>
+						<div class="launcher-profile-picker">
+							<label
+								>Profile (optional)<select
+									class="ui-input"
+									value={selectedProfileId}
+									disabled={busy || !server}
+									onchange={(event) =>
+										void run(() => chooseProfile(event.currentTarget.value))}
 								>
-									<span class="launcher-selection-marker" aria-hidden="true"
-										><SelectionMarker /></span
-									>
-									<span class="launcher-server-label"
-										><strong>{item.name}</strong><small
-											>{item.endpoint.host}:{item.endpoint.port}</small
-										></span
-									>
-								</button>
-								<div class="ui-icon-actions launcher-server-actions">
+									<option value="">No profile</option>
+									{#each profiles as item (item.id)}<option value={item.id}
+											>{item.name}</option
+										>{/each}
+								</select></label
+							>
+							{#if profile}
+								<div class="ui-icon-actions">
 									<button
 										class="ui-button ui-icon-button pregame-quiet"
 										type="button"
+										aria-label="Delete profile"
+										title="Delete profile"
 										disabled={busy}
-										aria-label={`Edit ${item.name}`}
-										title={`Edit ${item.name}`}
-										onclick={() =>
-											(editor = {
-												kind: "server",
-												mode: "edit",
-												id: item.id,
-												name: item.name,
-												contentPath: item.contentPath ?? "",
-												...item.endpoint,
-											})}
-										><span class="pregame-icon" aria-hidden="true"
-											><EditIcon /></span
-										></button
-									>
-									<button
-										class="ui-button ui-icon-button pregame-quiet"
-										type="button"
-										disabled={busy}
-										aria-label={`Delete ${item.name}`}
-										title={`Delete ${item.name}`}
-										onclick={() =>
-											(editor = { kind: "delete-server", value: item })}
+										onclick={() => {
+											if (profile)
+												editor = { kind: "delete-profile", value: profile };
+										}}
 										><span class="pregame-icon" aria-hidden="true"
 											><DeleteIcon /></span
 										></button
 									>
 								</div>
-							</div>
-						{:else}<p>Add a server to get started.</p>{/each}
-					</div>
-					<div class="launcher-actions">
-						<button
-							class="pregame-action ui-button"
-							disabled={busy}
-							onclick={() =>
-								(editor = {
-									kind: "server",
-									mode: "add",
-									id: crypto.randomUUID(),
-									name: "",
-									host: "",
-									port: 9000,
-									contentPath: "",
-								})}>Add server</button
-						>
-						<button
-							class="pregame-action ui-button"
-							disabled={busy}
-							onclick={() => (browsingServers = true)}
-							>Import from TreeStats</button
-						>
-					</div>
-				</section>
-				<form
-					class="launcher-profile"
-					aria-label="Launch options"
-					onsubmit={(event) => {
-						event.preventDefault();
-						void play();
-					}}
-				>
-					<header>
-						<h2>Launch options</h2>
-					</header>
-					<div class="launcher-profile-picker">
+							{/if}
+						</div>
+						{#if profile?.credentialStatus === "unavailable"}<p role="alert">
+								Saved credentials could not be loaded. Enter credentials and
+								overwrite this profile to repair it.
+							</p>{/if}
 						<label
-							>Profile (optional)<select
+							>Account<input
 								class="ui-input"
-								value={selectedProfileId}
+								autocomplete="username"
+								required
+								bind:value={account}
 								disabled={busy || !server}
-								onchange={(event) =>
-									void run(() => chooseProfile(event.currentTarget.value))}
-							>
-								<option value="">No profile</option>
-								{#each profiles as item (item.id)}<option value={item.id}
-										>{item.name}</option
-									>{/each}
-							</select></label
+							/></label
 						>
-						{#if profile}
+						<div class="launcher-password">
+							<label
+								>Password<input
+									class="ui-input"
+									type={passwordVisible ? "text" : "password"}
+									autocomplete="current-password"
+									bind:value={password}
+									disabled={busy || !server}
+								/></label
+							>
 							<div class="ui-icon-actions">
 								<button
 									class="ui-button ui-icon-button pregame-quiet"
 									type="button"
-									aria-label="Delete profile"
-									title="Delete profile"
-									disabled={busy}
-									onclick={() => {
-										if (profile)
-											editor = { kind: "delete-profile", value: profile };
-									}}
+									aria-label={passwordVisible
+										? "Hide password"
+										: "Show password"}
+									title={passwordVisible ? "Hide password" : "Show password"}
+									aria-pressed={passwordVisible}
+									disabled={busy || !server}
+									onclick={() => (passwordVisible = !passwordVisible)}
 									><span class="pregame-icon" aria-hidden="true"
-										><DeleteIcon /></span
+										><EyeIcon /></span
 									></button
 								>
 							</div>
-						{/if}
-					</div>
-					{#if profile?.credentialStatus === "unavailable"}<p role="alert">
-							Saved credentials could not be loaded. Enter credentials and
-							overwrite this profile to repair it.
-						</p>{/if}
-					<label
-						>Account<input
-							class="ui-input"
-							autocomplete="username"
-							required
-							bind:value={account}
-							disabled={busy || !server}
-						/></label
-					>
-					<div class="launcher-password">
-						<label
-							>Password<input
-								class="ui-input"
-								type={passwordVisible ? "text" : "password"}
-								autocomplete="current-password"
-								bind:value={password}
-								disabled={busy || !server}
-							/></label
-						>
-						<div class="ui-icon-actions">
+						</div>
+
+						<div class="launcher-actions">
+							{#if profile}<button
+									class="pregame-action ui-button"
+									type="button"
+									disabled={busy || !account || !profileChanged}
+									onclick={() => {
+										if (profile && profileChanged)
+											void run(() => persistProfile(profile.id, profile.name));
+									}}>Overwrite profile</button
+								>{/if}
 							<button
-								class="ui-button ui-icon-button pregame-quiet"
+								class="pregame-action ui-button launcher-save-profile"
 								type="button"
-								aria-label={passwordVisible ? "Hide password" : "Show password"}
-								title={passwordVisible ? "Hide password" : "Show password"}
-								aria-pressed={passwordVisible}
-								disabled={busy || !server}
-								onclick={() => (passwordVisible = !passwordVisible)}
-								><span class="pregame-icon" aria-hidden="true"><EyeIcon /></span
-								></button
+								disabled={busy || !server || !account}
+								onclick={() =>
+									(editor = { kind: "new-profile", name: account })}
+								>Save to new profile</button
 							>
 						</div>
-					</div>
-
-					<div class="launcher-actions">
-						{#if profile}<button
-								class="pregame-action ui-button"
-								type="button"
-								disabled={busy || !account || !profileChanged}
-								onclick={() => {
-									if (profile && profileChanged)
-										void run(() => persistProfile(profile.id, profile.name));
-								}}>Overwrite profile</button
-							>{/if}
 						<button
-							class="pregame-action ui-button launcher-save-profile"
-							type="button"
-							disabled={busy || !server || !account}
-							onclick={() => (editor = { kind: "new-profile", name: account })}
-							>Save to new profile</button
+							bind:this={playButton}
+							class="pregame-primary pregame-action ui-button launcher-play"
+							type="submit"
+							disabled={busy || !snapshot.canPlay || !server || !account}
+							>Play</button
 						>
-					</div>
-					<button
-						bind:this={playButton}
-						class="pregame-primary pregame-action ui-button launcher-play"
-						type="submit"
-						disabled={busy || !snapshot.canPlay || !server || !account}
-						>Play</button
-					>
-				</form>
-			</div>
-		{:else}<p>Loading launcher settings…</p>{/if}
-	</section>
+					</form>
+				</div>
+			{:else}<p>Loading launcher settings…</p>{/if}
+		</section>
+	</UiTabPanel>
 	{#snippet footer()}
 		<button
 			class="pregame-action ui-button pregame-quiet"
@@ -673,7 +765,7 @@
 			</form>
 		</UiDialog>
 	{/if}
-</ClientPregameScreen>
+</PregameScreen>
 
 {#snippet heading()}
 	<header>
@@ -688,10 +780,37 @@
 			width: 1.6em;
 			height: 1.6em;
 		}
+		.launcher-mode-tabs :global(.ui-tabs) {
+			background: transparent;
+			border: 0;
+			gap: 4px;
+			padding: 0;
+		}
+		.launcher-mode-tabs :global(.ui-tab) {
+			background: transparent;
+			border: 0;
+			border-radius: 0;
+			padding: 6px 12px;
+			color: var(--ui-color-muted);
+			font-family: var(--ui-font-heading);
+			box-shadow: inset 0 -2px transparent;
+		}
+		.launcher-mode-tabs :global(.ui-tab:hover:not(:disabled)) {
+			color: var(--ui-color-text);
+		}
+		.launcher-mode-tabs :global(.ui-tab[aria-selected="true"]) {
+			color: var(--ui-color-highlight);
+			box-shadow: inset 0 -2px var(--ui-color-accent);
+		}
+		.launcher-explorer-panel {
+			display: grid;
+			align-content: start;
+		}
 		.launcher {
 			display: flex;
 			flex-direction: column;
 			gap: 16px;
+			height: 100%;
 			min-height: 0;
 			overflow: auto;
 		}
@@ -833,6 +952,7 @@
 			margin-top: auto;
 		}
 		.launcher-error {
+			width: min(100%, 48ch);
 			min-height: 0;
 			display: grid;
 			grid-template-columns: minmax(0, 1fr) auto;

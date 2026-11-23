@@ -12,9 +12,12 @@ import type {
 } from "../../lib/game/runtime/scene-availability";
 import { LandblockLayerKind } from "../../lib/game/runtime/scene-interest";
 import type { SceneInterestRequest } from "../../lib/game/runtime/scene-interest";
-import type { Camera } from "../../lib/game/runtime/types";
+import type {
+	Camera,
+	PrimaryCameraView,
+	SceneInterestRadii,
+} from "../../lib/game/runtime/types";
 import type { ProjectionClearanceRevision } from "../../lib/game/camera/projection-clearance";
-import type { SceneInterestRadii } from "../../lib/game/runtime/types";
 import type { SceneResidency } from "../../lib/game/scene";
 import { PortalTransitionController } from "../../lib/client/portal-transition-controller";
 import type {
@@ -84,12 +87,21 @@ export type ExplorerCameraFocusStatus =
 	| `Scene target unavailable: ${string}`
 	| `Initial camera placement failed: ${string}`;
 
+/** Vertical margin below outdoor terrain before auto-enabling flat EnvCell rendering. */
+const UNDERGROUND_OOB_TOLERANCE_METERS = 0.5;
+
 /** Post-tick camera reconciliation consumed before attempting the matching render. */
 export interface ExplorerCameraResidencySync {
 	/** Exact pose and point-resolution result exposed by the Explorer HUD. */
 	readonly location: ExplorerCameraLocation | null;
 	/** Whether the runtime camera now owns a scope present in the current scene topology. */
 	readonly renderable: boolean;
+	/**
+	 * True when free-fly is outside EnvCell topology (dungeon OOB or beneath outdoor terrain
+	 * while not inside a valid underground EnvCell) so flat rendering should temporarily
+	 * override portal culling without mutating the user's setting.
+	 */
+	readonly requiresFlatEnvCellRenderMode: boolean;
 }
 
 /** The current scene-interest target and the radii outdoor follow mode reuses. */
@@ -138,6 +150,7 @@ export class ExplorerCameraCoordinator {
 	);
 	#hasRenderedFrame = false;
 	#lastResidency: SceneResidency | null = null;
+	#lastPrimaryView: PrimaryCameraView | null = null;
 	/** Exact position/residency most recently applied to the runtime camera. */
 	#presentedPlacement: HostCameraPlacement | null = null;
 	/** Last host placement announced to the Explorer status panel. */
@@ -402,16 +415,31 @@ export class ExplorerCameraCoordinator {
 			this.#pendingFollowSceneInterest = null;
 	}
 
-	/** Copy the scene-interest snapshot for diagnostics. */
+	/** Apply a freshly resolved radii update without disturbing the active target or camera pose. */
+	applySceneInterestRadii(request: SceneInterestRequest): boolean {
+		const current = this.#sceneInterestSnapshot;
+		if (current === null) return false;
+		const next: ExplorerSceneInterestSnapshot = {
+			radii: { ...request.radii },
+			residency: current.residency,
+			target: request.target,
+		};
+		this.#sceneInterestSnapshot = next;
+		if (this.#pendingFollowSceneInterest !== null) {
+			this.#pendingFollowSceneInterest = {
+				...this.#pendingFollowSceneInterest,
+				radii: next.radii,
+			};
+		}
+		if (!this.activationPending()) {
+			this.#runtime.updateSceneInterest(request);
+		}
+		return true;
+	}
+
+	/** Return the current immutable scene-interest snapshot by stable reference. */
 	sceneInterest(): ExplorerSceneInterestSnapshot | null {
-		const sceneInterest = this.#sceneInterestSnapshot;
-		return sceneInterest === null
-			? null
-			: {
-					radii: { ...sceneInterest.radii },
-					residency: { ...sceneInterest.residency },
-					target: sceneInterest.target,
-				};
+		return this.#sceneInterestSnapshot;
 	}
 
 	/** Apply input-event policy without deriving residency from a potentially changing scene. */
@@ -458,14 +486,24 @@ export class ExplorerCameraCoordinator {
 				return {
 					location: { position: state.position, residency: resolution },
 					renderable: true,
+					requiresFlatEnvCellRenderMode: false,
 				};
 			}
 			this.#reportResolutionIssue(
 				"Camera position is outside active dungeon topology.",
 			);
+			const fallbackResidency: SceneResidency = {
+				landblockId: this.#sceneInterestSnapshot.residency.landblockId,
+				envCellId: null,
+			};
+			this.#applyCamera(
+				createCamera(fallbackResidency, state, projection),
+				projection,
+			);
 			return {
 				location: { position: state.position, residency: resolution },
-				renderable: false,
+				renderable: true,
+				requiresFlatEnvCellRenderMode: true,
 			};
 		}
 		const location = { position: state.position, residency: resolution };
@@ -476,7 +514,19 @@ export class ExplorerCameraCoordinator {
 				createCamera(resolution.residency, state, projection),
 				projection,
 			);
-			return { location, renderable: true };
+			const terrainSurface =
+				resolution.residency.envCellId === null
+					? this.#runtime.queryOutdoorTerrainSurface(state.position)
+					: null;
+			const undergroundOob =
+				terrainSurface !== null &&
+				state.position.y <
+					terrainSurface.height - UNDERGROUND_OOB_TOLERANCE_METERS;
+			return {
+				location,
+				renderable: true,
+				requiresFlatEnvCellRenderMode: undergroundOob,
+			};
 		}
 		if (resolution.kind === "ambiguous") {
 			this.#reportResolutionIssue(
@@ -488,6 +538,25 @@ export class ExplorerCameraCoordinator {
 			this.#reportResolutionIssue(
 				"Camera position is outside canonical world bounds.",
 			);
+			const fallbackLandblockId =
+				this.#lastResidency?.landblockId ??
+				this.#sceneInterestSnapshot?.residency.landblockId ??
+				null;
+			if (fallbackLandblockId !== null) {
+				this.#applyCamera(
+					createCamera(
+						{ landblockId: fallbackLandblockId, envCellId: null },
+						state,
+						projection,
+					),
+					projection,
+				);
+				return {
+					location,
+					renderable: true,
+					requiresFlatEnvCellRenderMode: false,
+				};
+			}
 		}
 		const lastResidency = this.#lastResidency;
 		if (
@@ -504,9 +573,17 @@ export class ExplorerCameraCoordinator {
 				createCamera(lastResidency, state, projection),
 				projection,
 			);
-			return { location, renderable: true };
+			return {
+				location,
+				renderable: true,
+				requiresFlatEnvCellRenderMode: false,
+			};
 		}
-		return { location, renderable: false };
+		return {
+			location,
+			renderable: false,
+			requiresFlatEnvCellRenderMode: false,
+		};
 	}
 
 	/**
@@ -541,7 +618,11 @@ export class ExplorerCameraCoordinator {
 	): ExplorerCameraResidencySync {
 		if (placement === null) {
 			this.#reportResolutionIssue("Waiting for first host camera placement.");
-			return { location: null, renderable: false };
+			return {
+				location: null,
+				renderable: false,
+				requiresFlatEnvCellRenderMode: false,
+			};
 		}
 		const state = this.#controller.snapshotState();
 		const position = placement.position;
@@ -593,6 +674,7 @@ export class ExplorerCameraCoordinator {
 					},
 				},
 				renderable: false,
+				requiresFlatEnvCellRenderMode: false,
 			};
 		}
 		const resolution: ExplorerResidencyResolution = {
@@ -618,7 +700,11 @@ export class ExplorerCameraCoordinator {
 				`Camera residency follows host placement ${formatResidency(residency)}.`,
 			);
 		}
-		return { location: { position, residency: resolution }, renderable: true };
+		return {
+			location: { position, residency: resolution },
+			renderable: true,
+			requiresFlatEnvCellRenderMode: false,
+		};
 	}
 
 	/**
@@ -633,8 +719,18 @@ export class ExplorerCameraCoordinator {
 		this.#audioFollowsCamera = follows;
 	}
 
+	/** Exact camera and extent pair most recently pushed to the renderer. */
+	lastPrimaryView(): PrimaryCameraView | null {
+		return this.#lastPrimaryView;
+	}
+
 	#applyCamera(camera: Camera, projection: ProjectionClearanceRevision): void {
-		this.#runtime.setPrimaryView({ camera, extent: projection.extent });
+		const primaryView: PrimaryCameraView = {
+			camera,
+			extent: projection.extent,
+		};
+		this.#lastPrimaryView = primaryView;
+		this.#runtime.setPrimaryView(primaryView);
 		this.#presentedPlacement = {
 			position: sceneVec3(camera.placement.position.clone()),
 			residency: {

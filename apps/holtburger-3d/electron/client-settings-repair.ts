@@ -6,6 +6,10 @@ import {
 	clientCharacterSectionSchemas,
 	type ClientSettingsCollection,
 } from "../src/client/settings/settings-sections.js";
+import {
+	explorerHudPlacementSchemas,
+	explorerUserSectionSchemas,
+} from "../src/explorer/settings/explorer-settings-contract.js";
 
 /** A supported section normalized for disk, with notices only for discarded choices. */
 export interface RepairedSettingsEntry {
@@ -95,11 +99,16 @@ export function pruneUnsupportedSettings(document: ClientSettingsCollection): {
 		}
 		return entries;
 	};
-	// hudPlacements is a section map, not a versioned entry. Exclude it from envelope parsing.
-	const { hudPlacements, ...userEntries } = document.user;
+	// hudPlacements and explorerHudPlacements are section maps, not versioned entries.
+	const { hudPlacements, explorerHudPlacements, ...userEntries } =
+		document.user;
 	const user = prune(
 		userEntries,
-		new Set([...Object.keys(clientUserSectionSchemas), "window"]),
+		new Set([
+			...Object.keys(clientUserSectionSchemas),
+			...Object.keys(explorerUserSectionSchemas),
+			"window",
+		]),
 		"user",
 	);
 	if (hudPlacements !== undefined) {
@@ -112,6 +121,18 @@ export function pruneUnsupportedSettings(document: ClientSettingsCollection): {
 		else {
 			user.hudPlacements = {};
 			notices.push("user.hudPlacements: reset invalid map");
+		}
+	}
+	if (explorerHudPlacements !== undefined) {
+		if (isRecord(explorerHudPlacements))
+			user.explorerHudPlacements = prune(
+				explorerHudPlacements,
+				new Set(Object.keys(explorerHudPlacementSchemas)),
+				"user.explorerHudPlacements",
+			);
+		else {
+			user.explorerHudPlacements = {};
+			notices.push("user.explorerHudPlacements: reset invalid map");
 		}
 	}
 	const supportedCharacterSections = new Set(

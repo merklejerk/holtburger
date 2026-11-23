@@ -126,10 +126,10 @@ pub use dynamic_entity_view::{
     DynamicEntityAdvance, DynamicEntityClip, DynamicEntityClipCompletion, DynamicEntityContactView,
     DynamicEntityDisplayView, DynamicEntityEvent, DynamicEntityHostTime, DynamicEntityIdentityView,
     DynamicEntityMotion, DynamicEntityMotionActivity, DynamicEntityMotionLayer,
-    DynamicEntityPathLeg, DynamicEntityPathPoint, DynamicEntityPhysicsView,
-    DynamicEntityPlacedPath, DynamicEntityPlacementAdvanceKind, DynamicEntityPlacementView,
-    DynamicEntityPresentationView, DynamicEntitySampleModeView, DynamicEntitySnapshot,
-    DynamicEntityTickBatch, DynamicEntityView, DynamicEntityViewSource,
+    DynamicEntityPathLeg, DynamicEntityPathPoint, DynamicEntityPhysicsFlags,
+    DynamicEntityPhysicsView, DynamicEntityPlacedPath, DynamicEntityPlacementAdvanceKind,
+    DynamicEntityPlacementView, DynamicEntityPresentationView, DynamicEntitySampleModeView,
+    DynamicEntitySnapshot, DynamicEntityTickBatch, DynamicEntityView, DynamicEntityViewSource,
     PhysicalBodyParticipationView, dynamic_entity_display_view, project_dynamic_entity_view,
 };
 pub use dynamic_scripts::{

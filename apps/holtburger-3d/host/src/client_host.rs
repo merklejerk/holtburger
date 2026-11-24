@@ -14,7 +14,7 @@ use holtburger_core::{
     SequencedCharacterMotionEvent,
 };
 use serde::Deserialize;
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::broadcast;
 
 use crate::client_projection::{ClientHostEvent, client_exit_requested, project_client_event};
 use crate::protocol::EVENT_PROFILE_TARGET;
@@ -172,12 +172,13 @@ impl ClientCharacterMotionEventRequest {
 pub async fn run_client_task(
     mut client: holtburger_core::ClientRuntime,
     events: broadcast::Receiver<ClientViewEvent>,
-    command_tx: mpsc::UnboundedSender<holtburger_core::ClientCommand>,
+    handle: holtburger_core::ClientRuntimeHandle,
     sink: Arc<dyn crate::host_event_sink::ClientEventSink>,
     shutdown_requested: Arc<std::sync::atomic::AtomicBool>,
     performance: crate::client_performance::ClientPerformance,
 ) -> anyhow::Result<()> {
     let authority_performance = performance.clone();
+    let resync = move || handle.send_user(holtburger_core::ClientCommand::RequestCurrentApplicationState);
     supervise_client_runtime(
         Some(performance),
         async move {
@@ -193,7 +194,7 @@ pub async fn run_client_task(
             exit
         },
         events,
-        command_tx,
+        resync,
         sink,
     )
     .await
@@ -229,12 +230,12 @@ async fn supervise_client_runtime(
     performance: Option<crate::client_performance::ClientPerformance>,
     run: impl std::future::Future<Output = ClientHostEvent> + Send + 'static,
     events: broadcast::Receiver<ClientViewEvent>,
-    command_tx: mpsc::UnboundedSender<holtburger_core::ClientCommand>,
+    request_resync: impl Fn() -> anyhow::Result<()>,
     sink: Arc<dyn crate::host_event_sink::ClientEventSink>,
 ) -> anyhow::Result<()> {
     let mut authority = tokio::task::JoinSet::new();
     authority.spawn(run);
-    forward_client_events(performance.as_ref(), events, command_tx, sink.as_ref()).await?;
+    forward_client_events(performance.as_ref(), events, request_resync, sink.as_ref()).await?;
     while let Some(result) = authority.join_next().await {
         let exit = match result {
             Ok(exit) => exit,
@@ -249,7 +250,7 @@ async fn supervise_client_runtime(
 async fn forward_client_events(
     performance: Option<&crate::client_performance::ClientPerformance>,
     mut events: broadcast::Receiver<ClientViewEvent>,
-    command_tx: mpsc::UnboundedSender<holtburger_core::ClientCommand>,
+    request_resync: impl Fn() -> anyhow::Result<()>,
     sink: &dyn crate::host_event_sink::ClientEventSink,
 ) -> anyhow::Result<()> {
     // Core emits a few broad compatibility events while constructing its replacement level. The
@@ -294,10 +295,7 @@ async fn forward_client_events(
                 if !snapshot_request_pending {
                     snapshot_request_pending = true;
                     sink.publish_client_event(ClientHostEvent::StateResyncing)?;
-                    if command_tx
-                        .send(holtburger_core::ClientCommand::RequestCurrentApplicationState)
-                        .is_err()
-                    {
+                    if request_resync().is_err() {
                         // Authority ended before recovery could be requested. The
                         // supervisor owns its real terminal cause, not a second exit.
                         break;
@@ -315,6 +313,7 @@ async fn forward_client_events(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::sync::mpsc;
     use crate::client_projection::{
         ClientCurrentState, ClientHostEvent, ClientLifecycleWire, project_client_event,
     };
@@ -658,7 +657,6 @@ mod tests {
                 .unwrap();
         performance.control(start).unwrap();
         let (event_tx, events) = broadcast::channel(8);
-        let (command_tx, _commands) = mpsc::unbounded_channel();
         let (forwarded_tx, mut forwarded) = mpsc::unbounded_channel();
         let (progress_tx, progress) = std::sync::mpsc::channel();
         let sink = Arc::new(TestSink(move |event| {
@@ -685,7 +683,7 @@ mod tests {
                 client_exit_requested(ClientExitCause::HostShutdown, "test shutdown")
             },
             events,
-            command_tx,
+            || Ok(()),
             sink,
         )
         .await
@@ -729,7 +727,17 @@ mod tests {
                 .unwrap();
         }
         let forwarder = tokio::spawn(async move {
-            forward_client_events(None, events, command_tx, sink.as_ref()).await
+            forward_client_events(
+                None,
+                events,
+                move || {
+                    command_tx
+                        .send(holtburger_core::ClientCommand::RequestCurrentApplicationState)
+                        .map_err(|e| anyhow::anyhow!("{e}"))
+                },
+                sink.as_ref(),
+            )
+            .await
         });
         assert!(matches!(
             commands.recv().await,
@@ -847,7 +855,6 @@ mod tests {
     #[tokio::test]
     async fn sink_failure_cancels_the_owned_authority() {
         let (event_tx, events) = broadcast::channel(2);
-        let (command_tx, _commands) = mpsc::unbounded_channel();
         let (lifetime, dropped) = tokio::sync::oneshot::channel::<()>();
         let sink = Arc::new(TestSink(|_| anyhow::bail!("output closed")));
         let error = supervise_client_runtime(
@@ -860,7 +867,7 @@ mod tests {
                 client_exit_requested(ClientExitCause::HostShutdown, "unreachable")
             },
             events,
-            command_tx,
+            || Ok(()),
             sink,
         )
         .await
@@ -877,7 +884,6 @@ mod tests {
     #[tokio::test]
     async fn cancelling_the_supervisor_does_not_detach_authority() {
         let (event_tx, events) = broadcast::channel(2);
-        let (command_tx, _commands) = mpsc::unbounded_channel();
         let (started_tx, started) = tokio::sync::oneshot::channel();
         let (lifetime, dropped) = tokio::sync::oneshot::channel::<()>();
         let task = tokio::spawn(supervise_client_runtime(
@@ -890,7 +896,7 @@ mod tests {
                 client_exit_requested(ClientExitCause::HostShutdown, "unreachable")
             },
             events,
-            command_tx,
+            || Ok(()),
             Arc::new(TestSink(|_| Ok(()))),
         ));
         started.await.unwrap();
@@ -907,7 +913,6 @@ mod tests {
     #[tokio::test]
     async fn authority_panic_publishes_one_terminal_failure() {
         let (event_tx, events) = broadcast::channel(2);
-        let (command_tx, _commands) = mpsc::unbounded_channel();
         let (forwarded_tx, mut forwarded) = mpsc::unbounded_channel();
         supervise_client_runtime(
             None,
@@ -916,7 +921,7 @@ mod tests {
                 panic!("authority test failure");
             },
             events,
-            command_tx,
+            || Ok(()),
             Arc::new(TestSink(move |event| {
                 forwarded_tx.send(event)?;
                 Ok(())

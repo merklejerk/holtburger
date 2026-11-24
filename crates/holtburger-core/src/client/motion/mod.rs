@@ -10,3 +10,4 @@ pub mod precise_jump;
 pub mod precise_jump_prediction;
 pub(in crate::client) mod precise_jump_runtime;
 pub(in crate::client) mod rest_posture;
+pub mod steering;

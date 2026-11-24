@@ -62,6 +62,40 @@ export type AttackTarget = {
 	weenieId: number | null;
 };
 
+export type TrainingLevel =
+	"Unusable" | "Untrained" | "Trained" | "Specialized";
+
+export type MageSkillName = "Healing" | "LifeMagic" | "WarMagic" | "VoidMagic";
+
+export type FellowshipMember = {
+	guid: Guid;
+	name: string;
+	level: number;
+	max_health: number;
+	max_stamina: number;
+	max_mana: number;
+	current_health: number;
+	current_stamina: number;
+	current_mana: number;
+};
+
+export type Fellowship = {
+	name: string;
+	leader_guid: Guid | null;
+	members: FellowshipMember[];
+};
+
+export type MageChatMessage = {
+	sender: string | null;
+	message: string;
+};
+
+export type MageCombatFeedback = {
+	kind: string;
+	ok?: boolean;
+	error?: string;
+};
+
 export type SkillSnapshot = {
 	skillId: number;
 	effective: number;

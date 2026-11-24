@@ -71,7 +71,8 @@ pub use motion::{authored_grounded_actuation, grounded_character_actuation};
 pub use selection::{SelectionEnvelope, SelectionEnvelopeError, SelectionGeometry};
 pub use spatial::{
     AcceptedBodyMotion, AuthoritativeBodyVectors, AuthoritativePoseEffect,
-    AuthoritativePoseResetCause, AvailableEntitySelectionCandidates, CellTransitRequest,
+    AuthoritativePoseResetCause, AvailableEntitySelectionCandidates, CellPortalTopology,
+    CellTopology, CellTransitRequest,
     ChildSpatialBody, ChildSpatialBodyDefinition, ChildSpatialBodyDefinitionError,
     ChildSpatialBodyWaypoint, CollisionOwnerProof, CollisionQueryError, CollisionQueryPolicy,
     CollisionReportClassification, CollisionReportContact, CollisionReportOutcome,
@@ -88,7 +89,7 @@ pub use spatial::{
     FreeSphereSettleConfig, FreeSphereSettleOutcome, FreeSphereState, GroundState, GroundSupport,
     GroundedBodyActuation, GroundedBodySpheres, GroundedConfig, GroundedContactState,
     GroundedLaunch, GroundedObstruction, GroundedObstructionRequest, GroundedSphere,
-    HardEntityShape, HardSphereSweep, HardSphereSweepHit, LocalDriveControl, LocalDriveGait,
+    HardEntityShape, HardSphereSweep, HardSphereSweepHit,
     MOBILE_CONTACT_ANGULAR_CHORDS, MOBILE_CONTACT_CORRECTION_FRACTION,
     MOBILE_CONTACT_CORRECTION_TRAVEL_RADIUS_RATIO, MOBILE_CONTACT_HARD_SLIDE_PASSES,
     MOBILE_CONTACT_PASSES, MOBILE_CONTACT_TICK_SECONDS, MOBILE_CONTACT_TOLERANCE_METERS,

@@ -4,6 +4,7 @@ use std::{fs::File, sync::Mutex};
 use holtburger_content::CharacterGenCatalog;
 use holtburger_core::ClientState;
 use holtburger_dat::file_type::SkillTable;
+use holtburger_live_api::LiveApiEngine;
 use holtburger_scripting::ScriptHostConfig;
 use holtburger_world::spell::SpellCatalog;
 
@@ -70,21 +71,17 @@ pub struct AppState {
     pub script_host_config: ScriptHostConfig,
     /// Frontend-owned roots resolved once at launch and reused after reconnects.
     pub script_directories: ScriptDirectories,
+    /// Shared Live API engine mounted for this TUI session (used by in-process V8 scripts).
+    pub live_api_engine: Option<LiveApiEngine>,
+    /// Localhost Live API HTTP endpoint when `--api` is enabled.
+    pub live_api_endpoint: Option<String>,
+    /// Tokio runtime handle passed to dedicated V8 script threads.
+    pub tokio_handle: Option<tokio::runtime::Handle>,
 }
 
 pub struct RenderContext<'a> {
     pub client_state: &'a ClientState,
     pub net_stats: &'a NetStats,
-    pub server_time: Option<(f64, Instant)>,
-}
-
-#[derive(Debug, Clone, Copy, Default)]
-pub struct EventContext {
-    pub server_time: Option<(f64, Instant)>,
-}
-
-#[derive(Debug, Clone, Copy, Default)]
-pub struct TickContext {
     pub server_time: Option<(f64, Instant)>,
 }
 

@@ -1458,3 +1458,115 @@ export type ClientLocalMotionFeedback = z.infer<
 export const socialMotionReadySchema = z
 	.object({ ready: z.boolean() })
 	.strict();
+
+const finiteVec3Schema = z.tuple([
+	z.number().finite(),
+	z.number().finite(),
+	z.number().finite(),
+]);
+const rgbaColorSchema = z.tuple([
+	z.number().finite(),
+	z.number().finite(),
+	z.number().finite(),
+	z.number().finite(),
+]);
+
+/** Live API status summary emitted by the client host sidecar for the HUD pill. */
+const clientApiStateSchema = z
+	.object({
+		active: z.boolean(),
+		paused: z.boolean(),
+		endpoint: z.string().nullable(),
+	})
+	.strict();
+export type ClientApiState = z.infer<typeof clientApiStateSchema>;
+
+/** One projected 3D overlay marker emitted by the h3d Live API HUD hook. */
+const clientApiWorldMarkerSchema = z.discriminatedUnion("kind", [
+	z
+		.object({
+			kind: z.literal("ring"),
+			id: z.string(),
+			namespace: z.string().nullable(),
+			position: finiteVec3Schema,
+			renderScopeKey: z.string(),
+			radius: z.number().finite().positive(),
+			spin: z.boolean(),
+			color: rgbaColorSchema,
+			ttlMs: z.number().int().positive(),
+		})
+		.strict(),
+	z
+		.object({
+			kind: z.literal("polyline"),
+			id: z.string(),
+			namespace: z.string().nullable(),
+			points: z.array(finiteVec3Schema).min(2),
+			renderScopeKeys: z.array(z.string()).min(2),
+			color: rgbaColorSchema,
+			ttlMs: z.number().int().positive(),
+		})
+		.strict(),
+]);
+export type ClientApiWorldMarker = z.infer<typeof clientApiWorldMarkerSchema>;
+
+/** Frontend UI/HUD commands emitted by the h3d Live API hooks toward the renderer. */
+const clientApiHudEventSchema = z.discriminatedUnion("kind", [
+	z
+		.object({
+			kind: z.literal("select-entity"),
+			guid: guid.nullable(),
+		})
+		.strict(),
+	z
+		.object({
+			kind: z.literal("print"),
+			message: z.string(),
+			style: z.enum([
+				"info",
+				"warn",
+				"error",
+				"system",
+				"combat",
+				"magic",
+				"trade",
+			]),
+		})
+		.strict(),
+	z
+		.object({
+			kind: z.literal("toast"),
+			message: z.string(),
+			level: z.enum(["info", "success", "warn", "error"]),
+		})
+		.strict(),
+	z
+		.object({
+			kind: z.literal("upsert-markers"),
+			markers: z.array(clientApiWorldMarkerSchema),
+		})
+		.strict(),
+	z
+		.object({
+			kind: z.literal("clear-markers"),
+			namespace: z.string().nullable(),
+		})
+		.strict(),
+	z
+		.object({
+			kind: z.literal("capture-screenshot"),
+			requestId: z.string(),
+			maxWidth: z.number().int().positive(),
+			quality: z.number().finite().min(0.1).max(1),
+		})
+		.strict(),
+]);
+export type ClientApiHudEvent = z.infer<typeof clientApiHudEventSchema>;
+
+export function decodeClientApiState(value: unknown): ClientApiState {
+	return clientApiStateSchema.parse(value);
+}
+
+export function decodeClientApiHudEvent(value: unknown): ClientApiHudEvent {
+	return clientApiHudEventSchema.parse(value);
+}

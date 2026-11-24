@@ -42,9 +42,10 @@ import {
 	type ExplorerLaunchConfig,
 	type LauncherViewMode,
 } from "../src/launcher/launcher-contract.js";
-import type {
-	ClientLaunchConfiguration,
-	ExplorerLaunchConfiguration,
+import {
+	resolveLiveApiLaunch,
+	type ClientLaunchConfiguration,
+	type ExplorerLaunchConfiguration,
 } from "./client-launch.js";
 import { clientCharacterProfileKey } from "./client-profile-key.js";
 import { ClientRetirement } from "./client-retirement.js";
@@ -427,10 +428,18 @@ export async function installClientSession(
 			}
 			const {
 				kind,
-				...startup
+				...rawStartup
 			}: { readonly kind: "client" } & ClientLaunchConfiguration =
 				configuration;
 			void kind;
+			const liveApi = resolveLiveApiLaunch(
+				appSettings.settings.liveApi,
+				entry.liveApiOverride,
+			);
+			const startup: ClientLaunchConfiguration = {
+				...rawStartup,
+				...(liveApi === undefined ? {} : { liveApi }),
+			};
 			const content = createContentStartup({
 				window,
 				mode: "client",

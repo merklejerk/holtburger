@@ -1,5 +1,4 @@
 use crate::state::AppState;
-use crate::state::TickContext;
 use crate::types::{AppEvent, RedrawPriority, UpdateResult};
 
 impl AppState {
@@ -40,12 +39,7 @@ impl AppState {
     fn update_tick(&mut self, elapsed: f64) -> UpdateResult {
         let mut result = UpdateResult::new();
         // Delegate Page/GameState tick logic
-        result.merge(self.page.handle_tick(
-            elapsed,
-            &TickContext {
-                server_time: self.server_time,
-            },
-        ));
+        result.merge(self.page.handle_tick(elapsed));
 
         result
     }

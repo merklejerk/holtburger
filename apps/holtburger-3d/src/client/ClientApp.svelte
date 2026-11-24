@@ -55,6 +55,7 @@
 	import { runClientVersionCommand } from "./session/version-command";
 	import { isLogopolisCommand } from "./hud/logopolis";
 	import { runClientLocationCommand } from "./session/location-command";
+	import { runClientApiCommand } from "./session/api-command";
 	import { runClientScanCommand } from "./session/scan-command";
 	import { runClientCopyEntityCommand } from "./session/copy-entity-command";
 	import { ClientDeathCommands } from "./combat/death-commands";
@@ -222,6 +223,8 @@
 		ClientAppearanceOptions,
 		ClientDriveRequest,
 		ClientVital,
+		ClientApiState,
+		ClientApiHudEvent,
 	} from "./session/host-contract";
 	import {
 		clientChatShouldSuppress,
@@ -652,6 +655,14 @@
 	let characterMotion = $state<ClientCharacterMotionCapabilities | null>(null);
 	let activeJumpBeginSequence = $state<number | null>(null);
 	let toast = $state<ClientToast | null>(null);
+	let apiState = $state<ClientApiState | null>(null);
+	let apiPausePending = $state(false);
+	let suppressSelectionReport = false;
+	const pendingScreenshotRequests: Array<{
+		requestId: string;
+		maxWidth: number;
+		quality: number;
+	}> = [];
 	let dialogPresentation = $state<ClientDialogPresentation | null>(null);
 	let dialogs: ClientDialogs | null = null;
 	let chatMessages = $state<readonly ClientChatLine[]>([]);
@@ -1587,14 +1598,172 @@
 			case "exit-requested":
 				retireChatCharacter();
 				navigationWaypoint.acceptCharacter(null);
+				rejectPendingScreenshots("Client session ended.");
+				apiState = null;
+				apiPausePending = false;
 				inputGate.cancel("reset");
 				appLifecycle.acceptExit(event.exit);
 				return;
 			case "presentation-discontinuity":
 				inputGate.cancel("reset");
 				return;
+			case "api-state":
+				apiState = event.state.active ? event.state : null;
+				return;
+			case "api-hud":
+				handleApiHudEvent(event.hud);
+				return;
 			default:
 				return;
+		}
+	}
+
+	function handleApiHudEvent(hud: ClientApiHudEvent): void {
+		switch (hud.kind) {
+			case "select-entity": {
+				suppressSelectionReport = true;
+				try {
+					entitySelection?.select(hud.guid);
+				} finally {
+					suppressSelectionReport = false;
+				}
+				return;
+			}
+			case "print":
+				appendChatLine(
+					hud.style === "error"
+						? { kind: "error", message: hud.message }
+						: hud.style === "combat"
+							? { kind: "combat-notice", message: hud.message }
+							: { kind: "system", message: hud.message },
+				);
+				return;
+			case "toast":
+				toastCenter.publish({
+					message: hud.message,
+					tone:
+						hud.level === "warn" || hud.level === "error"
+							? "warning"
+							: "status",
+				});
+				return;
+			case "upsert-markers":
+				gameplayPresentation?.upsertApiWorldMarkers(
+					hud.markers,
+					performance.now(),
+				);
+				return;
+			case "clear-markers":
+				gameplayPresentation?.clearApiWorldMarkers(
+					hud.namespace,
+					performance.now(),
+				);
+				return;
+			case "capture-screenshot":
+				if (presentationRoot === null) {
+					submitApiScreenshotReply(session, {
+						requestId: hud.requestId,
+						error: "3D viewport is not currently mounted",
+					});
+					return;
+				}
+				pendingScreenshotRequests.push({
+					requestId: hud.requestId,
+					maxWidth: hud.maxWidth,
+					quality: hud.quality,
+				});
+				return;
+		}
+	}
+
+	function submitApiScreenshotReply(
+		activeSession: ClientLifecycleSession | null,
+		reply: Parameters<ClientLifecycleSession["submitApiScreenshot"]>[0],
+	): void {
+		if (activeSession === null) return;
+		void activeSession.submitApiScreenshot(reply).catch(() => undefined);
+	}
+
+	function rejectPendingScreenshots(reason: string): void {
+		if (pendingScreenshotRequests.length === 0) return;
+		const batch = pendingScreenshotRequests.splice(0);
+		const activeSession = session;
+		for (const req of batch) {
+			submitApiScreenshotReply(activeSession, {
+				requestId: req.requestId,
+				error: reason,
+			});
+		}
+	}
+
+	function drainPendingScreenshots(canvas: HTMLCanvasElement): void {
+		if (pendingScreenshotRequests.length === 0) return;
+		const batch = pendingScreenshotRequests.splice(0);
+		const activeSession = session;
+		if (activeSession === null) return;
+		for (const req of batch) {
+			try {
+				if (canvas.width <= 0 || canvas.height <= 0) {
+					submitApiScreenshotReply(activeSession, {
+						requestId: req.requestId,
+						error: "3D viewport canvas has zero size",
+					});
+					continue;
+				}
+				const scale = Math.min(1, req.maxWidth / canvas.width);
+				const outWidth = Math.max(1, Math.round(canvas.width * scale));
+				const outHeight = Math.max(1, Math.round(canvas.height * scale));
+				const offscreen = document.createElement("canvas");
+				offscreen.width = outWidth;
+				offscreen.height = outHeight;
+				const ctx2d = offscreen.getContext("2d");
+				if (ctx2d === null) {
+					submitApiScreenshotReply(activeSession, {
+						requestId: req.requestId,
+						error: "2D canvas context unavailable for screenshot encoding",
+					});
+					continue;
+				}
+				ctx2d.drawImage(canvas, 0, 0, outWidth, outHeight);
+				const dataUrl = offscreen.toDataURL("image/jpeg", req.quality);
+				const comma = dataUrl.indexOf(",");
+				if (comma < 0) {
+					submitApiScreenshotReply(activeSession, {
+						requestId: req.requestId,
+						error: "failed to encode JPEG screenshot",
+					});
+					continue;
+				}
+				submitApiScreenshotReply(activeSession, {
+					requestId: req.requestId,
+					contentType: "image/jpeg",
+					base64Data: dataUrl.slice(comma + 1),
+				});
+			} catch (error) {
+				submitApiScreenshotReply(activeSession, {
+					requestId: req.requestId,
+					error: formatError(error),
+				});
+			}
+		}
+	}
+
+	async function setAutomationPaused(paused: boolean): Promise<void> {
+		if (session === null || apiPausePending) return;
+		apiPausePending = true;
+		try {
+			await session.setAutomationPaused(paused);
+		} finally {
+			apiPausePending = false;
+		}
+	}
+
+	async function toggleAutomationPaused(): Promise<void> {
+		if (session === null || apiState === null || apiPausePending) return;
+		try {
+			await setAutomationPaused(!apiState.paused);
+		} catch (error) {
+			toastCenter.publish({ message: formatError(error), tone: "warning" });
 		}
 	}
 
@@ -1746,6 +1915,12 @@
 			throw new Error("Command session is unavailable.");
 		const generation = chatComposer.generation;
 		const handled =
+			(await runClientApiCommand(
+				message,
+				() => apiState,
+				setAutomationPaused,
+				appendChatLine,
+			)) ||
 			runClientScanCommand(
 				message,
 				() => {
@@ -2287,6 +2462,14 @@
 						elapsedSeconds,
 					);
 				const result = root.frame(startedAtMs);
+				if (
+					(result.kind === "gameplay" && result.frame.rendered) ||
+					(result.kind === "pregame" && result.rendered)
+				) {
+					drainPendingScreenshots(canvas);
+				} else if (result.kind === "failed") {
+					rejectPendingScreenshots(result.message);
+				}
 				const workMs = performance.now() - startedAtMs;
 				performanceSession?.recordFrame(workMs);
 				sampler.recordFrame({
@@ -2303,6 +2486,7 @@
 		return () => {
 			cancelled = true;
 			stopFrameLoop();
+			rejectPendingScreenshots("3D presentation unmounted.");
 			performanceSession?.retire();
 			unsubscribeContentFailures?.();
 			appLifecycle.acceptScene({ kind: "stopped" }, false);
@@ -2691,6 +2875,9 @@
 			selectedEntityGuid = guid;
 			refreshSelectedChatRecipient();
 			gameplayPresentation?.setSelectedEntityGuid(guid);
+			if (!suppressSelectionReport) {
+				void owner.reportSelectedEntity(guid).catch(() => undefined);
+			}
 		});
 		const unsubscribeHover = pointer.subscribeHovered((guid) => {
 			hoveredEntityGuid = guid;
@@ -2831,6 +3018,9 @@
 					if (entitySelection === selection) entitySelection = null;
 					if (preciseJumpSession === precise) preciseJumpSession = null;
 					enchantments = null;
+					rejectPendingScreenshots("Client composition retired.");
+					apiState = null;
+					apiPausePending = false;
 					session = null;
 					chatCharacterGuid = null;
 					housing = emptyHousing();
@@ -3029,6 +3219,16 @@
 		},
 		readConnection() {
 			return session?.connectionSample() ?? null;
+		},
+		get liveApi() {
+			if (apiState === null || !apiState.active) return null;
+			return {
+				state: apiState,
+				pausePending: apiPausePending,
+				onTogglePaused: () => {
+					void toggleAutomationPaused();
+				},
+			};
 		},
 		get vitals() {
 			return vitals;

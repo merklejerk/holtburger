@@ -137,6 +137,7 @@ describe("parseClientLaunchArguments", () => {
 			ignorePersistedConfig: false,
 			ignoreWorldMapCache: false,
 			settingsFile: null,
+			liveApiOverride: null,
 			rendererArguments: ["--query=landblock=0x7fffff"],
 		});
 	});
@@ -165,6 +166,7 @@ describe("parseClientLaunchArguments", () => {
 			ignorePersistedConfig: false,
 			ignoreWorldMapCache: false,
 			settingsFile: null,
+			liveApiOverride: null,
 			rendererArguments: [],
 		});
 	});
@@ -256,6 +258,7 @@ describe("parseClientLaunchArguments", () => {
 			noLauncher: false,
 			noUpdates: false,
 			settingsFile: null,
+			liveApiOverride: null,
 			rendererArguments: [],
 		});
 		expect(
@@ -354,5 +357,32 @@ describe("Explorer launch arguments", () => {
 		expect(() =>
 			parseClientLaunchArguments(["--launcher-view=explorer", "--no-launcher"]),
 		).toThrow(/cannot be combined/);
+	});
+
+	it("parses --api and --api-port and resolves precedence over AppSettings", async () => {
+		const { resolveLiveApiLaunch } = await import("./client-launch");
+		const offByDefault = parseClientLaunchArguments([]);
+		expect(offByDefault.liveApiOverride).toBeNull();
+		expect(
+			resolveLiveApiLaunch(
+				{ enabled: false, port: null },
+				offByDefault.liveApiOverride,
+			),
+		).toBeUndefined();
+
+		const cliEnabled = parseClientLaunchArguments([
+			"--api",
+			"--api-port=49100",
+		]);
+		expect(cliEnabled.liveApiOverride).toEqual({
+			enabled: true,
+			port: 49100,
+		});
+		expect(
+			resolveLiveApiLaunch(
+				{ enabled: false, port: null },
+				cliEnabled.liveApiOverride,
+			),
+		).toEqual({ port: 49100 });
 	});
 });

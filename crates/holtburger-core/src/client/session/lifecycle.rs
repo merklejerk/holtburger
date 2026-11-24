@@ -10,14 +10,35 @@ impl ClientRuntime {
         self.conn.exit_outcome.as_ref()
     }
 
+    /// Flushes any terminal local-steering completions out of `MovementSystem`.
+    pub(in crate::client) fn flush_navigation_completions(&mut self) {
+        for completion in self.movement.take_navigation_completions() {
+            let _ = self
+                .client_view_event_tx
+                .send(crate::client::types::ClientViewEvent::LocalNavigationFinished(completion));
+        }
+    }
+
     /// Retire transient portal-epoch state across world activation and character retirement.
     pub(in crate::client) fn retire_portal_epoch(&mut self, reason: &str) {
+        self.retire_portal_epoch_with_nav_outcome(
+            reason,
+            crate::client::steering::LocalNavigationOutcome::Teleported,
+        );
+    }
+
+    fn retire_portal_epoch_with_nav_outcome(
+        &mut self,
+        reason: &str,
+        nav_outcome: crate::client::steering::LocalNavigationOutcome,
+    ) {
         self.stop_inventory_operation(reason);
         self.stop_equipment_change(reason);
         self.cancel_rest_posture();
         self.reset_combat_engagement();
         self.portal = crate::client::PortalResyncState::default();
-        self.movement.retire_movement_epoch();
+        self.movement.retire_movement_epoch(nav_outcome);
+        self.flush_navigation_completions();
         self.reset_camera();
         if let Some(coordinator) = self.collision_coordinator.as_mut() {
             coordinator.invalidate();
@@ -28,8 +49,9 @@ impl ClientRuntime {
     /// `character_selection` when beginning a new entry transition.
     pub(in crate::client) fn retire_character_state(&mut self, bump_generation: bool) {
         self.stop_character_actions();
-        self.retire_portal_epoch(
+        self.retire_portal_epoch_with_nav_outcome(
             "Character lifecycle changed; the last request may still complete",
+            crate::client::steering::LocalNavigationOutcome::Cancelled,
         );
         self.reset_barber();
         if let Some(coordinator) = self.collision_coordinator.as_mut()
@@ -135,7 +157,9 @@ impl ClientRuntime {
             .send_message(&GameMessage::CharacterLogOff)
             .await?;
         self.stop_character_actions();
-        self.movement.retire_movement_epoch();
+        self.movement
+            .retire_movement_epoch(crate::client::steering::LocalNavigationOutcome::Cancelled);
+        self.flush_navigation_completions();
         self.reset_camera();
         self.portal.activation = None;
         self.set_state(ClientState::LoggingOut);

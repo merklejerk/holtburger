@@ -75,10 +75,12 @@ pub use motion::precise_jump;
 pub use motion::precise_jump_prediction;
 use motion::precise_jump_runtime;
 use motion::rest_posture;
+pub use motion::steering;
 use session::builder;
 use session::commands;
 pub use session::connection;
 pub use session::connection_failure;
+pub use session::control;
 use session::event_ordering;
 #[cfg(feature = "runtime-fixture")]
 pub use session::runtime_fixture;
@@ -177,7 +179,7 @@ impl PendingOperation {
         }
     }
 
-    fn kind(&self) -> BusyOperationKind {
+    pub(in crate::client) fn kind(&self) -> BusyOperationKind {
         match self {
             Self::Use { .. } => BusyOperationKind::Use,
             Self::UseWithTarget { .. } => BusyOperationKind::UseWithTarget,
@@ -334,7 +336,10 @@ pub struct ClientRuntime {
     client_view_event_tx: broadcast::Sender<ClientViewEvent>,
     /// Monotonic origin shared by focused dynamic-entity snapshots and deltas.
     dynamic_entity_time_origin: Instant,
-    command_rx: Option<mpsc::UnboundedReceiver<ClientCommand>>,
+    command_rx: Option<mpsc::UnboundedReceiver<control::ClientCommandEnvelope>>,
+    read_rx: Option<mpsc::UnboundedReceiver<control::ClientReadTask>>,
+    automation_paused: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    next_correlation_id: u64,
     message_dump_dir: Option<std::path::PathBuf>,
     movement: MovementSystem,
     /// Single owner of desired targeted combat and ACE repeat-sequence requests.
@@ -1060,8 +1065,32 @@ impl ClientRuntime {
         self.camera.input_handle()
     }
 
-    pub fn set_command_rx(&mut self, rx: mpsc::UnboundedReceiver<ClientCommand>) {
+    pub fn set_command_rx(&mut self, rx: mpsc::UnboundedReceiver<control::ClientCommandEnvelope>) {
         self.command_rx = Some(rx);
+    }
+
+    /// Installs the runtime's command and unicast read channels and returns a cloneable handle.
+    pub fn create_handle(&mut self) -> control::ClientRuntimeHandle {
+        let (command_tx, command_rx) = mpsc::unbounded_channel();
+        let (read_tx, read_rx) = mpsc::unbounded_channel();
+        self.command_rx = Some(command_rx);
+        self.read_rx = Some(read_rx);
+        control::ClientRuntimeHandle::new(
+            command_tx,
+            read_tx,
+            self.client_view_event_tx.clone(),
+            std::sync::Arc::clone(&self.automation_paused),
+        )
+    }
+
+    pub fn is_automation_paused(&self) -> bool {
+        self.automation_paused
+            .load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    pub(in crate::client) fn mint_correlation_id(&mut self) -> u64 {
+        self.next_correlation_id = self.next_correlation_id.saturating_add(1);
+        self.next_correlation_id
     }
 
     pub(super) fn publish_status_update(&mut self) {

@@ -269,6 +269,29 @@ describe("app lifecycle coordination", () => {
 		app.owner.acceptScene({ kind: "ready" }, true);
 		expect(app.page().kind).toBe("selection");
 	});
+	it("handles external Live API logout and character re-entry cleanly without local clicks", () => {
+		const app = setup();
+		app.owner.acceptAuthority({ kind: "in-world" }, 101);
+		app.owner.acceptScene({ kind: "ready" }, true);
+		expect(app.page().kind).toBe("gameplay");
+
+		app.owner.acceptAuthority({ kind: "logging-out" }, null);
+		expect(app.state().admission.mode).toBe("pregame");
+		app.owner.acceptAuthority(roster, null);
+		app.owner.acceptScene({ kind: "ready" }, true);
+		expect(app.page().kind).toBe("selection");
+
+		app.owner.acceptAuthority({ kind: "entering-world", characterGuid: 102 }, null);
+		expect(app.state().admission.mode).toBe("gameplay");
+		app.owner.acceptAuthority(
+			{ kind: "portal-space", worldGeneration: 2, cause: "initial-entry" },
+			102,
+		);
+		app.owner.acceptAuthority({ kind: "in-world" }, 102);
+		app.owner.acceptScene({ kind: "ready" }, true);
+		expect(app.page().kind).toBe("gameplay");
+		expect(app.state().admission.gameplayInput).toBe(true);
+	});
 	it("blocks input before flushing motion and sending logout, and restores it on rejection", async () => {
 		const app = setup();
 		const flush = deferred();

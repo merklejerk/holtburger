@@ -13,6 +13,9 @@ use tokio::time::MissedTickBehavior;
 const COMMAND_BATCH_LIMIT: usize = 64;
 /// Stop starting more commands after this budget; an individual command is not preemptible.
 const COMMAND_BATCH_BUDGET: Duration = Duration::from_millis(2);
+/// Bound synchronous read closures drained per select turn so polling cannot starve physics.
+const READ_BATCH_LIMIT: usize = 64;
+const READ_BATCH_BUDGET: Duration = Duration::from_millis(2);
 
 /// Bound ready network intake so sustained server traffic still leaves turns for input and physics.
 const NETWORK_BATCH_LIMIT: usize = 64;
@@ -83,7 +86,10 @@ impl ClientRuntime {
 
     /// Consume the selected command first, then a bounded FIFO prefix of pending input,
     /// coalescing repeated dynamic-entity upserts per entity until the batch finishes.
-    async fn process_command_batch(&mut self, first: Option<ClientCommand>) -> Result<()> {
+    async fn process_command_batch(
+        &mut self,
+        first: Option<control::ClientCommandEnvelope>,
+    ) -> Result<()> {
         self.begin_dynamic_entity_upsert_coalescing();
         let result = self.process_command_batch_inner(first).await;
         if result.is_ok() && !matches!(self.conn.state, ClientState::Disconnected) {
@@ -96,25 +102,25 @@ impl ClientRuntime {
 
     async fn process_command_batch_inner(
         &mut self,
-        mut first: Option<ClientCommand>,
+        mut first: Option<control::ClientCommandEnvelope>,
     ) -> Result<()> {
         let started = Instant::now();
         for _ in 0..COMMAND_BATCH_LIMIT {
             if matches!(self.conn.state, ClientState::Disconnected) {
                 break;
             }
-            let command = if let Some(command) = first.take() {
-                command
+            let envelope = if let Some(envelope) = first.take() {
+                envelope
             } else {
                 let Some(receiver) = self.command_rx.as_mut() else {
                     break;
                 };
                 match receiver.try_recv() {
-                    Ok(command) => command,
+                    Ok(envelope) => envelope,
                     Err(TryRecvError::Empty | TryRecvError::Disconnected) => break,
                 }
             };
-            if let Err(error) = self.handle_command(command).await {
+            if let Err(error) = self.handle_command_envelope(envelope).await {
                 self.finish_disconnect(ClientExitCause::RuntimeFailure);
                 return Err(error);
             }
@@ -123,6 +129,34 @@ impl ClientRuntime {
             }
         }
         Ok(())
+    }
+
+    /// Executes a bounded batch of unicast read-only closures directly against `&self`.
+    pub(in crate::client) fn process_read_batch(&mut self, mut first: Option<control::ClientReadTask>) {
+        let started = Instant::now();
+        for _ in 0..READ_BATCH_LIMIT {
+            let task = if let Some(task) = first.take() {
+                task
+            } else {
+                let Some(receiver) = self.read_rx.as_mut() else {
+                    break;
+                };
+                match receiver.try_recv() {
+                    Ok(task) => task,
+                    Err(TryRecvError::Empty | TryRecvError::Disconnected) => break,
+                }
+            };
+            let ctx = control::ClientReadContext::new(self);
+            task(&ctx);
+            if started.elapsed() >= READ_BATCH_BUDGET {
+                break;
+            }
+        }
+    }
+
+    #[cfg(test)]
+    pub(in crate::client) fn drain_reads_for_test(&mut self) {
+        self.process_read_batch(None);
     }
 
     fn should_send_keepalive_ping(&self, now: Instant) -> bool {
@@ -312,6 +346,15 @@ impl ClientRuntime {
 
                     profile.finish(format_args!(""));
                 }
+                Some(task) = async {
+                    if let Some(rx) = &mut self.read_rx {
+                        rx.recv().await
+                    } else {
+                        None
+                    }
+                } => {
+                    self.process_read_batch(Some(task));
+                }
                 _ = precise_jump_notification.notified() => {
                     self.publish_precise_jump_progress();
                 }
@@ -403,6 +446,7 @@ impl ClientRuntime {
                     .send(ClientViewEvent::CharacterMotionFeedback(feedback));
             }
         }
+        self.flush_navigation_completions();
         profile.checkpoint(PhysicsTickPhase::PreTick);
 
         let scene_snapshot = self
@@ -718,12 +762,16 @@ mod tests {
         client.set_command_rx(receiver);
         for _ in 0..COMMAND_BATCH_LIMIT {
             sender
-                .send(ClientCommand::RequestCurrentApplicationState)
+                .send(control::ClientCommandEnvelope::user(
+                    ClientCommand::RequestCurrentApplicationState,
+                ))
                 .unwrap();
         }
         // The command already removed by select counts toward the same batch limit.
         client
-            .process_command_batch(Some(ClientCommand::RequestCurrentApplicationState))
+            .process_command_batch(Some(control::ClientCommandEnvelope::user(
+                ClientCommand::RequestCurrentApplicationState,
+            )))
             .await
             .unwrap();
         let mut snapshots = 0;
@@ -745,10 +793,14 @@ mod tests {
         let (sender, receiver) = mpsc::unbounded_channel();
         client.set_command_rx(receiver);
         sender
-            .send(ClientCommand::RequestCurrentApplicationState)
+            .send(control::ClientCommandEnvelope::user(
+                ClientCommand::RequestCurrentApplicationState,
+            ))
             .unwrap();
         client
-            .process_command_batch(Some(ClientCommand::Quit))
+            .process_command_batch(Some(control::ClientCommandEnvelope::user(
+                ClientCommand::Quit,
+            )))
             .await
             .unwrap();
         assert!(matches!(client.conn.state, ClientState::Disconnected));
@@ -774,7 +826,9 @@ mod tests {
             ClientCommand::Quit,
             ClientCommand::RequestCurrentApplicationState,
         ] {
-            sender.send(command).unwrap();
+            sender
+                .send(control::ClientCommandEnvelope::user(command))
+                .unwrap();
         }
         while !matches!(client.conn.state, ClientState::Disconnected) {
             client.process_command_batch(None).await.unwrap();
@@ -796,8 +850,8 @@ mod tests {
         client.set_command_rx(receiver);
         // Registration targets a different player identity than this empty world.
         sender
-            .send(ClientCommand::StartClientCamera(
-                crate::ClientCameraStartRequest {
+            .send(control::ClientCommandEnvelope::user(
+                ClientCommand::StartClientCamera(crate::ClientCameraStartRequest {
                     player_guid: Guid(1),
                     entity_generation: 1,
                     initial_reach: 5.0,
@@ -808,11 +862,13 @@ mod tests {
                     cumulative_zoom_displacement: 0.0,
                     projection_revision: 1,
                     clearance_radius: 0.1,
-                },
+                }),
             ))
             .unwrap();
         sender
-            .send(ClientCommand::RequestCurrentApplicationState)
+            .send(control::ClientCommandEnvelope::user(
+                ClientCommand::RequestCurrentApplicationState,
+            ))
             .unwrap();
         assert!(client.process_command_batch(None).await.is_err());
         assert!(matches!(client.conn.state, ClientState::Disconnected));

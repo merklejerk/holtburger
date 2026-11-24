@@ -1,7 +1,7 @@
-// Autonomous fighter script for the TUI.
-// It keeps the character alive, heals nearby allies or self, supports the party,
+// Autonomous fighter script using the unified Holtburger Live API (`HB`).
+// Keeps the character alive, heals nearby allies or self, supports the party,
 // and picks fights that stay compatible with party movement.
-// When nothing else needs attention, it stays with the party leader.
+// When nothing else needs attention, it follows the party leader.
 
 const DEFAULT_AGGRO_DISTANCE = 15;
 const DEFAULT_MAX_PARTY_DISTANCE = 20;
@@ -9,7 +9,8 @@ const PARTY_RESUME_FACTOR = 0.9;
 const HEALING_DISTANCE = 15;
 const LOW_STAMINA_RATIO = 0.1;
 const LOW_HEALTH_RATIO = 0.6;
-const HEALING_BUSY_OPERATIONS = new Set(["use", "use_with_target"]);
+const HEALING_BUSY_OPERATIONS = new Set(["use", "use-with-target"]);
+const DEFAULT_MELEE_PROFILE = { kind: "melee", height: "medium", power: 0.5 };
 
 let aggroDistance = DEFAULT_AGGRO_DISTANCE;
 let maxPartyDistance = DEFAULT_MAX_PARTY_DISTANCE;
@@ -46,7 +47,7 @@ function clearTransientState() {
 
 function parsePositiveNumberArg(args, flagName) {
   const prefix = `${flagName}=`;
-  const token = args
+  const token = String(args ?? "")
     .trim()
     .split(/\s+/)
     .find((candidate) => candidate.startsWith(prefix));
@@ -77,51 +78,75 @@ function isLowStamina(self) {
 }
 
 function isHealingBusy(self) {
-  return HEALING_BUSY_OPERATIONS.has(self.busyOperation);
+  return self.busy != null && HEALING_BUSY_OPERATIONS.has(self.busy);
 }
 
-function isDefeated(entity) {
-  if (entity == null) {
+function entitySummary(entityOrDetail) {
+  if (entityOrDetail == null) {
+    return null;
+  }
+  return "summary" in entityOrDetail ? entityOrDetail.summary : entityOrDetail;
+}
+
+function isDefeated(entityOrDetail) {
+  const summary = entitySummary(entityOrDetail);
+  if (summary == null) {
     return false;
   }
-
-  if (entity.motionCommand != null && entity.motionCommand.kind === "dead") {
-    return true;
-  }
-
-  return (
-    entity.profile != null &&
-    entity.profile.kind === "creature" &&
-    entity.profile.data.health === 0
-  );
+  return Boolean(summary.isDead);
 }
 
 // Automated combat stays PvE-only, using world-owned hostility and observed life.
-function isAttackCandidate(entity) {
+function isAttackCandidate(entityOrDetail) {
+  const summary = entitySummary(entityOrDetail);
   return (
-    entity != null &&
-    entity.kind === "monster" &&
-    entity.isHostile &&
-    !isDefeated(entity)
+    summary != null &&
+    summary.category === "monster" &&
+    summary.isHostile &&
+    !summary.isDead
   );
 }
 
+function getFellowship() {
+  const social = HB.social();
+  return social?.fellowship ?? null;
+}
+
+function memberHealthRatio(member) {
+  if (member == null || !member.max_health) {
+    return null;
+  }
+  return ratio(member.current_health, member.max_health);
+}
+
 // The leader is the anchor for follow behavior and party distance checks.
-function partyLeaderMember(party) {
-  if (!party) {
+function partyLeaderMember(fellowship) {
+  if (!fellowship || fellowship.leader_guid == null) {
     return null;
   }
 
   return (
-    party.members.find(
+    fellowship.members.find(
       (member) =>
-        member.guid === party.leaderGuid && HB.entityExists(member.guid),
+        member.guid === fellowship.leader_guid && HB.entity(member.guid) != null,
     ) ?? null
   );
 }
 
 function distanceToPartyLeader(self, partyLeader) {
   return partyLeader ? HB.distance(self.guid, partyLeader.guid) : null;
+}
+
+function isFollowingTarget(self, targetGuid) {
+  return (
+    self.navigation?.goal?.kind === "follow" &&
+    self.navigation.goal.target === targetGuid
+  );
+}
+
+function cancelActiveActions() {
+  HB.stopCombat();
+  HB.stopMovement();
 }
 
 // Pick the most urgent nearby heal target, including self.
@@ -138,14 +163,15 @@ function chooseHealingTarget(self) {
     });
   }
 
-  const party = HB.party();
-  if (party) {
-    for (const member of party.members) {
+  const fellowship = getFellowship();
+  if (fellowship) {
+    for (const member of fellowship.members) {
       if (member.guid === self.guid) {
         continue;
       }
 
-      if (!isLowHealth(member.healthPercent)) {
+      const healthRatio = memberHealthRatio(member);
+      if (!isLowHealth(healthRatio)) {
         continue;
       }
 
@@ -154,14 +180,14 @@ function chooseHealingTarget(self) {
       }
 
       const distance = HB.distance(self.guid, member.guid);
-      if (distance > HEALING_DISTANCE) {
+      if (!Number.isFinite(distance) || distance > HEALING_DISTANCE) {
         continue;
       }
 
       candidates.push({
         guid: member.guid,
         distance,
-        healthRatio: member.healthPercent,
+        healthRatio,
       });
     }
   }
@@ -187,10 +213,15 @@ function chooseHealingTarget(self) {
 
 // Use the first healing kit we can find.
 function firstHealingKit() {
-  for (const container of HB.inventory()) {
+  const inventory = HB.inventory();
+  if (!inventory || !Array.isArray(inventory.containers)) {
+    return null;
+  }
+
+  for (const container of inventory.containers) {
     for (const itemGuid of container.items) {
-      const item = HB.entity(itemGuid);
-      if (item && item.kind === "healing_kit") {
+      const item = entitySummary(HB.entity(itemGuid));
+      if (item && item.category === "healing_kit") {
         return item.guid;
       }
     }
@@ -201,9 +232,10 @@ function firstHealingKit() {
 
 // Prefer monsters that keep us close to the party leader.
 function selectAttackTarget(self, partyLeader) {
-  const monsters = HB.nearbyEntities(aggroDistance, ["monster"]).filter(
-    isAttackCandidate,
-  );
+  const monsters = HB.entities({
+    maxDistance: aggroDistance,
+    category: "monster",
+  }).filter(isAttackCandidate);
   const withinPartyAttackRange = (monster) =>
     !partyLeader ||
     HB.distance(partyLeader.guid, monster.guid) <= maxPartyDistance;
@@ -292,7 +324,7 @@ function healIfNeeded(self) {
 
   const key = `heal:${healingKit}:${healTarget.guid}`;
   return issuePrimaryAction(key, () => {
-    HB.useWith(healingKit, healTarget.guid);
+    HB.useItem(healingKit, healTarget.guid);
   });
 }
 
@@ -302,52 +334,37 @@ function followPartyLeader(self, partyLeader) {
     return false;
   }
 
-  const currentInteraction = HB.currentInteraction();
-  if (
-    currentInteraction != null &&
-    currentInteraction.kind === "Follow" &&
-    currentInteraction.data.guid === partyLeader.guid
-  ) {
+  if (isFollowingTarget(self, partyLeader.guid)) {
     return true;
   }
 
   const key = `follow:${partyLeader.guid}`;
   return issuePrimaryAction(key, () => {
-    HB.cancelInteraction();
+    HB.stopCombat();
     HB.follow(partyLeader.guid);
   });
 }
 
-function attackTarget(target) {
+function attackTarget(self, target) {
   if (!target) {
     return false;
   }
 
-  const combatInfo = HB.combatInfo();
-  const currentInteraction = HB.currentInteraction();
+  const combat = HB.combat();
   const alreadyAttackingSameTarget =
-    (combatInfo.target != null && combatInfo.target === target.guid) ||
-    (currentInteraction != null &&
-      currentInteraction.kind === "Attack" &&
-      currentInteraction.data.guid === target.guid);
+    combat.target != null && combat.target === target.guid;
   const alreadyApproachingSameTarget =
-    currentInteraction != null &&
-    currentInteraction.kind === "Approach" &&
-    currentInteraction.data.guid === target.guid;
+    self.navigation?.goal?.kind === "approach" &&
+    self.navigation.goal.target === target.guid;
 
-  if (alreadyAttackingSameTarget) {
-    state.preferredAttackTargetGuid = target.guid;
-    return true;
-  }
-
-  if (alreadyApproachingSameTarget) {
+  if (alreadyAttackingSameTarget || alreadyApproachingSameTarget) {
     state.preferredAttackTargetGuid = target.guid;
     return true;
   }
 
   state.preferredAttackTargetGuid = target.guid;
   return issuePrimaryAction(target.key, () => {
-    HB.attack(target.guid);
+    HB.beginCombat(target.guid, DEFAULT_MELEE_PROFILE);
   });
 }
 
@@ -379,21 +396,17 @@ function updatePartySeparationLatch(self, partyLeader) {
 
 // Main priority loop for each lifecycle tick.
 function runFighter() {
-  const self = HB.selfEntity();
-  if (!self) {
+  const self = HB.self();
+  if (!self || !self.guid) {
     return;
   }
 
-  const combatInfo = HB.combatInfo();
+  const combat = HB.combat();
+  const isEngaged = combat.state !== "idle" && combat.target != null;
   // Retire invalid engagements before any other automation can retain their target.
-  if (
-    combatInfo.isEngaged &&
-    !isAttackCandidate(HB.entity(combatInfo.target))
-  ) {
+  if (isEngaged && !isAttackCandidate(HB.entity(combat.target))) {
     state.preferredAttackTargetGuid = null;
-    issuePrimaryAction(`invalid-target:${combatInfo.target}`, () =>
-      HB.cancelInteraction(),
-    );
+    issuePrimaryAction(`invalid-target:${combat.target}`, cancelActiveActions);
     return;
   }
   const lowStamina = isLowStamina(self);
@@ -406,11 +419,12 @@ function runFighter() {
 
     let emittedAction = false;
 
-    if (combatInfo.isEngaged && !state.lowStaminaCancelIssued) {
+    if (isEngaged && !state.lowStaminaCancelIssued) {
       state.lowStaminaCancelIssued = true;
-      emittedAction = issuePrimaryAction("low-stamina-cancel", () => {
-        HB.cancelInteraction();
-      });
+      emittedAction = issuePrimaryAction(
+        "low-stamina-cancel",
+        cancelActiveActions,
+      );
     }
 
     if (healIfNeeded(self)) {
@@ -427,7 +441,7 @@ function runFighter() {
   state.wasLowStamina = false;
   state.lowStaminaCancelIssued = false;
 
-  if (self.busyOperation !== "none") {
+  if (self.busy != null) {
     return;
   }
 
@@ -435,8 +449,8 @@ function runFighter() {
     return;
   }
 
-  const party = HB.party();
-  const partyLeader = partyLeaderMember(party);
+  const fellowship = getFellowship();
+  const partyLeader = partyLeaderMember(fellowship);
   const separation = updatePartySeparationLatch(self, partyLeader);
 
   if (separation.shouldFollow) {
@@ -448,11 +462,11 @@ function runFighter() {
     state.partySeparationLatched = false;
   }
 
-  if (combatInfo.isEngaged) {
+  if (isEngaged) {
     return;
   }
 
-  if (attackTarget(selectAttackTarget(self, partyLeader))) {
+  if (attackTarget(self, selectAttackTarget(self, partyLeader))) {
     return;
   }
 
@@ -460,30 +474,28 @@ function runFighter() {
 }
 
 HB.onEvent((event) => {
-  if (event.kind !== "lifecycle") {
-    return;
-  }
-
-  switch (event.data.kind) {
+  switch (event.kind) {
     case "started":
       resetTransientState();
       initializeSessionConfig();
       aggroDistance =
-        parsePositiveNumberArg(event.data.data.args, "aggro-dist") ??
+        parsePositiveNumberArg(event.args, "aggro-dist") ??
         DEFAULT_AGGRO_DISTANCE;
       maxPartyDistance =
-        parsePositiveNumberArg(event.data.data.args, "max-party-dist") ??
+        parsePositiveNumberArg(event.args, "max-party-dist") ??
         DEFAULT_MAX_PARTY_DISTANCE;
       runFighter();
-      break;
-    case "teleport_started":
-      clearTransientState();
       break;
     case "stopped":
       resetTransientState();
       break;
     case "tick":
       runFighter();
+      break;
+    case "api":
+      if (event.event?.kind === "teleport-started") {
+        clearTransientState();
+      }
       break;
   }
 });

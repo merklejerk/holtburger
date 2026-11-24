@@ -211,6 +211,8 @@ export interface FrameInput {
 	readonly entityOverlays: EntityOverlayLookup;
 	/** Optional frontend-resolved precise-jump indicator; absent frames draw no marker or curve. */
 	readonly worldIndicator?: WorldIndicatorInput | null;
+	/** Optional additive world-space rings and polylines (e.g. Live API HUD markers). */
+	readonly worldOverlays?: WorldOverlayBatchInput | null;
 	/** Optional Explorer 6-DOF transform gizmo; absent/null frames draw nothing and allocate no GPU resources. */
 	readonly transformGizmo?: TransformGizmoVisual | null;
 	/** App-owned relationships prepared from current posed scene endpoints. */
@@ -292,7 +294,7 @@ export interface WorldCurveTrajectoryInput extends WorldTrajectoryCommon {
 	readonly placements: readonly WorldTrajectoryPlacementInput[];
 }
 /** Accepted root-motion legs are drawn directly, without fitting post-contact curves. */
-interface WorldPolylineTrajectoryInput extends WorldTrajectoryCommon {
+export interface WorldPolylineTrajectoryInput extends WorldTrajectoryCommon {
 	readonly kind: "polyline";
 	readonly segments: readonly {
 		readonly start: SceneVec3;
@@ -302,6 +304,12 @@ interface WorldPolylineTrajectoryInput extends WorldTrajectoryCommon {
 }
 export type WorldTrajectoryInput =
 	WorldCurveTrajectoryInput | WorldPolylineTrajectoryInput;
+
+/** Additive batch of world-space rings and polylines rendered via the existing overlay passes. */
+export interface WorldOverlayBatchInput {
+	readonly markers: readonly WorldMarkerInput[];
+	readonly polylines: readonly WorldPolylineTrajectoryInput[];
+}
 
 /** Latest renderer-side selection counts, aggregated across every view in one frame. */
 export interface FrameSelectionMetrics {

@@ -5,10 +5,13 @@ use crossterm::{
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
+use holtburger_cli::live_api::{TuiLiveApiEvent, mount_tui_live_api};
 use holtburger_cli::pages;
 use holtburger_cli::scripting::ScriptDirectories;
 use holtburger_cli::state::{AppState, NetStats, QueuedScriptStartup};
-use holtburger_cli::types::{AppEvent, ChatMessageTags, Page, RedrawPriority, UpdateResult};
+use holtburger_cli::types::{
+    AppAction, AppEvent, ChatMessageTags, Interaction, Page, RedrawPriority, UpdateResult,
+};
 use holtburger_content::CharacterGenCatalog;
 use holtburger_core::errors::format_action_result_message;
 use holtburger_core::errors::is_actually_weenie_error;
@@ -17,6 +20,7 @@ use holtburger_core::{
     ClientViewEvent,
 };
 use holtburger_dat::file_type::SkillTable;
+use holtburger_live_api::StaticReferenceCatalogs;
 use holtburger_protocol::errors::CharacterError;
 use holtburger_scripting::{ScriptFetchAllowedHost, ScriptFetchPolicy, ScriptHostConfig};
 use holtburger_world::RuntimeBodyResetCause;
@@ -34,7 +38,7 @@ const PRE_WORLD_RETRY_DELAY: Duration = Duration::from_secs(3);
 const DEFAULT_SCRIPT_FETCH_ALLOWED_HOST: &str = "localhost:9999";
 
 struct BootstrappedClient {
-    server_cmd_tx: mpsc::UnboundedSender<ClientCommand>,
+    runtime_handle: holtburger_core::ClientRuntimeHandle,
     server_event_rx: tokio::sync::broadcast::Receiver<ClientViewEvent>,
     client_task_handle: tokio::task::JoinHandle<ClientTaskResult>,
     initial_events: Vec<ClientViewEvent>,
@@ -343,10 +347,28 @@ struct Args {
         help = "Maximum HB.postJson response body size in bytes"
     )]
     script_fetch_max_response_bytes: usize,
+    #[arg(
+        long = "api",
+        help = "Enable the localhost-only Live Automation API server (REST + WebSocket + OpenAPI)"
+    )]
+    api: bool,
+    #[arg(
+        long = "api-port",
+        value_name = "PORT",
+        help = "Localhost port for the Live Automation API server (0 = ephemeral; implies --api)"
+    )]
+    api_port: Option<u16>,
     #[arg(long, action = clap::ArgAction::Help)]
     help: Option<bool>,
     #[arg(long, action = clap::ArgAction::Version)]
     version: Option<bool>,
+}
+
+fn live_api_server_port_from_args(args: &Args) -> Option<u16> {
+    if !args.api && args.api_port.is_none() {
+        return None;
+    }
+    Some(args.api_port.unwrap_or(0))
 }
 
 fn is_retryable_pre_world_character_error(error: CharacterError) -> bool {
@@ -649,7 +671,7 @@ fn process_bootstrap_event(
 
 async fn finalize_bootstrap_outcome(
     outcome: BootstrapEventOutcome,
-    server_cmd_tx: mpsc::UnboundedSender<ClientCommand>,
+    runtime_handle: holtburger_core::ClientRuntimeHandle,
     server_event_rx: tokio::sync::broadcast::Receiver<ClientViewEvent>,
     client_task_handle: tokio::task::JoinHandle<ClientTaskResult>,
     character_gen_catalog: Arc<CharacterGenCatalog>,
@@ -659,7 +681,7 @@ async fn finalize_bootstrap_outcome(
     match outcome {
         BootstrapEventOutcome::Ready { initial_events } => {
             BootstrapOutcome::Ready(BootstrappedClient {
-                server_cmd_tx,
+                runtime_handle,
                 server_event_rx,
                 client_task_handle,
                 initial_events,
@@ -688,13 +710,12 @@ async fn bootstrap_once(args: &Args, host: &str, port: u16) -> Result<BootstrapO
 
     apply_capture_path(&mut client, args.capture.as_ref());
 
-    let (server_cmd_tx, server_cmd_rx) = mpsc::unbounded_channel();
-    client.set_command_rx(server_cmd_rx);
-    let mut server_event_rx = client.subscribe_client_view_events();
+    let runtime_handle = client.create_handle();
+    let mut server_event_rx = runtime_handle.subscribe();
     let mut client_task_handle = tokio::spawn(run_client_attempt(client));
 
-    let _ = server_cmd_tx.send(ClientCommand::RequestCurrentApplicationState);
-    let _ = server_cmd_tx.send(ClientCommand::Login(args.password.clone()));
+    let _ = runtime_handle.send_user(ClientCommand::RequestCurrentApplicationState);
+    let _ = runtime_handle.send_user(ClientCommand::Login(args.password.clone()));
 
     let mut latest_status = Some(ClientState::Connected);
     let mut latest_world_name = None;
@@ -720,7 +741,7 @@ async fn bootstrap_once(args: &Args, host: &str, port: u16) -> Result<BootstrapO
                         ) {
                             return Ok(finalize_bootstrap_outcome(
                                 outcome,
-                                server_cmd_tx,
+                                runtime_handle,
                                 server_event_rx,
                                 client_task_handle,
                                 Arc::clone(&character_gen_catalog),
@@ -732,7 +753,8 @@ async fn bootstrap_once(args: &Args, host: &str, port: u16) -> Result<BootstrapO
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
                         if !requested_initial_view_state {
                             requested_initial_view_state = true;
-                            let _ = server_cmd_tx.send(ClientCommand::RequestCurrentApplicationState);
+                            let _ = runtime_handle
+                                .send_user(ClientCommand::RequestCurrentApplicationState);
                         }
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => {
@@ -860,7 +882,7 @@ async fn run() -> Result<()> {
     }
 
     let BootstrappedClient {
-        server_cmd_tx,
+        runtime_handle,
         mut server_event_rx,
         client_task_handle,
         initial_events,
@@ -874,6 +896,17 @@ async fn run() -> Result<()> {
             return Ok(());
         }
     };
+
+    let live_api_port = live_api_server_port_from_args(&args);
+    let mut live_api = mount_tui_live_api(
+        runtime_handle.clone(),
+        StaticReferenceCatalogs {
+            spells: Arc::clone(&spell_catalog),
+            skills: Arc::clone(&skill_table),
+        },
+        live_api_port,
+    )
+    .await?;
 
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -902,7 +935,14 @@ async fn run() -> Result<()> {
         queued_script_startup: queued_script_startup_from_args(&args),
         script_host_config: script_host_config_from_args(&args),
         script_directories,
+        live_api_engine: Some(live_api.script_engine.clone()),
+        live_api_endpoint: live_api.server.as_ref().map(|server| server.base_url()),
+        tokio_handle: Some(tokio::runtime::Handle::current()),
     };
+
+    if let Some(server) = &live_api.server {
+        log::info!("Live API listening on {}", server.base_url());
+    }
 
     if args.verbose > 0 {
         app_state.log(
@@ -927,21 +967,21 @@ async fn run() -> Result<()> {
 
     let update_state = |res: UpdateResult,
                         pending_redraw: &mut PendingRedraw,
-                        server_cmd_tx: &mpsc::UnboundedSender<ClientCommand>,
+                        runtime_handle: &holtburger_core::ClientRuntimeHandle,
                         should_quit: &mut bool| {
         pending_redraw.request(res.effective_redraw_priority());
         for cmd in res.commands {
             if let ClientCommand::Quit = cmd {
                 *should_quit = true;
             }
-            let _ = server_cmd_tx.send(cmd);
+            let _ = runtime_handle.send_user(cmd);
         }
     };
 
     for event in initial_events {
         let res = app_state.handle_app_event(AppEvent::ReceivedViewEvent(Box::new(event)));
         let mut should_quit = false;
-        update_state(res, &mut pending_redraw, &server_cmd_tx, &mut should_quit);
+        update_state(res, &mut pending_redraw, &runtime_handle, &mut should_quit);
         if should_quit {
             break;
         }
@@ -984,10 +1024,32 @@ async fn run() -> Result<()> {
             }
         }
 
-        // 1. Process Logger Events
+        // 1. Process Logger & Live API UI Hook Events
         while let Ok(log) = local_log_rx.try_recv() {
             app_state.capture_log(log.chat_tags, log.text);
             pending_redraw.request(RedrawPriority::Immediate);
+        }
+
+        while let Ok(api_event) = live_api.event_rx.try_recv() {
+            match api_event {
+                TuiLiveApiEvent::Print { chat_tags, message } => {
+                    app_state.log(chat_tags, message);
+                    pending_redraw.request(RedrawPriority::Immediate);
+                }
+                TuiLiveApiEvent::SelectEntity(guid) => {
+                    if app_state.game_option().is_some() {
+                        let action = match guid {
+                            Some(target_guid) => AppAction::BeginInteraction {
+                                interaction: Interaction::Targeting { target_guid },
+                            },
+                            None => AppAction::CancelInteraction,
+                        };
+                        let mut res = app_state.reduce_app_action(action);
+                        app_state.drain_actions(&mut res);
+                        update_state(res, &mut pending_redraw, &runtime_handle, &mut should_quit);
+                    }
+                }
+            }
         }
 
         // 2. Process Network Events (Drain batch)
@@ -998,7 +1060,7 @@ async fn run() -> Result<()> {
 
                     let res =
                         app_state.handle_app_event(AppEvent::ReceivedViewEvent(Box::new(event)));
-                    update_state(res, &mut pending_redraw, &server_cmd_tx, &mut should_quit);
+                    update_state(res, &mut pending_redraw, &runtime_handle, &mut should_quit);
                     should_quit |= app_state.has_pending_exit();
                 }
                 Err(tokio::sync::broadcast::error::TryRecvError::Empty) => break,
@@ -1008,10 +1070,11 @@ async fn run() -> Result<()> {
                             cause: RuntimeBodyResetCause::Resync,
                         },
                     )));
-                    update_state(reset, &mut pending_redraw, &server_cmd_tx, &mut should_quit);
+                    update_state(reset, &mut pending_redraw, &runtime_handle, &mut should_quit);
                     if !requested_initial_view_state {
                         requested_initial_view_state = true;
-                        let _ = server_cmd_tx.send(ClientCommand::RequestCurrentApplicationState);
+                        let _ = runtime_handle
+                            .send_user(ClientCommand::RequestCurrentApplicationState);
                     }
                     break;
                 }
@@ -1038,11 +1101,11 @@ async fn run() -> Result<()> {
                         }
 
                         let res = app_state.handle_app_event(AppEvent::KeyPress(key));
-                        update_state(res, &mut pending_redraw, &server_cmd_tx, &mut should_quit);
+                        update_state(res, &mut pending_redraw, &runtime_handle, &mut should_quit);
                     }
                     Event::Mouse(mouse) => {
                         let res = app_state.handle_app_event(AppEvent::Mouse(mouse));
-                        update_state(res, &mut pending_redraw, &server_cmd_tx, &mut should_quit);
+                        update_state(res, &mut pending_redraw, &runtime_handle, &mut should_quit);
                     }
                     _ => {}
                 }
@@ -1056,7 +1119,7 @@ async fn run() -> Result<()> {
         let elapsed = last_tick.elapsed().as_secs_f64();
         if last_tick.elapsed() >= tick_rate {
             let res = app_state.handle_app_event(AppEvent::Tick(elapsed));
-            update_state(res, &mut pending_redraw, &server_cmd_tx, &mut should_quit);
+            update_state(res, &mut pending_redraw, &runtime_handle, &mut should_quit);
             should_quit |= app_state.has_pending_exit();
             last_tick = Instant::now();
         }
@@ -1064,6 +1127,14 @@ async fn run() -> Result<()> {
         if should_quit {
             break;
         }
+
+        let current_selection = app_state
+            .game_option()
+            .and_then(|game| match game.view.active_interaction {
+                Some(Interaction::Targeting { target_guid }) => Some(target_guid),
+                _ => None,
+            });
+        live_api.sync_selection(current_selection);
 
         // 4. Draw (If needed and frame budget allows)
         if pending_redraw.any() {
@@ -1082,6 +1153,8 @@ async fn run() -> Result<()> {
             }
         }
     }
+
+    drop(live_api);
 
     disable_raw_mode()?;
     execute!(
@@ -1227,6 +1300,19 @@ mod tests {
             .expect("auto-quit args should parse");
 
         assert!(args.quit_on_disconnect);
+    }
+
+    #[test]
+    fn live_api_flags_default_disabled_and_parse_port() {
+        let disabled = Args::try_parse_from(["tui", "--account", "acct"]).unwrap();
+        assert!(live_api_server_port_from_args(&disabled).is_none());
+
+        let ephemeral = Args::try_parse_from(["tui", "--account", "acct", "--api"]).unwrap();
+        assert_eq!(live_api_server_port_from_args(&ephemeral), Some(0));
+
+        let fixed_port =
+            Args::try_parse_from(["tui", "--account", "acct", "--api-port", "17440"]).unwrap();
+        assert_eq!(live_api_server_port_from_args(&fixed_port), Some(17440));
     }
 
     #[test]

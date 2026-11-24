@@ -69,7 +69,8 @@ pub(crate) use dead_reckoning::project_pose_by_velocity;
 #[cfg(test)]
 mod tests;
 pub use collision::{
-    AvailableEntitySelectionCandidates, CellTransitRequest, CollisionOwnerProof,
+    AvailableEntitySelectionCandidates, CellPortalTopology, CellTopology, CellTransitRequest,
+    CollisionOwnerProof,
     CollisionQueryError, CollisionQueryPolicy, CollisionScene, CollisionSceneUpdateError,
     CollisionSurfaceRayHit, EntitySelectionCandidateResult, EntitySelectionQueryError,
     EntitySelectionRayRequest, EntitySelectionUnavailable, EntitySurfaceRayHit,

@@ -306,6 +306,9 @@ impl ClientRuntimeBuilder {
             client_view_event_tx,
             dynamic_entity_time_origin: Instant::now(),
             command_rx: None,
+            read_rx: None,
+            automation_paused: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            next_correlation_id: 0,
             message_dump_dir: self.message_dump_dir,
             movement: MovementSystem::with_policy(movement_policy),
             combat_engagement: Default::default(),
@@ -335,7 +338,7 @@ impl ClientRuntimeBuilder {
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub(crate) fn build_test_client(initial_state: ClientState) -> ClientRuntime {
     let (client_view_event_tx, _) = broadcast::channel(4096);
 
@@ -352,8 +355,11 @@ pub(crate) fn build_test_client(initial_state: ClientState) -> ClientRuntime {
         client_view_event_tx,
         dynamic_entity_time_origin: Instant::now(),
         command_rx: None,
+        read_rx: None,
+        automation_paused: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        next_correlation_id: 0,
         message_dump_dir: None,
-        movement: MovementSystem::new(),
+        movement: MovementSystem::with_policy(ClientMovementPolicy::Physical),
         combat_engagement: Default::default(),
         combat_attribution: Default::default(),
         combat_tuning: ClientCombatTuning::default(),
@@ -369,6 +375,81 @@ pub(crate) fn build_test_client(initial_state: ClientState) -> ClientRuntime {
         conn: ConnectionSessionState::with_state(initial_state),
         character: Default::default(),
         portal: Default::default(),
+    }
+}
+
+#[cfg(feature = "test-support")]
+impl ClientRuntime {
+    /// Constructs an in-memory `InWorld` runtime for downstream crate integration tests
+    /// without requiring retail archives or a live game server.
+    pub fn synthetic_in_world(account_name: impl Into<String>, world_name: Option<String>) -> Self {
+        let mut runtime = build_test_client(ClientState::InWorld);
+        runtime.character_selection = CharacterSelectionState::new(account_name.into());
+        runtime.conn.world_name = world_name;
+        runtime.movement = MovementSystem::with_policy(ClientMovementPolicy::Navigation);
+        runtime
+    }
+
+    pub fn world_mut(&mut self) -> &mut WorldState {
+        &mut self.world
+    }
+
+    pub fn emit_synthetic_view_event(&self, event: crate::ClientViewEvent) {
+        let _ = self.client_view_event_tx.send(event);
+    }
+
+    pub fn view_event_sender(&self) -> broadcast::Sender<crate::ClientViewEvent> {
+        self.client_view_event_tx.clone()
+    }
+
+    /// Runs the command, read-closure, and 30 Hz physics tick loops until `shutdown` resolves.
+    pub async fn run_synthetic(mut self, mut shutdown: tokio::sync::oneshot::Receiver<()>) {
+        let mut command_rx = self
+            .command_rx
+            .take()
+            .expect("call create_handle() before run_synthetic()");
+        let mut read_rx = self
+            .read_rx
+            .take()
+            .expect("call create_handle() before run_synthetic()");
+        let mut physics_tick = tokio::time::interval(std::time::Duration::from_millis(33));
+        physics_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        let mut last_tick = Instant::now();
+
+        loop {
+            tokio::select! {
+                _ = &mut shutdown => break,
+                _ = physics_tick.tick() => {
+                    let now = Instant::now();
+                    let dt = now.duration_since(last_tick);
+                    last_tick = now;
+                    let profile = crate::client::runtime_profile::RuntimeScopeProfile::begin(
+                        crate::client::runtime_profile::RuntimeProfileScope::PhysicsTick,
+                        self.runtime_profile.as_ref(),
+                    );
+                    let _ = self.advance_physics_tick(
+                        now,
+                        dt,
+                        profile,
+                        #[cfg(feature = "runtime-fixture")]
+                        None,
+                    ).await;
+                }
+                Some(envelope) = command_rx.recv() => {
+                    let _ = self.handle_command_envelope(envelope).await;
+                }
+                Some(read_fn) = read_rx.recv() => {
+                    let ctx = crate::client::control::ClientReadContext::new(&self);
+                    read_fn(&ctx);
+                    for _ in 0..31 {
+                        match read_rx.try_recv() {
+                            Ok(next_fn) => next_fn(&ctx),
+                            Err(_) => break,
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 

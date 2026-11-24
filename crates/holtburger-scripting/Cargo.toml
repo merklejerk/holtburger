@@ -8,12 +8,17 @@ repository.workspace = true
 
 [dependencies]
 anyhow.workspace = true
-futures.workspace = true
-holtburger-common.workspace = true
-holtburger-core.workspace = true
-holtburger-protocol.workspace = true
-holtburger-world.workspace = true
+deno_core = "0.330.0"
+holtburger-live-api = { workspace = true }
 log = { workspace = true }
 reqwest.workspace = true
 serde.workspace = true
-deno_core = "0.330.0"
+serde_json.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+async-trait.workspace = true
+holtburger-common.workspace = true
+holtburger-core = { workspace = true, features = ["schema", "test-support"] }
+holtburger-world.workspace = true
+tempfile.workspace = true

@@ -1,5 +1,5 @@
 pub mod components;
-pub mod navigation;
+pub mod live_api;
 pub mod pages;
 pub mod scripting;
 pub mod state;

@@ -175,13 +175,6 @@ fn application_snapshot_restores_the_character_after_event_lag() {
         runtime_bodies: Vec::new().into(),
     };
     let recovery = ClientViewEvent::ApplicationSnapshot(Box::new(snapshot.clone()));
-    assert!(crate::scripting::script_event_from_view_event(&recovery).is_none());
-    assert!(matches!(
-        crate::scripting::script_event_from_view_event(&ClientViewEvent::PlayerVitalsUpdated {
-            vitals: Default::default(),
-        }),
-        Some(holtburger_scripting::ScriptEvent::SelfVitalsChanged)
-    ));
     let result = state.handle_view_event(recovery);
     assert_eq!(state.data.level_info.as_ref().unwrap().level, 10);
     assert_eq!(state.data.armor, 20);

@@ -13,6 +13,7 @@ import type {
 	RendererSkyCapability,
 	WorldIndicatorInput,
 	WorldMarkerInput,
+	WorldOverlayBatchInput,
 } from "../renderer";
 import type { RenderContribution, RenderWorld } from "../render-world";
 import type { VisibleDynamicPresentation } from "../../systems/components";
@@ -140,7 +141,10 @@ export class SkyParticleOverlayAndSelectionPasses {
 	readonly #worldMarkerPass: WebGL2WorldMarkerPass;
 	readonly #worldTrajectoryPass: WebGL2WorldTrajectoryPass;
 	readonly #desiredTrajectoryPass: WebGL2WorldTrajectoryPass;
+	/** Lazily initialized on first Live API polyline so it never collides with jump trajectory revisions. */
+	#overlayTrajectoryPass: WebGL2WorldTrajectoryPass | null = null;
 	#frameWorldIndicator: WorldIndicatorInput | null = null;
+	#frameWorldOverlays: WorldOverlayBatchInput | null = null;
 	/** Lazily initialized on the first non-null transform gizmo frame so Client mode pays zero GPU cost. */
 	#transformGizmoPass: WebGL2TransformGizmoPass | null = null;
 	#frameTransformGizmo: TransformGizmoVisual | null = null;
@@ -312,6 +316,7 @@ export class SkyParticleOverlayAndSelectionPasses {
 
 	setFrameInputs(
 		worldIndicator: WorldIndicatorInput | null,
+		worldOverlays: WorldOverlayBatchInput | null,
 		transformGizmo: TransformGizmoVisual | null,
 		summonLeashes: readonly SummonLeashInput[],
 		selectionTarget: EntitySelectionTarget | null,
@@ -319,6 +324,7 @@ export class SkyParticleOverlayAndSelectionPasses {
 		viewerEntityIdentity: string | null,
 	): void {
 		this.#frameWorldIndicator = worldIndicator;
+		this.#frameWorldOverlays = worldOverlays;
 		this.#frameTransformGizmo = transformGizmo;
 		this.#frameSummonLeashes = summonLeashes;
 		this.#frameSelectionTarget = selectionTarget;
@@ -889,39 +895,67 @@ export class SkyParticleOverlayAndSelectionPasses {
 		} | null,
 	): void {
 		const indicator = this.#frameWorldIndicator;
-		if (indicator === null) return;
-		if (indicator.desiredTrajectory) {
-			this.drawWorldTrajectory(
-				view,
-				indicator.desiredTrajectory,
-				portal,
-				this.#desiredTrajectoryPass,
-			);
-		}
-		if (indicator.trajectory) {
-			this.drawWorldTrajectory(
-				view,
-				indicator.trajectory,
-				portal,
-				this.#worldTrajectoryPass,
-			);
-		}
-		if (portal !== null) {
-			for (const marker of [indicator.marker, indicator.landingMarker]) {
-				if (
-					marker &&
-					portal.visibility.selectedScopeOrdinal(marker.renderScopeKey) !== null
-				) {
-					this.drawWorldMarker(view, marker, {
-						key: marker.renderScopeKey,
-						routing: portal.routing,
-					});
+		const overlays = this.#frameWorldOverlays;
+		if (indicator === null && overlays === null) return;
+		if (indicator !== null) {
+			if (indicator.desiredTrajectory) {
+				this.drawWorldTrajectory(
+					view,
+					indicator.desiredTrajectory,
+					portal,
+					this.#desiredTrajectoryPass,
+				);
+			}
+			if (indicator.trajectory) {
+				this.drawWorldTrajectory(
+					view,
+					indicator.trajectory,
+					portal,
+					this.#worldTrajectoryPass,
+				);
+			}
+			if (portal !== null) {
+				for (const marker of [indicator.marker, indicator.landingMarker]) {
+					if (
+						marker &&
+						portal.visibility.selectedScopeOrdinal(marker.renderScopeKey) !==
+							null
+					) {
+						this.drawWorldMarker(view, marker, {
+							key: marker.renderScopeKey,
+							routing: portal.routing,
+						});
+					}
+				}
+			} else {
+				this.drawWorldMarker(view, indicator.marker, null);
+				if (indicator.landingMarker) {
+					this.drawWorldMarker(view, indicator.landingMarker, null);
 				}
 			}
-		} else {
-			this.drawWorldMarker(view, indicator.marker, null);
-			if (indicator.landingMarker) {
-				this.drawWorldMarker(view, indicator.landingMarker, null);
+		}
+		if (overlays !== null) {
+			if (overlays.polylines.length > 0) {
+				const pass = (this.#overlayTrajectoryPass ??=
+					new WebGL2WorldTrajectoryPass(this.#deviceTargets.gl));
+				for (const polyline of overlays.polylines) {
+					this.drawWorldTrajectory(view, polyline, portal, pass);
+				}
+			}
+			for (const marker of overlays.markers) {
+				if (portal !== null) {
+					if (
+						portal.visibility.selectedScopeOrdinal(marker.renderScopeKey) !==
+						null
+					) {
+						this.drawWorldMarker(view, marker, {
+							key: marker.renderScopeKey,
+							routing: portal.routing,
+						});
+					}
+				} else {
+					this.drawWorldMarker(view, marker, null);
+				}
 			}
 		}
 	}
@@ -958,7 +992,7 @@ export class SkyParticleOverlayAndSelectionPasses {
 				clipFromAnchor: view.clipFromAnchor,
 				color: marker.color,
 				normal: marker.normal,
-				radius: Math.min(2.4, Math.max(marker.radius, cameraDistance * 0.012)),
+				radius: Math.max(marker.radius, Math.min(2.4, cameraDistance * 0.012)),
 				shape: marker.shape,
 				spinAngle: marker.pending
 					? (this.#deviceTargets.frameClockSeconds % 1) * Math.PI * 2
@@ -1069,6 +1103,8 @@ export class SkyParticleOverlayAndSelectionPasses {
 		this.#worldMarkerPass.destroy();
 		this.#worldTrajectoryPass.destroy();
 		this.#desiredTrajectoryPass.destroy();
+		this.#overlayTrajectoryPass?.destroy();
+		this.#overlayTrajectoryPass = null;
 		this.#transformGizmoPass?.destroy();
 		this.#transformGizmoPass = null;
 		this.#entityOverlayPass.destroy();

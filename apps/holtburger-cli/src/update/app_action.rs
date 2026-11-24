@@ -57,6 +57,9 @@ impl AppState {
                 game.data.skill_table = self.skill_table.clone();
                 game.script.host_config = self.script_host_config.clone();
                 game.script.directories = self.script_directories.clone();
+                game.script.live_api = self.live_api_engine.clone();
+                game.script.live_api_endpoint = self.live_api_endpoint.clone();
+                game.script.rt_handle = self.tokio_handle.clone();
                 let queued_script_startup = self.queued_script_startup.take();
                 self.page = Page::Game(Box::new(game));
                 let mut result = UpdateResult::redraw();
@@ -126,6 +129,9 @@ mod tests {
             queued_script_startup: None,
             script_host_config: ScriptHostConfig::default(),
             script_directories: crate::scripting::ScriptDirectories::default(),
+            live_api_engine: None,
+            live_api_endpoint: None,
+            tokio_handle: None,
         };
 
         let _ = app_state.reduce_app_action(AppAction::TransitionToGame {
@@ -169,6 +175,9 @@ mod tests {
             queued_script_startup: None,
             script_host_config: ScriptHostConfig::default(),
             script_directories: crate::scripting::ScriptDirectories::default(),
+            live_api_engine: None,
+            live_api_endpoint: None,
+            tokio_handle: None,
         };
 
         let result = app_state.reduce_app_action(AppAction::TransitionToGame {
@@ -207,6 +216,9 @@ mod tests {
             queued_script_startup: None,
             script_host_config: ScriptHostConfig::default(),
             script_directories: crate::scripting::ScriptDirectories::default(),
+            live_api_engine: None,
+            live_api_endpoint: None,
+            tokio_handle: None,
         };
 
         app_state.drain_actions(&mut UpdateResult {
@@ -256,6 +268,9 @@ mod tests {
             queued_script_startup: None,
             script_host_config: ScriptHostConfig::default(),
             script_directories: crate::scripting::ScriptDirectories::default(),
+            live_api_engine: None,
+            live_api_endpoint: None,
+            tokio_handle: None,
         };
 
         let result = app_state.reduce_app_action(AppAction::SendCommands {
@@ -295,6 +310,9 @@ mod tests {
             queued_script_startup: None,
             script_host_config: ScriptHostConfig::default(),
             script_directories: crate::scripting::ScriptDirectories::default(),
+            live_api_engine: None,
+            live_api_endpoint: None,
+            tokio_handle: None,
         };
 
         let _ = app_state.reduce_app_action(AppAction::TransitionToGame {
@@ -337,6 +355,9 @@ mod tests {
             )),
             script_host_config: ScriptHostConfig::default(),
             script_directories: crate::scripting::ScriptDirectories::default(),
+            live_api_engine: None,
+            live_api_endpoint: None,
+            tokio_handle: None,
         };
 
         let directories = crate::scripting::ScriptDirectories {

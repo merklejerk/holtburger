@@ -1,5 +1,6 @@
 //! Pure lifecycle owner for one desired targeted-attack engagement.
 
+use crate::client::control::ControlSource;
 use crate::client::types::{
     ClientAttackProfile, ClientCombatControlState, ClientCombatEngagement,
     ClientCombatRefillEstimate, ClientCombatStatus,
@@ -44,6 +45,7 @@ enum CombatPhase {
 pub(in crate::client) struct CombatEngagementRuntime {
     /// Command acknowledgement, independent of the retained engagement's target and profile.
     processed_intent_sequence: u64,
+    origin: Option<ControlSource>,
     desired: Option<ClientCombatEngagement>,
     sent: Option<ClientCombatEngagement>,
     phase: CombatPhase,
@@ -57,6 +59,7 @@ impl Default for CombatEngagementRuntime {
     fn default() -> Self {
         Self {
             processed_intent_sequence: 0,
+            origin: None,
             desired: None,
             sent: None,
             phase: CombatPhase::Idle,
@@ -93,9 +96,13 @@ impl CombatEngagementRuntime {
         }
     }
 
-    /// Admit only newer begin/stop requests, including refusals. Host tasks may enqueue out of order.
+    /// Admit only newer user begin/stop requests, including refusals. Automation requests bypass
+    /// the user UI's monotonic Escape-key watermark so both control sources never collide.
     #[must_use]
-    pub(in crate::client) fn admit_intent(&mut self, sequence: u64) -> bool {
+    pub(in crate::client) fn admit_intent(&mut self, origin: ControlSource, sequence: u64) -> bool {
+        if origin == ControlSource::Automation {
+            return true;
+        }
         if sequence <= self.processed_intent_sequence {
             return false;
         }
@@ -103,8 +110,20 @@ impl CombatEngagementRuntime {
         true
     }
 
+    #[cfg(test)]
     pub(in crate::client) fn begin(
         &mut self,
+        target: Guid,
+        profile: ClientAttackProfile,
+        now: Instant,
+        refill_duration: Duration,
+    ) {
+        self.begin_from(ControlSource::User, target, profile, now, refill_duration);
+    }
+
+    pub(in crate::client) fn begin_from(
+        &mut self,
+        origin: ControlSource,
         target: Guid,
         profile: ClientAttackProfile,
         now: Instant,
@@ -117,6 +136,7 @@ impl CombatEngagementRuntime {
         let replacing_sent = self.sent.is_some_and(|sent| {
             sent.target != target || sent.profile.combat_mode() != profile.combat_mode()
         });
+        self.origin = Some(origin);
         self.desired = Some(desired);
         self.refill = None;
         self.pending_error = None;
@@ -172,6 +192,7 @@ impl CombatEngagementRuntime {
     }
 
     pub(in crate::client) fn stop(&mut self) {
+        self.origin = None;
         self.desired = None;
         self.profile_dirty = false;
         self.profile_update_ready = false;
@@ -185,6 +206,16 @@ impl CombatEngagementRuntime {
         } else {
             CombatPhase::Idle
         };
+    }
+
+    /// Retires only engagements owned by `ControlSource::Automation`.
+    pub(in crate::client) fn stop_if_automation(&mut self) -> bool {
+        if self.origin == Some(ControlSource::Automation) {
+            self.stop();
+            true
+        } else {
+            false
+        }
     }
 
     pub(in crate::client) fn reset(&mut self) {

@@ -3,7 +3,8 @@ import {
 	PARTY_HEAL_THRESHOLD,
 	PARTY_REVITALIZE_THRESHOLD,
 } from "./constants";
-import { isDefeated } from "./runtime-helpers";
+import { isDefeated, ratio } from "./runtime-helpers";
+import type { Fellowship, FellowshipMember } from "./types";
 
 type PartyPercentTarget = {
 	guid: Guid;
@@ -11,43 +12,63 @@ type PartyPercentTarget = {
 	distance: number;
 };
 
+export function currentFellowship(): Fellowship | null {
+	const social = HB.social();
+	const fellowship = social?.fellowship;
+	if (
+		fellowship == null ||
+		typeof fellowship !== "object" ||
+		Array.isArray(fellowship) ||
+		!Array.isArray((fellowship as Fellowship).members)
+	) {
+		return null;
+	}
+	return fellowship as Fellowship;
+}
+
 export function partyLeaderMember(
-	party: ScriptPartyView | null,
-): ScriptPartyMemberView | null {
-	if (party == null) {
+	party: Fellowship | null,
+): FellowshipMember | null {
+	if (party == null || party.leader_guid == null) {
 		return null;
 	}
 
 	return (
 		party.members.find(
 			(member) =>
-				member.guid === party.leaderGuid && HB.entityExists(member.guid),
+				member.guid === party.leader_guid && HB.entity(member.guid) != null,
 		) ?? null
 	);
 }
 
-export function choosePartyHealTarget(self: ScriptSelfView): Guid | null {
+export function choosePartyHealTarget(self: SelfView): Guid | null {
 	return choosePartyMemberBelowThreshold(
 		self,
 		PARTY_HEAL_THRESHOLD,
-		(member) => member.healthPercent,
+		(member) =>
+			member.max_health > 0
+				? ratio(member.current_health, member.max_health)
+				: null,
 	);
 }
 
-export function choosePartyRevitalizeTarget(self: ScriptSelfView): Guid | null {
+export function choosePartyRevitalizeTarget(self: SelfView): Guid | null {
 	return choosePartyMemberBelowThreshold(
 		self,
 		PARTY_REVITALIZE_THRESHOLD,
-		(member) => member.staminaPercent,
+		(member) =>
+			member.max_stamina > 0
+				? ratio(member.current_stamina, member.max_stamina)
+				: null,
 	);
 }
 
 function choosePartyMemberBelowThreshold(
-	self: ScriptSelfView,
+	self: SelfView,
 	threshold: number,
-	percentForMember: (member: ScriptPartyMemberView) => number | null,
+	percentForMember: (member: FellowshipMember) => number | null,
 ): Guid | null {
-	const party = HB.party();
+	const party = currentFellowship();
 	if (!party) {
 		return null;
 	}
@@ -65,7 +86,7 @@ function choosePartyMemberBelowThreshold(
 		}
 
 		const distance = HB.distance(self.guid, member.guid);
-		if (distance > HEALING_DISTANCE) {
+		if (!Number.isFinite(distance) || distance > HEALING_DISTANCE) {
 			continue;
 		}
 

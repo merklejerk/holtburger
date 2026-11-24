@@ -42,8 +42,8 @@ recovery snapshots to frontends and scripts.
 | Submodule | Responsibility |
 | :--- | :--- |
 | [`client/mod.rs`](src/client/mod.rs) | `ClientRuntime` root, `ConnectionSessionState`, `CharacterSessionState`, `PortalResyncState`, retirement transitions, and `WorldEvent` $\rightarrow$ `ClientViewEvent` projection. |
-| [`client/session/`](src/client/session) | `ClientRuntimeBuilder`, GLS/world handshake (`connection.rs`, `lifecycle.rs`), inbound `messages.rs`, outbound `commands.rs`, `busy_operation.rs`, fixed-tick `simulation.rs`, `event_ordering.rs`, and public `ClientCommand` / `ClientViewEvent` (`types.rs`). |
-| [`client/motion/`](src/client/motion) | 30ms `MovementSystem` (`movement/`), `PlayerDriveIntent` & `CharacterDrive` (`movement_types.rs`), clock-free `character_motion.rs` & `character_jump.rs`, `character_kinematics.rs`, reduced `navigation_body.rs`, `collision.rs` demand coordinator, `precise_jump*.rs`, and `rest_posture.rs`. |
+| [`client/session/`](src/client/session) | `ClientRuntimeBuilder`, `ClientRuntimeHandle` & `ControlSource` (`control.rs`), GLS/world handshake (`connection.rs`, `lifecycle.rs`), inbound `messages.rs`, outbound `commands.rs`, `busy_operation.rs`, fixed-tick `simulation.rs`, `event_ordering.rs`, and public `ClientCommand` / `ClientViewEvent` (`types.rs`). |
+| [`client/motion/`](src/client/motion) | 30ms `MovementSystem` (`movement/`), shared core local steering (`steering.rs`), `PlayerDriveIntent` & `CharacterDrive` (`movement_types.rs`), clock-free `character_motion.rs` & `character_jump.rs`, `character_kinematics.rs`, reduced `navigation_body.rs`, `collision.rs` demand coordinator, `precise_jump*.rs`, and `rest_posture.rs`. |
 | [`client/camera/`](src/client/camera) | Dedicated worker service (`camera_service.rs`) and client camera runtime (`runtime.rs`) driving `KinematicBoomController` off the simulation lock. |
 | [`client/entities/`](src/client/entities) | Replicated `ClientEntitySnapshot` / `ClientEntityDelta` + `PlayerEntitySummary` (`entity_facts.rs`), dynamic-entity feed adapter (`dynamic_entity_view.rs`), script/sound `entity_cues.rs`, and `selection_query.rs`. |
 | [`client/combat/`](src/client/combat) | `combat_runtime.rs`, `combat_engagement.rs`, `combat_attribution.rs`, `combat_feedback.rs`, and server combat text parsing. |
@@ -88,7 +88,23 @@ publisher:
   delegating physical-only eligibility gates to the server without inventing invalid positions or
   weakening `holtburger-world`'s physical solver.
 
-### 2. Snapshot + Delta Replication & Dynamic Entity Feed
+Shared local steering (`client/motion/steering.rs`: `MoveTo`, `Approach`, `Follow`, `FaceHeading`,
+`FaceEntity`) runs inside `MovementSystem` over the same `MotionOrder` directed-motion reducer used
+by server-directed movement, so both Physical (3D collision) and Navigation (position-only)
+compositions share identical steering semantics, stuck detection, and terminal `Stop` sync.
+
+### 2. Control Attribution & Read-Only Query Handle (`control.rs`)
+`ClientRuntimeHandle` is the single boundary for frontends and `holtburger-live-api`:
+- Commands are tagged with `ControlSource::User` or `ControlSource::Automation` (`send_user`,
+  `submit_user`, `send_automation`) and return structured `CommandAdmission` (`Accepted` with
+  optional correlation ID, or `Rejected(CommandRejection)`).
+- `User` movement interrupts active `Automation` steering (`InterruptedByUser`). Pausing automation
+  (`set_automation_paused(true)`) cancels active automation movement and combat immediately and
+  rejects subsequent `Automation` commands with `AutomationPaused`.
+- `ClientRuntimeHandle::read(|ctx: &ClientReadContext| ...)` executes read-only projections on the
+  runtime loop with zero mutex contention over `WorldState`.
+
+### 3. Snapshot + Delta Replication & Dynamic Entity Feed
 - **Application & Entity Snapshots**: Reconnects and webview remounts hydrate from
   `ClientApplicationSnapshot` (character sheet, enchantments, vendor, trade, barber, housing,
   social, character preferences) plus `ClientEntitySnapshot` (`PlayerEntitySummary` + per-entity
@@ -99,7 +115,7 @@ publisher:
   `camera_service.rs` advances `KinematicBoomController` on a dedicated worker against immutable
   collision snapshots without contending on the world simulation lock.
 
-### 3. Guarded Workflow Pattern
+### 4. Guarded Workflow Pattern
 Stateful client workflows (`SubmitInventory`, equipment swaps, `VendorTrade`, `Trade`,
 `SalvageSubmit` via `SalvageApproval` revision tokens, and housing payment/management) follow a
 strict three-way split:

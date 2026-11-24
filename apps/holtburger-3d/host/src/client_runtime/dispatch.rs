@@ -429,6 +429,24 @@ pub async fn dispatch_client(
         }
         StartClient { startup } => unit_result(runtime.start(startup).await).await,
         RequestClientCurrentState => unit_result(runtime.request_current_state().await).await,
+        ReportClientSelectedEntity { guid } => {
+            runtime.report_selected_entity(guid).await;
+            Ok(HostResponse::Unit)
+        }
+        SetClientAutomationPaused { paused } => {
+            unit_result(runtime.set_automation_paused(paused).await).await
+        }
+        SubmitClientApiScreenshot {
+            request_id,
+            content_type,
+            base64_data,
+            error,
+        } => {
+            runtime
+                .submit_api_screenshot(&request_id, content_type, base64_data, error)
+                .await;
+            Ok(HostResponse::Unit)
+        }
         LogoutClient => send_unit(runtime, ClientCommand::Logout).await,
         DisconnectClient => unit_result(runtime.disconnect().await).await,
 

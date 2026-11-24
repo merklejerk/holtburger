@@ -7,6 +7,8 @@
 	import { CLIENT_TUNING } from "../settings/tuning";
 	import type { ClientCharacterSheetState } from "./character-sheet-state";
 	import ClientConnectionBadge from "../hud/ClientConnectionBadge.svelte";
+	import ClientLiveApiBadge from "../hud/ClientLiveApiBadge.svelte";
+	import type { ClientLiveApiHudControls } from "../session/gameplay-surfaces";
 	import type { ClientConnectionObservation } from "../session/lifecycle-session";
 	import type { ClientVital } from "../session/host-contract";
 	import { formatQuantity } from "../../app/ui/quantity-format";
@@ -14,6 +16,8 @@
 	interface Props {
 		/** Reader for the browser session-owned transport observation. */
 		readonly readConnection: () => ClientConnectionObservation | null;
+		/** Present only while the localhost Live API server is active. */
+		readonly liveApi?: ClientLiveApiHudControls | null;
 		readonly playerName: string | null;
 		readonly worldName: string | null;
 		/** Current session account shown when hovering the server label. */
@@ -31,6 +35,7 @@
 		accountName,
 		vitals,
 		readConnection,
+		liveApi = null,
 		characterSheet,
 		onContentHeightChange,
 	}: Props = $props();
@@ -123,6 +128,13 @@
 					>on {worldName ?? "Unknown world"}</span
 				>
 				<ClientConnectionBadge {readConnection} />
+				{#if liveApi !== null && liveApi.state.active}
+					<ClientLiveApiBadge
+						state={liveApi.state}
+						pausePending={liveApi.pausePending}
+						onTogglePaused={liveApi.onTogglePaused}
+					/>
+				{/if}
 			</span>
 		</header>
 		<div class="xp-track">

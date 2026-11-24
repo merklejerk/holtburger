@@ -2,26 +2,31 @@ export function ratio(current: number, max: number): number {
 	return max > 0 ? current / max : 0;
 }
 
-export function isDefeated(entity: ScriptEntityView | null): boolean {
+export function entitySummary(
+	entity: EntitySummary | EntityDetail | null | undefined,
+): EntitySummary | null {
 	if (entity == null) {
-		return false;
+		return null;
 	}
+	return "summary" in entity ? entity.summary : entity;
+}
 
-	if (entity.motionCommand.kind === "dead") {
-		return true;
-	}
-
-	return (
-		entity.profile?.kind === "creature" && entity.profile.data.health === 0
-	);
+export function isDefeated(
+	entity: EntitySummary | EntityDetail | null | undefined,
+): boolean {
+	const summary = entitySummary(entity);
+	return summary?.isDead === true;
 }
 
 /** Shared eligibility for acquiring and retaining the mage's PvE combat targets. */
-export function isAttackCandidate(entity: ScriptEntityView | null): boolean {
+export function isAttackCandidate(
+	entity: EntitySummary | EntityDetail | null | undefined,
+): boolean {
+	const summary = entitySummary(entity);
 	return (
-		entity != null &&
-		entity.kind === "monster" &&
-		entity.isHostile &&
-		!isDefeated(entity)
+		summary != null &&
+		summary.category === "monster" &&
+		summary.isHostile &&
+		!summary.isDead
 	);
 }

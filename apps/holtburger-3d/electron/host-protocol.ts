@@ -400,6 +400,7 @@ export class SidecarHostClient {
 				password,
 				meleeMaxChaseDistance,
 				appraisalTuning,
+				liveApi,
 			} = startup;
 			await this.#invokeWire({
 				command: "start_client",
@@ -419,6 +420,7 @@ export class SidecarHostClient {
 					...(meleeMaxChaseDistance === undefined
 						? {}
 						: { meleeMaxChaseDistance }),
+					...(liveApi === undefined ? {} : { liveApi }),
 				},
 			});
 		} finally {

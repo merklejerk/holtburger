@@ -24,6 +24,7 @@ use serde::{Deserialize, Serialize};
 
 /// Identity-based destination; no frontend array positions cross this boundary.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum InventoryTarget {
     /// Remove equipped gear into automatically allocated carried storage.
@@ -31,6 +32,7 @@ pub enum InventoryTarget {
     /// Acquire a loose world item or accessible external contents into carried storage.
     Pickup {
         /// Optional carried-container preference from scripting; allocation may use other packs.
+        #[serde(default)]
         container: Option<Guid>,
     },
     /// Drop an owned carried or equipped object near the character.
@@ -66,6 +68,7 @@ pub enum InventoryTarget {
 
 /// One desired inventory interaction, re-evaluated against current world state on submission.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct InventoryIntent {
     /// Source identity; container transfers also accept accessible external contents.
     pub item: Guid,

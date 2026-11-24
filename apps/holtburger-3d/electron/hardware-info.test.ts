@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { DEFAULT_LIVE_API_SETTINGS } from "../src/app/desktop/app-settings-contract";
 import { copyHardwareInfo } from "./hardware-info";
 
 const native = vi.hoisted(() => ({
@@ -47,6 +48,7 @@ const startup = {
 	graphicsBackend: "automatic",
 	vsync: true,
 	gpuCompositing: true,
+	liveApi: DEFAULT_LIVE_API_SETTINGS,
 } as const;
 
 beforeEach(() => {
@@ -90,7 +92,12 @@ describe("hardware clipboard report", () => {
 			window,
 			{ build: "v-test revision", webgl: null },
 			startup,
-			{ graphicsBackend: "gl", vsync: false, gpuCompositing: true },
+			{
+				graphicsBackend: "gl",
+				vsync: false,
+				gpuCompositing: true,
+				liveApi: DEFAULT_LIVE_API_SETTINGS,
+			},
 			["--use-angle"],
 		);
 		const report: string = native.writeText.mock.calls[0][0];

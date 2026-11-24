@@ -15,6 +15,7 @@ import {
 	appSettingsRequireRestart,
 	graphicsBackendOptions,
 } from "./app-settings";
+import { DEFAULT_LIVE_API_SETTINGS } from "../src/app/desktop/app-settings-contract";
 
 const directories: string[] = [];
 async function settingsPath(): Promise<string> {
@@ -66,6 +67,7 @@ describe("app graphics startup", () => {
 			graphicsBackend: "automatic",
 			vsync: true,
 			gpuCompositing: true,
+			liveApi: DEFAULT_LIVE_API_SETTINGS,
 		} as const;
 		const disabled = { ...enabled, gpuCompositing: false };
 		const startup = commandLine([]);
@@ -84,14 +86,24 @@ describe("app graphics startup", () => {
 		const automatic = commandLine([]);
 		expect(
 			applyAppGraphicsSettings(
-				{ graphicsBackend: "automatic", vsync: true, gpuCompositing: true },
+				{
+					graphicsBackend: "automatic",
+					vsync: true,
+					gpuCompositing: true,
+					liveApi: DEFAULT_LIVE_API_SETTINGS,
+				},
 				automatic,
 			),
 		).toEqual([]);
 		expect(automatic.switches.size).toBe(0);
 		const selected = commandLine([]);
 		applyAppGraphicsSettings(
-			{ graphicsBackend: "metal", vsync: false, gpuCompositing: true },
+			{
+				graphicsBackend: "metal",
+				vsync: false,
+				gpuCompositing: true,
+				liveApi: DEFAULT_LIVE_API_SETTINGS,
+			},
 			selected,
 		);
 		expect(selected.switches.get("use-angle")).toBe("metal");
@@ -106,7 +118,12 @@ describe("app graphics startup", () => {
 		]);
 		expect(
 			applyAppGraphicsSettings(
-				{ graphicsBackend: "d3d11", vsync: false, gpuCompositing: true },
+				{
+					graphicsBackend: "d3d11",
+					vsync: false,
+					gpuCompositing: true,
+					liveApi: DEFAULT_LIVE_API_SETTINGS,
+				},
 				native,
 			),
 		).toContain("--use-angle");
@@ -118,7 +135,12 @@ describe("app graphics startup", () => {
 			["disable-gpu-vsync", ""],
 		]);
 		applyAppGraphicsSettings(
-			{ graphicsBackend: "automatic", vsync: true, gpuCompositing: true },
+			{
+				graphicsBackend: "automatic",
+				vsync: true,
+				gpuCompositing: true,
+				liveApi: DEFAULT_LIVE_API_SETTINGS,
+			},
 			uncapped,
 		);
 		expect(uncapped.switches.has("disable-gpu-vsync")).toBe(true);
@@ -159,6 +181,7 @@ describe("app settings persistence", () => {
 				graphicsBackend: "automatic",
 				vsync: false,
 				gpuCompositing: false,
+				liveApi: DEFAULT_LIVE_API_SETTINGS,
 			} as const;
 			await store.save(selected);
 			expect(new AppSettingsStore(path, platform).settings).toEqual(selected);
@@ -176,6 +199,7 @@ describe("app settings persistence", () => {
 			graphicsBackend: "d3d11",
 			vsync: true,
 			gpuCompositing: true,
+			liveApi: DEFAULT_LIVE_API_SETTINGS,
 		} as const;
 		await mkdir(path);
 		await expect(store.save(selected)).rejects.toThrow();
@@ -195,6 +219,7 @@ describe("app settings persistence", () => {
 			graphicsBackend: "d3d11",
 			vsync: false,
 			gpuCompositing: true,
+			liveApi: DEFAULT_LIVE_API_SETTINGS,
 		} as const;
 		await store.save(settings);
 		expect(new AppSettingsStore(path, "win32").settings).toEqual(settings);

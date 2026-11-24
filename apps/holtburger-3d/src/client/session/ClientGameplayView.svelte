@@ -961,6 +961,7 @@
 				accountName={character.accountName}
 				vitals={character.vitals}
 				readConnection={character.readConnection}
+				liveApi={character.liveApi ?? null}
 				characterSheet={character.characterSheet}
 			/>
 		</ClientHudPanel>

@@ -1,10 +1,10 @@
 HB.onEvent((event) => {
-	if (event.kind !== "lifecycle" || event.data.kind !== "started") {
+	if (event.kind !== "started") {
 		return;
 	}
 
 	(async () => {
-		HB.print("info", "starting postJson smoke test");
+		HB.print("starting postJson smoke test", "info");
 
 		const [firstResult, secondResult] = await Promise.allSettled([
 			HB.postJson({
@@ -31,26 +31,28 @@ HB.onEvent((event) => {
 		]) {
 			if (result.status === "fulfilled") {
 				HB.print(
-					"info",
 					`${label} ${result.value.status} ok=${result.value.ok} body=${JSON.stringify(result.value.bodyJson)}`,
+					"info",
 				);
 				continue;
 			}
 
 			const error = result.reason;
-			const code = error && typeof error === "object" && "code" in error
-				? String(error.code)
-				: "unknown";
+			const code =
+				error && typeof error === "object" && "code" in error
+					? String(error.code)
+					: "unknown";
 			const message = error instanceof Error ? error.message : String(error);
-			HB.print("error", `${label} failed (${code}): ${message}`);
+			HB.print(`${label} failed (${code}): ${message}`, "error");
 		}
 
-		HB.print("info", "postJson smoke test complete");
+		HB.print("postJson smoke test complete", "info");
 	})().catch((error) => {
-		const code = error && typeof error === "object" && "code" in error
-			? String(error.code)
-			: "unknown";
+		const code =
+			error && typeof error === "object" && "code" in error
+				? String(error.code)
+				: "unknown";
 		const message = error instanceof Error ? error.message : String(error);
-		HB.print("error", `postJson smoke test failed (${code}): ${message}`);
+		HB.print(`postJson smoke test failed (${code}): ${message}`, "error");
 	});
 });

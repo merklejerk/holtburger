@@ -656,6 +656,26 @@ pub enum ClientHostCommand {
     StopClientCamera {
         request: holtburger_core::ClientCameraIdentity,
     },
+    /// Mirrors frontend target selection into the Live API `ui.selection` hook.
+    ReportClientSelectedEntity {
+        #[serde(default)]
+        guid: Option<holtburger_common::Guid>,
+    },
+    /// Pauses or resumes Live API automation from the h3d HUD safety pill.
+    SetClientAutomationPaused {
+        paused: bool,
+    },
+    /// Delivers a HUD-free WebGL2 viewport screenshot back to a pending Live API request.
+    SubmitClientApiScreenshot {
+        #[serde(rename = "requestId")]
+        request_id: String,
+        #[serde(default, rename = "contentType")]
+        content_type: Option<String>,
+        #[serde(default, rename = "base64Data")]
+        base64_data: Option<String>,
+        #[serde(default)]
+        error: Option<String>,
+    },
     /// Graceful character logout, preserving the login session.
     LogoutClient,
     DisconnectClient,
@@ -735,6 +755,9 @@ pub const CLIENT_COMMAND_NAMES: &[&str] = &[
     "cancel_client_precise_jump",
     "acknowledge_client_world_reveal",
     "stop_client_camera",
+    "report_client_selected_entity",
+    "set_client_automation_paused",
+    "submit_client_api_screenshot",
     "logout_client",
     "disconnect_client",
 ];

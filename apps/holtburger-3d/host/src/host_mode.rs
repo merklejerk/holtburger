@@ -158,6 +158,15 @@ fn ensure_unique<T>(value: &Option<T>, name: &str) -> Result<()> {
     Ok(())
 }
 
+/// Opt-in localhost Live API configuration forwarded from Electron on client startup.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LiveApiLaunchConfiguration {
+    /// Localhost TCP port (`0` selects an OS-assigned ephemeral port).
+    #[serde(default)]
+    pub port: u16,
+}
+
 /// One launch-only client connection configuration. The password is intentionally redacted from
 /// debug output because this value crosses the private Electron-to-host startup boundary.
 #[derive(Clone, Deserialize, Serialize)]
@@ -177,6 +186,9 @@ pub struct ClientLaunchConfiguration {
     /// Shared appraisal pacing and recency configuration validated by the host at startup.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub appraisal_tuning: Option<holtburger_core::ClientAppraisalTuningConfig>,
+    /// Opt-in localhost Live API server configuration; `None` disables the server entirely.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub live_api: Option<LiveApiLaunchConfiguration>,
 }
 
 impl fmt::Debug for ClientLaunchConfiguration {
@@ -189,6 +201,7 @@ impl fmt::Debug for ClientLaunchConfiguration {
             .field("password", &"<redacted>")
             .field("melee_max_chase_distance", &self.melee_max_chase_distance)
             .field("appraisal_tuning", &self.appraisal_tuning)
+            .field("live_api", &self.live_api)
             .finish()
     }
 }

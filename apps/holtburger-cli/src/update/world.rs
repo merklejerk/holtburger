@@ -1,7 +1,6 @@
 use crate::pages::selection::creation::CharacterCreationState;
 use crate::pages::selection::{CharacterDashboardEntry, SelectionState};
 use crate::state::AppState;
-use crate::state::EventContext;
 use crate::types::{Page, UpdateResult};
 use holtburger_core::{ClientCommand, ClientState, ClientViewEvent};
 use std::sync::Arc;
@@ -204,10 +203,6 @@ impl AppState {
             return result;
         }
 
-        let ctx = EventContext {
-            server_time: self.server_time,
-        };
-
         match event {
             ClientViewEvent::ConnectionUpdated(sample) => {
                 self.net_stats.history_in.rotate_left(1);
@@ -220,28 +215,16 @@ impl AppState {
                 }
                 result.merge(
                     self.page
-                        .handle_view_event(ClientViewEvent::ConnectionUpdated(sample), &ctx),
+                        .handle_view_event(ClientViewEvent::ConnectionUpdated(sample)),
                 );
             }
             ClientViewEvent::StatusUpdate { .. } | ClientViewEvent::ActionResult { .. } => {
                 result.merge(self.handle_client_status_event(&event));
-                result.merge(self.page.handle_view_event(event, &ctx));
-            }
-            ClientViewEvent::BusyOperationFinished {
-                operation,
-                result: busy_result,
-            } => {
-                result.merge(self.page.handle_view_event(
-                    ClientViewEvent::BusyOperationFinished {
-                        operation,
-                        result: busy_result,
-                    },
-                    &ctx,
-                ));
+                result.merge(self.page.handle_view_event(event));
             }
             _ => {
                 // All other entity, player, trade, and combat events delegate completely!
-                result.merge(self.page.handle_view_event(event, &ctx));
+                result.merge(self.page.handle_view_event(event));
             }
         }
         result
@@ -278,6 +261,9 @@ mod tests {
             queued_script_startup: None,
             script_host_config: ScriptHostConfig::default(),
             script_directories: crate::scripting::ScriptDirectories::default(),
+            live_api_engine: None,
+            live_api_endpoint: None,
+            tokio_handle: None,
         }
     }
 

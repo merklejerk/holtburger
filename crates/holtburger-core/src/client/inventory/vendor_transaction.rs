@@ -118,18 +118,26 @@ impl VendorExecution {
 }
 
 impl ClientRuntime {
-    pub(in crate::client) fn preview_vendor_trade(&self, request: VendorTradeRequest) {
+    pub(in crate::client) fn evaluate_vendor_preview_readonly(
+        &self,
+        request: VendorTradeRequest,
+    ) -> VendorPreviewResult {
         let outcome = match self.world.quote_vendor_draft(&request.draft) {
             Ok(quote) => VendorPreviewOutcome::Ready { quote },
             Err(reason) => VendorPreviewOutcome::Rejected { reason },
         };
+        VendorPreviewResult {
+            sequence: request.sequence,
+            vendor: request.draft.vendor,
+            outcome,
+        }
+    }
+
+    pub(in crate::client) fn preview_vendor_trade(&self, request: VendorTradeRequest) {
+        let result = self.evaluate_vendor_preview_readonly(request);
         let _ = self
             .client_view_event_tx
-            .send(ClientViewEvent::VendorDraftPreview(VendorPreviewResult {
-                sequence: request.sequence,
-                vendor: request.draft.vendor,
-                outcome,
-            }));
+            .send(ClientViewEvent::VendorDraftPreview(result));
     }
 
     pub(in crate::client) async fn submit_vendor_trade(

@@ -2,6 +2,7 @@ use binrw::{BinRead, BinWrite};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, BinRead, BinWrite, PartialEq, Default)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[br(little)]
 #[bw(little)]
 pub struct Vector3 {
@@ -115,6 +116,7 @@ impl std::ops::Div<f32> for Vector3 {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, BinRead, BinWrite, PartialEq, Default)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[br(little)]
 #[bw(little)]
 pub struct Quaternion {

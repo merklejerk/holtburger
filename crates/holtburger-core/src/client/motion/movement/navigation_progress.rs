@@ -5,8 +5,6 @@ use holtburger_common::{Quaternion, RigidTransform, Vector3, position::WorldPosi
 use holtburger_world::motion::DirectedMotionTravel;
 use holtburger_world::{CollisionScene, PointPlacement};
 
-use crate::client::movement_types::AutonomousDriveIntent;
-
 /// Uncommitted progress through known voids, rebased whenever canonical placement changes.
 /// This state never supplies world queries, packet positions, or arrival checks.
 #[derive(Default)]
@@ -39,45 +37,6 @@ enum NavigationDisplacement {
 impl NavigationProgress {
     pub fn reset(&mut self) {
         self.interval = None;
-    }
-
-    /// Consumes only this tick's admitted travel budget. Missing/ambiguous geometry holds progress;
-    /// known outside samples advance the intent but never become committed positions.
-    pub fn advance(
-        &mut self,
-        scene: &CollisionScene,
-        committed: WorldPosition,
-        intent: AutonomousDriveIntent,
-        admitted_fraction: f32,
-    ) -> Result<Option<WorldPosition>> {
-        ensure!(
-            intent.desired_world_delta.length().is_finite(),
-            "navigation displacement must have finite length"
-        );
-        ensure!(
-            intent.desired_heading.is_none_or(f32::is_finite),
-            "navigation heading must be finite"
-        );
-        ensure!(
-            (0.0..=1.0).contains(&admitted_fraction),
-            "navigation admitted fraction must be between zero and one"
-        );
-        let displacement = match intent.target_hint {
-            Some(target) => NavigationDisplacement::Target {
-                travel: DirectedMotionTravel {
-                    target,
-                    moving_away: false,
-                },
-                authored_delta: intent.desired_world_delta * admitted_fraction,
-            },
-            None => {
-                NavigationDisplacement::Relative(intent.desired_world_delta * admitted_fraction)
-            }
-        };
-        let rotation = intent
-            .desired_heading
-            .map_or(committed.rotation, Quaternion::from_heading);
-        self.advance_displacement(scene, committed, displacement, rotation)
     }
 
     /// Uses the already admitted authored tick once. A server travel node supplies direction;

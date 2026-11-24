@@ -17,7 +17,7 @@ function makeCandidate(
 		guid: guid as Guid,
 		weenieId: 1,
 		position: {
-			landblockId: 1 as Guid,
+			landblock_id: 1 as Guid,
 			coords: { x: 0, y: 0, z: 0 },
 			rotation: { w: 1, x: 0, y: 0, z: 0 },
 		},

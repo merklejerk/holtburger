@@ -114,6 +114,7 @@ bitflags! {
     Display,
     FromRepr,
 )]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub enum CharacterOption {
     AutoRepeatAttacks = 0x00,
     IgnoreAllegianceRequests = 0x01,

@@ -383,6 +383,7 @@ export class WebGL2Renderer implements Renderer {
 		this.#deviceTargets.setFrameClockSeconds(input.timeSeconds);
 		this.#overlayPasses.setFrameInputs(
 			input.worldIndicator ?? null,
+			input.worldOverlays ?? null,
 			input.transformGizmo ?? null,
 			input.summonLeashes ?? [],
 			input.selectionTarget,

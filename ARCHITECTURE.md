@@ -21,7 +21,8 @@ graph TD
     Session["holtburger-session<br/>UDP Sequencing & Crypto"]
     World["holtburger-world<br/>Authoritative World & Physics"]
     Core["holtburger-core<br/>Client Runtime & Workflows"]
-    Scripting["holtburger-scripting<br/>JS Automation Runtime"]
+    LiveApi["holtburger-live-api<br/>Live API Engine & Localhost Server"]
+    Scripting["holtburger-scripting<br/>In-Process V8 Scripting Runtime"]
     CLI["apps/holtburger-cli<br/>Terminal Client (TUI)"]
     H3D["apps/holtburger-3d<br/>3D Client & Explorer (Electron + WebGL2)"]
 
@@ -36,13 +37,16 @@ graph TD
     Core --> Session
     Core --> World
     Core --> Protocol
-    Scripting --> Common
-    Scripting --> World
+    LiveApi --> Core
+    LiveApi --> World
+    Scripting --> LiveApi
     CLI --> Content
     CLI --> Core
+    CLI --> LiveApi
     CLI --> Scripting
     H3D --> Content
     H3D --> Core
+    H3D --> LiveApi
 ```
 
 ---
@@ -68,16 +72,19 @@ UDP socket management, packet sequencing, fragment reassembly, checksums, and st
 Authoritative in-memory world model (`WorldState` and `PlayerState`), entity hydration and retention lifecycle, canonical `SpatialScene` / `CollisionScene` / `MotionRuntimeRegistry` simulation state, semantic entity facts and inspection, and pure `WorldContext` queries.
 
 ### 7. [`holtburger-core`](crates/holtburger-core/ARCHITECTURE.md)
-Client runtime orchestrator (`ClientRuntime` and `ClientRuntimeBuilder`) binding `session` and `world` together. Owns connection/character/portal session lifetimes, fixed-tick simulation and movement execution, guarded multi-step client workflows (inventory, equipment, vendor, trade, salvage, housing), reusable camera collision (`KinematicBoomController`), and the `ClientViewEvent` stream.
+Client runtime orchestrator (`ClientRuntime` and `ClientRuntimeBuilder`) binding `session` and `world` together. Owns connection/character/portal session lifetimes, `ControlSource` (`User` vs `Automation`) command admission and pause gating, read-only query closures (`ClientRuntimeHandle::read`), fixed-tick simulation and shared local steering (`MoveTo`/`Approach`/`Follow`/`Face*`), guarded multi-step client workflows (inventory, equipment, vendor, trade, salvage, housing), reusable camera collision (`KinematicBoomController`), and the `ClientViewEvent` stream.
 
-### 8. `holtburger-scripting`
-Embedded V8/Deno JavaScript runtime exposing read-only projections (`ScriptClientView`) and typed automation intents (`ScriptIntent`) for scripted workflows without coupling scripts to engine internals.
+### 8. [`holtburger-live-api`](crates/holtburger-live-api/ARCHITECTURE.md)
+Shared Live Automation API engine (`LiveApiEngine`) and opt-in localhost-only REST/WebSocket/OpenAPI 3.1 server backed directly by `ClientRuntimeHandle`. Derives advertised capabilities from mounted frontend hooks (`ClientUiHook`, `ClientHudHook`) and `StaticReferenceCatalogs`.
 
-### 9. [`apps/holtburger-cli`](apps/holtburger-cli/ARCHITECTURE.md)
-Interactive `ratatui` terminal client serving as a fast proving ground over `holtburger-core`, owning TUI-local layout, keybindings, navigation policy, and script hosting.
+### 9. `holtburger-scripting`
+Embedded V8/Deno JavaScript runtime running on a dedicated non-Tokio OS thread directly over `holtburger-live-api::LiveApiEngine` via three generic ops (`op_api_query`, `op_api_command`, `op_api_poll_events`) plus script-local config/data/HTTP helpers.
 
-### 10. [`apps/holtburger-3d`](apps/holtburger-3d/ARCHITECTURE.md)
-Full 3D desktop client and content Explorer built with Electron, Svelte 5, WebGL2, and a mode-specific Rust host sidecar (`apps/holtburger-3d/host`) keeping live Client authority separate from offline Explorer authority.
+### 10. [`apps/holtburger-cli`](apps/holtburger-cli/ARCHITECTURE.md)
+Interactive `ratatui` terminal client over `holtburger-core`, owning TUI-local layout, keybindings, script discovery/lifecycle over `LiveApiEngine`, and optional `--api` localhost server hosting.
+
+### 11. [`apps/holtburger-3d`](apps/holtburger-3d/ARCHITECTURE.md)
+Full 3D desktop client and content Explorer built with Electron, Svelte 5, WebGL2, and a mode-specific Rust host sidecar (`apps/holtburger-3d/host`) keeping live Client authority (including opt-in Live API server + HUD hooks) separate from offline Explorer authority.
 
 ---
 

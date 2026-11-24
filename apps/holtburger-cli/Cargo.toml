@@ -9,10 +9,12 @@ default-run = "tui"
 build = "build.rs"
 
 [dependencies]
+async-trait = { workspace = true }
 holtburger-content = { workspace = true }
 holtburger-core = { workspace = true }
 holtburger-common = { workspace = true }
 holtburger-dat = { workspace = true }
+holtburger-live-api = { workspace = true }
 holtburger-protocol = { workspace = true }
 holtburger-scripting = { workspace = true }
 tokio.workspace = true
@@ -32,6 +34,7 @@ serde_json.workspace = true
 reqwest.workspace = true
 
 [dev-dependencies]
+holtburger-core = { workspace = true, features = ["test-support"] }
 holtburger-world = { workspace = true, features = ["test-support"] }
 tempfile.workspace = true
 

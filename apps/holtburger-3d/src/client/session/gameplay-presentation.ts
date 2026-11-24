@@ -95,7 +95,10 @@ import type {
 	FrameSelectionMetrics,
 	RendererFrameDiagnosticsSnapshot,
 	WorldIndicatorInput,
+	WorldOverlayBatchInput,
 } from "../../lib/game/renderer/renderer";
+import { ApiWorldMarkersStore } from "../hud/api-markers";
+import type { ClientApiWorldMarker } from "./host-contract";
 import type { MinimapFrame } from "../../app/minimap/frame";
 import type { MapEntity } from "../../lib/game/map/map-blips";
 import type { MapTerrainSource } from "../../lib/game/map/map-renderer";
@@ -230,6 +233,7 @@ export interface ClientGameplayRuntime
 	resolveViewportExtent(cssWidth: number, cssHeight: number): RenderExtent;
 	setPrimaryView(view: PrimaryCameraView): void;
 	setWorldIndicator(indicator: WorldIndicatorInput | null): void;
+	setWorldOverlays?(overlays: WorldOverlayBatchInput | null): void;
 	setAudioListener(placement: AudioListenerPlacement | null): void;
 	setSceneEnvironment(environment: ResolvedSceneEnvironment): void;
 	setViewerEntity(guid: number | null): void;
@@ -357,6 +361,7 @@ export class ClientGameplayPresentation {
 	readonly #scenePortal: ClientScenePortalCoordinator;
 	readonly #cameraSelection: ClientCameraAndSelectionPresenter;
 	readonly #combatOverlays: ClientCombatAndOverlayPresenter;
+	readonly #apiMarkers = new ApiWorldMarkersStore();
 	#unsubscribe: (() => void) | null = null;
 	#playerGuid: number | null = null;
 	#startPromise: Promise<void> | null = null;
@@ -466,6 +471,39 @@ export class ClientGameplayPresentation {
 	/** Invalidate passive preview immediately after input targeting preferences change. */
 	invalidateImmediateOverlayPreview(): void {
 		this.#combatOverlays.invalidateImmediateOverlayPreview();
+	}
+
+	/** Upsert TTL-backed 3D world markers received from the Live API `h3d.hud` hook. */
+	upsertApiWorldMarkers(
+		markers: readonly ClientApiWorldMarker[],
+		nowMs: number,
+	): void {
+		this.#apiMarkers.upsert(markers, nowMs);
+		this.#syncApiWorldOverlays(this.#activeResources?.runtime, nowMs);
+	}
+
+	/** Clear Live API 3D world markers (optionally scoped to one namespace). */
+	clearApiWorldMarkers(namespace: string | null, nowMs: number): void {
+		this.#apiMarkers.clear(namespace);
+		this.#syncApiWorldOverlays(this.#activeResources?.runtime, nowMs);
+	}
+
+	#clearAllApiWorldMarkers(): void {
+		this.#apiMarkers.clear(null);
+		this.#activeResources?.runtime.setWorldOverlays?.(null);
+	}
+
+	#syncApiWorldOverlays(
+		runtime: ClientGameplayRuntime | undefined,
+		nowMs: number,
+	): void {
+		if (runtime?.setWorldOverlays === undefined) return;
+		const snapshot = this.#apiMarkers.snapshot(nowMs);
+		runtime.setWorldOverlays(
+			snapshot.markers.length === 0 && snapshot.polylines.length === 0
+				? null
+				: snapshot,
+		);
 	}
 
 	/** Forward the cold identity level once; presentation resolves realization and pose per frame. */
@@ -783,6 +821,7 @@ export class ClientGameplayPresentation {
 		resources.runtime.setViewerEntity(playerGuid);
 		if (!portal) {
 			this.#combatOverlays.reconcileCombatHealth(nowMs);
+			this.#syncApiWorldOverlays(resources.runtime, nowMs);
 			resources.runtime.tick(nowMs);
 		}
 		const primaryView = portal
@@ -841,6 +880,7 @@ export class ClientGameplayPresentation {
 
 	async #destroy(): Promise<void> {
 		this.#cameraSelection.clearPreciseJumpMarker();
+		this.#clearAllApiWorldMarkers();
 		this.#destroyed = true;
 		this.#lifetime.abort(abortError("Gameplay presentation retired."));
 		this.#cameraSelection.resetTarget(false);
@@ -908,6 +948,7 @@ export class ClientGameplayPresentation {
 			resources.runtime.clearCombatEffects();
 			resources.runtime.setSummonVisuals([], CLIENT_SUMMON_TUNING);
 			resources.runtime.setWorldIndicator(null);
+			resources.runtime.setWorldOverlays?.(null);
 			resources.runtime.setViewerEntity(null);
 			resources.runtime.setSelectedEntityGuid(null);
 			resources.runtime.setHoveredEntityGuid(null);
@@ -999,6 +1040,7 @@ export class ClientGameplayPresentation {
 				this.#combatOverlays.clearOverlayPresentation(
 					this.#activeResources?.runtime,
 				);
+				this.#clearAllApiWorldMarkers();
 				this.#combatOverlays.syncCombatHealthWorld(true);
 				this.#activeResources?.runtime.clearCombatEffects();
 				return;
@@ -1049,6 +1091,7 @@ export class ClientGameplayPresentation {
 					this.#combatOverlays.clearOverlayPresentation(
 						this.#activeResources?.runtime,
 					);
+					this.#clearAllApiWorldMarkers();
 					this.#combatOverlays.syncCombatHealthWorld(true);
 				} else {
 					this.#combatOverlays.syncCombatHealthWorld(false);
@@ -1105,6 +1148,7 @@ export class ClientGameplayPresentation {
 				this.#combatOverlays.clearOverlayPresentation(
 					this.#activeResources?.runtime,
 				);
+				this.#clearAllApiWorldMarkers();
 				this.#combatOverlays.syncCombatHealthWorld(true);
 				this.#receivePresentationDiscontinuity(event.discontinuity);
 				return;

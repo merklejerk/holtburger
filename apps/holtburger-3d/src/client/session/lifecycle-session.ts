@@ -2,7 +2,11 @@ import { ClientPackAffinities } from "../settings/pack-affinities";
 import {
 	localMotionFeedbackSchema,
 	socialMotionReadySchema,
+	decodeClientApiState,
+	decodeClientApiHudEvent,
 	type ClientLocalMotionFeedback,
+	type ClientApiState,
+	type ClientApiHudEvent,
 } from "./host-contract";
 import {
 	lockFeedbackSchema,
@@ -368,6 +372,9 @@ type ClientCommandName = Extract<
 	| "cancel_client_precise_jump"
 	| "acknowledge_client_world_reveal"
 	| "stop_client_camera"
+	| "report_client_selected_entity"
+	| "set_client_automation_paused"
+	| "submit_client_api_screenshot"
 	| "logout_client"
 	| "disconnect_client"
 >;
@@ -456,6 +463,8 @@ type ClientEventName = Extract<
 	| "client-presentation-tick"
 	| "client-presentation-discontinuity"
 	| "client-exit-requested"
+	| "client-api-state"
+	| "client-api-hud"
 >;
 
 /** Narrow injected seam used by the client lifecycle owner and its browser tests. */
@@ -611,6 +620,8 @@ export type ClientLifecycleSessionEvent =
 			readonly destinations: readonly RecallDestination[];
 	  }
 	| { readonly type: "dynamic-sound-cue"; readonly cue: ClientDynamicSoundCue }
+	| { readonly type: "api-state"; readonly state: ClientApiState }
+	| { readonly type: "api-hud"; readonly hud: ClientApiHudEvent }
 	| {
 			readonly type: "confirmation";
 			readonly confirmation: ClientConfirmation | null;
@@ -1582,6 +1593,26 @@ export class ClientLifecycleSession {
 		await this.#transport.invoke("logout_client");
 	}
 
+	/** Mirrors frontend target selection into the Live API `ui.selection` hook. */
+	async reportSelectedEntity(guid: number | null): Promise<void> {
+		await this.#transport.invoke("report_client_selected_entity", { guid });
+	}
+
+	/** Pauses or resumes Live API automation via the client host safety gate. */
+	async setAutomationPaused(paused: boolean): Promise<void> {
+		await this.#transport.invoke("set_client_automation_paused", { paused });
+	}
+
+	/** Submits a HUD-free WebGL2 viewport screenshot back to a pending Live API request. */
+	async submitApiScreenshot(payload: {
+		requestId: string;
+		contentType?: string;
+		base64Data?: string;
+		error?: string;
+	}): Promise<void> {
+		await this.#transport.invoke("submit_client_api_screenshot", payload);
+	}
+
 	/** Withdraw camera IPC before the Electron close owner takes over native shutdown. */
 	prepareAuthorityShutdown(): void {
 		this.#cameras.close();
@@ -2199,6 +2230,22 @@ export class ClientLifecycleSession {
 				await listen("client-exit-requested", (payload) =>
 					this.#receiveExit(payload),
 				),
+			);
+			unlisteners.push(
+				await listen("client-api-state", (payload) => {
+					this.#emit({
+						type: "api-state",
+						state: decodeClientApiState(payload),
+					});
+				}),
+			);
+			unlisteners.push(
+				await listen("client-api-hud", (payload) => {
+					this.#emit({
+						type: "api-hud",
+						hud: decodeClientApiHudEvent(payload),
+					});
+				}),
 			);
 			return unlisteners;
 		} catch (error) {

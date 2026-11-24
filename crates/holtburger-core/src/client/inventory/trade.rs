@@ -16,6 +16,7 @@ const TRADE_ADDITION_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// A negotiation command captures its partner; additions and acceptance also capture the displayed offer.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum TradeRequest {
     /// Initiate negotiations; server registration establishes the session.
@@ -266,9 +267,10 @@ impl ClientRuntime {
         if matches!(request, TradeRequest::Open { .. })
             && self.world.player_combat_mode() != CombatMode::NonCombat
             && let Err(error) = self
-                .handle_combat_command(crate::client::types::ClientCommand::SetCombatMode(
-                    CombatMode::NonCombat,
-                ))
+                .handle_combat_command(
+                    crate::client::control::ControlSource::User,
+                    crate::client::types::ClientCommand::SetCombatMode(CombatMode::NonCombat),
+                )
                 .await
         {
             self.report_trade_failure(format!("Trade request failed: {error}"));

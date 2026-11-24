@@ -9,14 +9,26 @@ const source = readFileSync(
 );
 
 test("fighter skips summons and retires a target that becomes nonhostile and resumes acquisition", () => {
-	const summon = { guid: 2, kind: "monster", isHostile: false, profile: null };
-	const mob = { guid: 3, kind: "monster", isHostile: true, profile: null };
+	const summon = {
+		guid: 2,
+		category: "monster",
+		isHostile: false,
+		isDead: false,
+	};
+	const mob = {
+		guid: 3,
+		category: "monster",
+		isHostile: true,
+		isDead: false,
+	};
 	const attacks: number[] = [];
-	let cancellations = 0;
+	let stopCombatCount = 0;
+	let stopMovementCount = 0;
 	const combat = {
-		isEngaged: false,
+		state: "idle",
 		target: null as number | null,
-		combatMode: "Melee",
+		combatMode: "melee",
+		profile: null,
 	};
 	const callbacks: { event?: (event: unknown) => void } = {};
 	runInNewContext(source, {
@@ -24,48 +36,51 @@ test("fighter skips summons and retires a target that becomes nonhostile and res
 			onEvent: (callback: (event: unknown) => void) => {
 				callbacks.event = callback;
 			},
-			selfEntity: () => ({
+			self: () => ({
 				guid: 1,
 				health: 100,
 				healthMax: 100,
 				stamina: 100,
 				staminaMax: 100,
-				busyOperation: "none",
+				busy: null,
+				navigation: null,
 			}),
-			entity: (guid: number) => (guid === mob.guid ? mob : summon),
-			nearbyEntities: () => [summon, mob],
-			combatInfo: () => combat,
-			party: () => null,
-			currentInteraction: () => null,
-			attack: (guid: number) => attacks.push(guid),
-			cancelInteraction: () => {
-				cancellations++;
+			entity: (guid: number) => ({
+				summary: guid === mob.guid ? mob : summon,
+			}),
+			entities: () => [summon, mob],
+			combat: () => combat,
+			social: () => ({ fellowship: null }),
+			beginCombat: (guid: number) => attacks.push(guid),
+			stopCombat: () => {
+				stopCombatCount++;
+			},
+			stopMovement: () => {
+				stopMovementCount++;
 			},
 		},
 	});
 	const dispatch = callbacks.event;
 	assert.ok(dispatch);
-	dispatch({
-		kind: "lifecycle",
-		data: { kind: "started", data: { args: "" } },
-	});
+	dispatch({ kind: "started", args: "" });
 	assert.deepEqual(attacks, [mob.guid]);
-	combat.isEngaged = true;
+	combat.state = "engaged";
 	combat.target = mob.guid;
-	dispatch({ kind: "lifecycle", data: { kind: "tick" } });
+	dispatch({ kind: "tick", elapsed: 0.1 });
 	assert.deepEqual(attacks, [mob.guid]);
 	mob.isHostile = false;
-	dispatch({ kind: "lifecycle", data: { kind: "tick" } });
-	assert.equal(cancellations, 1);
+	dispatch({ kind: "tick", elapsed: 0.1 });
+	assert.equal(stopCombatCount, 1);
+	assert.equal(stopMovementCount, 1);
 	assert.deepEqual(attacks, [mob.guid]);
 	// An unchanged pending cancellation must not be sent on every tick.
-	dispatch({ kind: "lifecycle", data: { kind: "tick" } });
-	assert.equal(cancellations, 1);
-	combat.isEngaged = false;
+	dispatch({ kind: "tick", elapsed: 0.1 });
+	assert.equal(stopCombatCount, 1);
+	combat.state = "idle";
 	combat.target = null;
-	dispatch({ kind: "lifecycle", data: { kind: "tick" } });
+	dispatch({ kind: "tick", elapsed: 0.1 });
 	assert.deepEqual(attacks, [mob.guid]);
 	mob.isHostile = true;
-	dispatch({ kind: "lifecycle", data: { kind: "tick" } });
+	dispatch({ kind: "tick", elapsed: 0.1 });
 	assert.deepEqual(attacks, [mob.guid, mob.guid]);
 });

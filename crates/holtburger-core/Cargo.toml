@@ -22,6 +22,7 @@ log.workspace = true
 encoding_rs.workspace = true
 binrw.workspace = true
 serde.workspace = true
+schemars = { workspace = true, optional = true }
 thiserror.workspace = true
 glam.workspace = true
 bitflags.workspace = true
@@ -39,3 +40,5 @@ serde_json.workspace = true
 [features]
 # Diagnostic capture/replay is excluded from ordinary clients.
 runtime-fixture = []
+schema = ["dep:schemars", "holtburger-common/schema"]
+test-support = ["holtburger-world/test-support"]

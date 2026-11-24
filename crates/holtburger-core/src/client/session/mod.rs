@@ -3,6 +3,7 @@ pub(in crate::client) mod busy_operation;
 pub(in crate::client) mod commands;
 pub mod connection;
 pub mod connection_failure;
+pub mod control;
 pub(in crate::client) mod event_ordering;
 pub(in crate::client) mod lifecycle;
 pub(in crate::client) mod messages;

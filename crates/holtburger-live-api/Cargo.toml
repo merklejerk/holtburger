@@ -1,0 +1,37 @@
+[package]
+name = "holtburger-live-api"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = ["server"]
+server = ["dep:axum", "dep:aide", "dep:futures-util"]
+
+[dependencies]
+holtburger-common = { workspace = true, features = ["schema"] }
+holtburger-core = { workspace = true, features = ["schema"] }
+holtburger-dat.workspace = true
+holtburger-protocol.workspace = true
+holtburger-world.workspace = true
+anyhow.workspace = true
+async-trait.workspace = true
+directories.workspace = true
+futures.workspace = true
+log.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+axum = { version = "0.8.9", features = ["ws"], optional = true }
+aide = { version = "0.15.1", features = ["axum", "axum-json", "axum-query", "axum-ws"], optional = true }
+futures-util = { version = "0.3.34", optional = true }
+
+[dev-dependencies]
+holtburger-core = { workspace = true, features = ["schema", "test-support"] }
+reqwest.workspace = true
+tempfile.workspace = true
+tokio-tungstenite = "0.30.0"

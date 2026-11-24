@@ -1,6 +1,6 @@
 //! Retail server-directed MoveTo/TurnTo reduction into ordinary authored motion orders.
 
-use crate::entity::{EntityMotionDirective, EntityMoveToParameters};
+use crate::entity::{EntityMotionDirective, EntityMoveToParameters, OrderedMotionScalar};
 use crate::spatial::ContactState;
 use holtburger_common::Guid;
 use holtburger_common::position::WorldPosition;
@@ -329,6 +329,128 @@ pub fn begin_server_directed_motion(
             }),
         },
     }
+}
+
+/// Builds a local position-steering state reusing the retail `MoveTo` motion-order reducer.
+/// Returns `None` if any supplied scalar is non-finite or invalid.
+pub fn begin_local_move_to_position(
+    current_pose: WorldPosition,
+    destination: WorldPosition,
+    arrival_distance: f32,
+    run_rate: f32,
+    run: bool,
+    final_heading: Option<f32>,
+) -> Option<ServerDirectedMotionState> {
+    if !arrival_distance.is_finite()
+        || arrival_distance < 0.0
+        || !run_rate.is_finite()
+        || run_rate <= 0.0
+    {
+        return None;
+    }
+    let final_heading_degrees = match final_heading {
+        Some(heading) if heading.is_finite() => heading.to_degrees(),
+        Some(_) => return None,
+        None => 0.0,
+    };
+    let mut flags = MOVE_TOWARDS | if run { CAN_RUN } else { CAN_WALK };
+    if final_heading.is_some() {
+        flags |= USE_FINAL_HEADING;
+    }
+    let params = EntityMoveToParameters {
+        flags,
+        distance_to_object: OrderedMotionScalar::from_f32(arrival_distance)?,
+        min_distance: OrderedMotionScalar::from_f32(0.0)?,
+        // Local steering uses stuck-detection and max-duration timers rather than a fixed start radius.
+        fail_distance: OrderedMotionScalar::from_f32(f32::MAX)?,
+        speed: OrderedMotionScalar::from_f32(1.0)?,
+        walk_run_threshold: OrderedMotionScalar::from_f32(0.0)?,
+        desired_heading_degrees: OrderedMotionScalar::from_f32(final_heading_degrees)?,
+    };
+    Some(ServerDirectedMotionState {
+        kind: ServerDirectedMotionKind::MoveTo(MoveToState {
+            params,
+            run_rate,
+            starting_pose: current_pose,
+            target: MoveToTarget::Position(destination),
+            phase: MoveToPhase::InitialTurn { progress: None },
+        }),
+    })
+}
+
+/// Builds a local object-approach steering state reusing the retail `MoveTo` motion-order reducer.
+/// Returns `None` if any supplied scalar is non-finite or invalid.
+pub fn begin_local_move_to_object(
+    current_pose: WorldPosition,
+    target: Guid,
+    arrival_distance: f32,
+    run_rate: f32,
+    run: bool,
+    use_spheres: bool,
+) -> Option<ServerDirectedMotionState> {
+    if target.is_null()
+        || !arrival_distance.is_finite()
+        || arrival_distance < 0.0
+        || !run_rate.is_finite()
+        || run_rate <= 0.0
+    {
+        return None;
+    }
+    let mut flags = MOVE_TOWARDS | if run { CAN_RUN } else { CAN_WALK };
+    if use_spheres {
+        flags |= USE_SPHERES;
+    }
+    let params = EntityMoveToParameters {
+        flags,
+        distance_to_object: OrderedMotionScalar::from_f32(arrival_distance)?,
+        min_distance: OrderedMotionScalar::from_f32(0.0)?,
+        fail_distance: OrderedMotionScalar::from_f32(f32::MAX)?,
+        speed: OrderedMotionScalar::from_f32(1.0)?,
+        walk_run_threshold: OrderedMotionScalar::from_f32(0.0)?,
+        desired_heading_degrees: OrderedMotionScalar::from_f32(0.0)?,
+    };
+    Some(ServerDirectedMotionState {
+        kind: ServerDirectedMotionKind::MoveTo(MoveToState {
+            params,
+            run_rate,
+            starting_pose: current_pose,
+            target: MoveToTarget::Object { guid: target },
+            phase: MoveToPhase::InitialTurn { progress: None },
+        }),
+    })
+}
+
+/// Builds a local heading-turn steering state reusing the retail `TurnTo` reducer.
+pub fn begin_local_turn_to_heading(heading: f32) -> Option<ServerDirectedMotionState> {
+    if !heading.is_finite() {
+        return None;
+    }
+    Some(ServerDirectedMotionState {
+        kind: ServerDirectedMotionKind::TurnTo(TurnToState {
+            target: TurnToTarget::Heading(normalize_heading(heading)),
+            speed_mod: 1.5,
+            stop_completely: true,
+            progress: None,
+        }),
+    })
+}
+
+/// Builds a local object-facing steering state reusing the retail `TurnTo` reducer.
+pub fn begin_local_turn_to_object(target: Guid) -> Option<ServerDirectedMotionState> {
+    if target.is_null() {
+        return None;
+    }
+    Some(ServerDirectedMotionState {
+        kind: ServerDirectedMotionKind::TurnTo(TurnToState {
+            target: TurnToTarget::Object {
+                guid: target,
+                heading_offset: 0.0,
+            },
+            speed_mod: 1.5,
+            stop_completely: true,
+            progress: None,
+        }),
+    })
 }
 
 /// Reduces one retained directive without mutating world, body, playback, or target state.

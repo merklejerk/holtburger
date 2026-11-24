@@ -32,6 +32,7 @@ import {
 import { createInitialState } from "./state";
 import type {
 	AttackRaySnapshot,
+	Fellowship,
 	MageRuntimeState,
 	MageSpellcastRequest,
 	MonsterCandidate,
@@ -41,16 +42,15 @@ const testGlobal = globalThis as typeof globalThis & {
 	HB: {
 		log: () => void;
 		debugLog: () => void;
-		selfEntity?: () => ScriptSelfView | null;
-		inventory?: () => Array<{ items: Guid[] }>;
-		entity?: (guid?: Guid) => ScriptEntityView | ScriptSelfView | null;
-		useWith?: (itemGuid: Guid, targetGuid: Guid) => void;
-		currentInteraction?: () => { kind: string; data: { guid: Guid } } | null;
-		cancelInteraction?: () => void;
+		self?: () => SelfView;
+		inventory?: () => { containers: Array<{ items: Guid[] }> };
+		entity?: (guid?: Guid) => EntityDetail | null;
+		useItem?: (itemGuid: Guid, targetGuid: Guid) => void;
+		stopCombat?: () => void;
+		stopMovement?: () => void;
 		follow?: (guid: Guid) => void;
 		distance?: (left: Guid, right: Guid) => number;
-		party?: () => ScriptPartyView | null;
-		entityExists?: (guid: Guid) => boolean;
+		social?: () => { fellowship: Fellowship | null };
 	};
 };
 
@@ -300,25 +300,20 @@ test("teleporting cancels active attack planning and clears miss cache", () => {
 
 test("stale follow is canceled when the player becomes the leader", () => {
 	const state = createInitialState();
-	const self = sampleSelfEntity();
 	const followTarget = 307 as Guid;
+	const self: SelfView = {
+		...sampleSelfEntity(),
+		navigation: {
+			goal: { kind: "follow", target: followTarget },
+		},
+	};
 	let cancelCount = 0;
 	let followCount = 0;
 
-	const hb: {
-		log: () => void;
-		debugLog: () => void;
-		currentInteraction: () => { kind: "Follow"; data: { guid: Guid } } | null;
-		cancelInteraction: () => void;
-		follow: () => void;
-	} = {
+	testGlobal.HB = {
 		log: () => undefined,
 		debugLog: () => undefined,
-		currentInteraction: () => ({
-			kind: "Follow",
-			data: { guid: followTarget },
-		}),
-		cancelInteraction: () => {
+		stopMovement: () => {
 			cancelCount += 1;
 		},
 		follow: () => {
@@ -326,14 +321,16 @@ test("stale follow is canceled when the player becomes the leader", () => {
 		},
 	};
 
-	testGlobal.HB = hb;
-
 	const handled = followPartyLeader(state, self, {
 		guid: self.guid,
-		name: self.name,
-		healthPercent: null,
-		staminaPercent: null,
-		manaPercent: null,
+		name: self.name ?? "Self",
+		level: 50,
+		max_health: 100,
+		max_stamina: 100,
+		max_mana: 100,
+		current_health: 100,
+		current_stamina: 100,
+		current_mana: 100,
 	});
 
 	assert.equal(handled, false);
@@ -419,30 +416,29 @@ test("healing kits resolve from chat and block immediate retries until health ca
 
 	testGlobal.HB = {
 		...testGlobal.HB,
-		selfEntity: () => sampleSelfEntity(),
-		inventory: () => [
-			{
-				items: [101 as Guid],
-			},
-		],
+		self: () => sampleSelfEntity(),
+		inventory: () => ({
+			containers: [
+				{
+					items: [101 as Guid],
+				},
+			],
+		}),
 		entity: (guid?: Guid) => {
 			if (guid === (101 as Guid)) {
-				return { kind: "healing_kit", guid } as unknown as ScriptEntityView;
+				return sampleDetail({ category: "healing_kit", guid });
 			}
 			if (guid === targetGuid) {
-				return {
+				return sampleDetail({
 					guid,
 					name: "Ally",
-					kind: "player",
-					weenieId: null,
+					category: "player",
 					position: makePosition(1, 0, 0),
-					motionCommand: { kind: "walking" },
-					profile: null,
-				} as unknown as ScriptEntityView;
+				});
 			}
 			return null;
 		},
-		useWith: () => {
+		useItem: () => {
 			useWithCount += 1;
 		},
 	};
@@ -482,18 +478,15 @@ test("healing kit failure chat clears the pending use", () => {
 
 	testGlobal.HB = {
 		...testGlobal.HB,
-		selfEntity: () => sampleSelfEntity(),
+		self: () => sampleSelfEntity(),
 		entity: (guid?: Guid) =>
 			guid === targetGuid
-				? ({
+				? sampleDetail({
 						guid,
 						name: "Ally",
-						kind: "player",
-						weenieId: null,
+						category: "player",
 						position: makePosition(1, 0, 0),
-						motionCommand: { kind: "walking" },
-						profile: null,
-					} as unknown as ScriptEntityView)
+					})
 				: null,
 	};
 
@@ -649,10 +642,7 @@ test("combat victim notifications resolve attack casts", () => {
 	});
 
 	const handled = resolveSpellcastFromCombatFeedback(state, {
-		kind: "victim_notification",
-		data: {
-			deathMessage: "Olthoi Noble is shattered by your assault!",
-		},
+		kind: "victim-notification",
 	});
 
 	assert.equal(handled, true);
@@ -675,10 +665,7 @@ test("combat killer notifications resolve attack casts", () => {
 	});
 
 	const handled = resolveSpellcastFromCombatFeedback(state, {
-		kind: "killer_notification",
-		data: {
-			deathMessage: "Olthoi Noble is shattered by your assault!",
-		},
+		kind: "killer-notification",
 	});
 
 	assert.equal(handled, true);
@@ -706,22 +693,52 @@ function beginActiveSpellcast(
 	};
 }
 
-function sampleSelfEntity(): ScriptSelfView {
+function sampleDetail(overrides: Partial<EntitySummary>): EntityDetail {
+	return {
+		summary: {
+			guid: 1 as Guid,
+			name: "Entity",
+			wcid: null,
+			category: "player",
+			isHostile: false,
+			isDead: false,
+			isVendor: false,
+			position: makePosition(0, 0, 0),
+			distanceToSelf: 0,
+			healthFraction: 1,
+			stackCount: null,
+			container: null,
+			wielder: null,
+			...overrides,
+		},
+		facts: null,
+		properties: null,
+		creatureProfile: null,
+		weaponProfile: null,
+		armorProfile: null,
+	};
+}
+
+function sampleSelfEntity(): SelfView {
 	return {
 		guid: 1 as Guid,
 		name: "Self",
 		position: makePosition(0, 0, 0),
+		heading: 0,
 		health: 100,
 		healthMax: 100,
 		stamina: 100,
 		staminaMax: 100,
 		mana: 100,
 		manaMax: 100,
-		encumbrance: 0,
-		capacity: 0,
-		busyOperation: "none",
-		heading: 0,
-		combatMode: 0 as unknown as CombatMode,
+		pyreals: 0,
+		burden: 0,
+		combatMode: "peace",
+		busy: null,
+		confirmation: null,
+		spellCastTarget: null,
+		navigation: null,
+		serverTime: 0,
 	};
 }
 
@@ -748,7 +765,7 @@ function sampleAttackRay(): AttackRaySnapshot {
 
 function makePosition(x: number, y: number, z: number): WorldPosition {
 	return {
-		landblockId: 1 as Guid,
+		landblock_id: 1 as Guid,
 		coords: { x, y, z },
 		rotation: { w: 1, x: 0, y: 0, z: 0 },
 	};

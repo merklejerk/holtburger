@@ -92,6 +92,8 @@ import type {
 	ClientPreciseJumpEvaluation,
 	ClientPreciseJumpTransactionFeedback,
 	ClientEntitySelectionQueryResult,
+	ClientApiState,
+	ClientApiHudEvent,
 } from "../../client/session/host-contract";
 
 /** Bulk content commands sharing one connection-wide admission budget. */
@@ -235,6 +237,9 @@ const CLIENT_HOST_COMMAND_NAMES = [
 	"cancel_client_precise_jump",
 	"acknowledge_client_world_reveal",
 	"stop_client_camera",
+	"report_client_selected_entity",
+	"set_client_automation_paused",
+	"submit_client_api_screenshot",
 	"logout_client",
 	"disconnect_client",
 ] as const;
@@ -358,6 +363,8 @@ const CLIENT_HOST_EVENT_NAMES = [
 	"client-presentation-tick",
 	"client-presentation-discontinuity",
 	"client-exit-requested",
+	"client-api-state",
+	"client-api-hud",
 ] as const;
 
 /** One event emitted by the app-local host boundary. */
@@ -496,6 +503,8 @@ export interface HostEventPayloadMap {
 	"client-presentation-tick": ClientPresentationTick;
 	"client-presentation-discontinuity": ClientPresentationDiscontinuity;
 	"client-exit-requested": ClientExitRequested;
+	"client-api-state": ClientApiState;
+	"client-api-hud": ClientApiHudEvent;
 }
 
 /** Request values are validated by the host command handlers and remain opaque to the shell. */

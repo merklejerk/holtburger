@@ -46,3 +46,25 @@ pub fn scene_direction_to_ac(direction: [f32; 3]) -> Result<Vector3> {
     );
     Ok(Vector3::new(direction[0], -direction[2], direction[1]))
 }
+
+/// Converts an AC `WorldPosition` into canonical scene coordinates `[x, y, z]` and its
+/// renderer portal scope key (`"outdoor"` for outdoor cells, `"0x{cell:08x}"` for interiors).
+pub fn world_position_to_scene_point(position: &WorldPosition) -> Result<([f32; 3], String)> {
+    let coords = position.coords;
+    ensure!(
+        coords.x.is_finite() && coords.y.is_finite() && coords.z.is_finite(),
+        "world position coordinates must be finite"
+    );
+    let block_x = ((position.landblock_id.0 >> 24) & 0xFF) as f32;
+    let block_y = ((position.landblock_id.0 >> 16) & 0xFF) as f32;
+    let scene_x = block_x * METERS_PER_LANDBLOCK + coords.x;
+    let scene_y = coords.z;
+    let scene_z = -(block_y * METERS_PER_LANDBLOCK + coords.y);
+    let cell_index = position.landblock_id.0 & 0xFFFF;
+    let scope_key = if cell_index >= 0x0100 {
+        format!("0x{:08x}", position.landblock_id.0)
+    } else {
+        "outdoor".to_string()
+    };
+    Ok(([scene_x, scene_y, scene_z], scope_key))
+}

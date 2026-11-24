@@ -16,6 +16,7 @@ import {
 	type Renderer,
 	type RendererFrameDiagnosticsSnapshot,
 	type WorldIndicatorInput,
+	type WorldOverlayBatchInput,
 } from "../renderer/renderer";
 import type { EntityOverlayFrame } from "../renderer/overlays/entity-overlay-policy";
 import type { TransformGizmoVisual } from "../renderer/overlays/transform-gizmo-contract";
@@ -666,6 +667,10 @@ export class GamePresentationRuntime {
 
 	setWorldIndicator(indicator: WorldIndicatorInput | null): void {
 		this.#framePresentation.setWorldIndicator(indicator);
+	}
+
+	setWorldOverlays(overlays: WorldOverlayBatchInput | null): void {
+		this.#framePresentation.setWorldOverlays(overlays);
 	}
 
 	setTransformGizmo(gizmo: TransformGizmoVisual | null): void {

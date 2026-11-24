@@ -42,6 +42,7 @@ pub use holtburger_world::WorldEvent;
 
 /// Caller intent for a spellbook cast; normal casting resolves spell semantics.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum SpellCastAim {
     /// Selection captured at submission; self and naturally untargeted spells ignore it.
@@ -50,7 +51,8 @@ pub enum SpellCastAim {
     Untargeted,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum ChatChannelKind {
     Fellowship,
@@ -78,6 +80,7 @@ pub enum ChatChannelKind {
 
 /// Sendable channel destinations; notifications and unknown receive IDs cannot be submitted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum ChatChannelDestination {
     Fellowship,
@@ -96,7 +99,8 @@ pub enum ChatChannelDestination {
 }
 
 /// Authoritative speaker category derived from the protocol sender GUID when available.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum ChatSpeakerKind {
     Player,
@@ -106,6 +110,7 @@ pub enum ChatSpeakerKind {
 
 /// Address carried by a tell intent; NPC identity must survive selection changes and replies.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum ChatTellTarget {
     /// Player names support long-distance communication through the Tell action.
@@ -522,7 +527,8 @@ pub enum ClientLifecycleState {
 }
 
 /// Replacement activation causes proven by the protocol/retail trace.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum ClientWorldActivationCause {
     InitialEntry,
@@ -530,7 +536,8 @@ pub enum ClientWorldActivationCause {
 }
 
 /// Existing-character identity needed by the first-cut selection screen.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct ClientCharacterSummary {
     /// Server-assigned character identity used for world entry.
@@ -754,7 +761,8 @@ pub struct ClientCombatEngagement {
 }
 
 /// Coarse lifecycle exposed to presentation without leaking reducer bookkeeping.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum ClientCombatControlState {
     Idle,
@@ -1024,6 +1032,8 @@ impl ActiveCharacterConfirmation {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
 pub enum BusyOperationKind {
     Use,
     UseWithTarget,
@@ -1458,6 +1468,10 @@ pub enum ClientViewEvent {
     },
     /// Completed shared transport observation.
     ConnectionUpdated(crate::client::connection::ConnectionSample),
+    /// Terminal completion for a core-owned local steering goal.
+    LocalNavigationFinished(crate::client::steering::LocalNavigationFinished),
+    /// Runtime automation pause state changed by the user.
+    AutomationPausedChanged(bool),
 }
 
 #[derive(Debug, Clone)]
@@ -1593,6 +1607,12 @@ pub enum ClientCommand {
         unrestricted: bool,
     },
     DriveSelf(PlayerDriveIntent),
+    /// Begins core-owned local steering (MoveTo, Approach, Follow, FaceHeading, FaceEntity).
+    StartLocalSteering(crate::client::steering::LocalSteeringRequest),
+    /// Cancels any active core-owned local steering operation.
+    StopLocalSteering,
+    /// Pauses or resumes `ControlSource::Automation` commands; pausing cancels active automation.
+    SetAutomationPaused(bool),
     /// Applies one ordered, non-coalescible character-motion lifecycle edge.
     ControlCharacter(SequencedCharacterMotionEvent),
     /// Replaces any queued precise-jump hover sample for the same active camera generation.

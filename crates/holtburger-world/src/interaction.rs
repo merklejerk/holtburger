@@ -53,6 +53,15 @@ pub enum EntityUseRejection {
     Object { name: String },
 }
 
+impl std::fmt::Display for EntityUseRejection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Door { name } => write!(f, "You can't open or close this {name} that way"),
+            Self::Object { name } => write!(f, "The {name} cannot be used"),
+        }
+    }
+}
+
 /// Reject explicit NO useability; absent objects and unspecified useability supply no rejection.
 pub fn entity_use_rejection(
     world: &impl WorldContextExt,

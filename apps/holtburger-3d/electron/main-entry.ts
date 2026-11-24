@@ -16,6 +16,7 @@ import {
 	parseExplorerLaunchArguments,
 	type ClientLaunchConfiguration,
 	type ExplorerLaunchConfiguration,
+	type LiveApiCliOverride,
 } from "./client-launch.js";
 import type { HostContentSelection } from "./content-startup.js";
 import { SidecarHostClient } from "./host-protocol.js";
@@ -45,6 +46,7 @@ export function entryArguments(): {
 	ignorePersistedConfig: boolean;
 	ignoreWorldMapCache: boolean;
 	settingsFile: string | null;
+	liveApiOverride: LiveApiCliOverride | null;
 	contentPath: string | null;
 	noContentSearch: boolean;
 	clearContent: boolean;
@@ -70,6 +72,7 @@ export function entryArguments(): {
 	let ignorePersistedConfig: boolean;
 	let ignoreWorldMapCache: boolean;
 	let settingsFile: string | null;
+	let liveApiOverride: LiveApiCliOverride | null = null;
 	let rendererArguments: readonly string[];
 	if (mode === "client") {
 		const explorerArgument = entryArgs.find(isExplorerOnlyArgument);
@@ -89,6 +92,7 @@ export function entryArguments(): {
 		ignorePersistedConfig = parsed.ignorePersistedConfig;
 		ignoreWorldMapCache = parsed.ignoreWorldMapCache;
 		settingsFile = parsed.settingsFile;
+		liveApiOverride = parsed.liveApiOverride;
 		rendererArguments = parsed.rendererArguments;
 	} else {
 		const clientArgument = entryArgs.find(isClientOnlyArgument);
@@ -133,6 +137,7 @@ export function entryArguments(): {
 		ignorePersistedConfig,
 		ignoreWorldMapCache,
 		settingsFile,
+		liveApiOverride,
 		contentPath: extracted.contentPath,
 		noContentSearch: extracted.noContentSearch,
 		clearContent: extracted.clearContent,

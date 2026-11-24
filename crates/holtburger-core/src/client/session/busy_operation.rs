@@ -128,13 +128,17 @@ impl ClientRuntime {
                     ),
                 },
             );
-            self.publish_busy_completion(
-                pending.operation.kind(),
-                BusyOperationResult::Completed {
+            let busy_result = match (resolved_error == WeenieError::None)
+                .then(|| self.pending_lock_rejection_message())
+                .flatten()
+            {
+                Some(message) => BusyOperationResult::Failed { message },
+                None => BusyOperationResult::Completed {
                     error: resolved_error,
                     parameter,
                 },
-            );
+            };
+            self.publish_busy_completion(pending.operation.kind(), busy_result);
             self.complete_lock_use(resolved_error);
         }
         if error != WeenieError::None {

@@ -125,7 +125,10 @@ impl ClientRuntime {
         }
     }
 
-    pub(in crate::client) fn query_death_locations(&self, query: DeathLocationQuery) {
+    pub(in crate::client) fn evaluate_death_locations_readonly(
+        &self,
+        query: DeathLocationQuery,
+    ) -> DeathLocationResult {
         let locations = match query {
             DeathLocationQuery::LastOutdoor => DeathLocations::LastOutdoor {
                 position: self
@@ -144,12 +147,17 @@ impl ClientRuntime {
                     .collect(),
             },
         };
+        DeathLocationResult {
+            character: self.world.player.guid,
+            locations,
+        }
+    }
+
+    pub(in crate::client) fn query_death_locations(&self, query: DeathLocationQuery) {
+        let result = self.evaluate_death_locations_readonly(query);
         let _ = self
             .client_view_event_tx
-            .send(ClientViewEvent::DeathLocations(DeathLocationResult {
-                character: self.world.player.guid,
-                locations,
-            }));
+            .send(ClientViewEvent::DeathLocations(result));
     }
 }
 

@@ -1237,6 +1237,34 @@ impl Default for CollisionScene {
     }
 }
 
+/// Read-only portal connection projected into its owning landblock's coordinate frame.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CellPortalTopology {
+    /// Target indoor cell GUID within the same landblock, or `None` when leading outdoors.
+    pub other_cell_id: Option<Guid>,
+    /// True when this portal connects to the outdoor landblock surface.
+    pub is_outdoor: bool,
+    /// Centroid of the doorway polygon in landblock-local coordinates.
+    pub center: Vector3,
+    /// Ordered doorway polygon corners in landblock-local coordinates.
+    pub vertices: Vec<Vector3>,
+}
+
+/// Read-only indoor cell connectivity and visibility projected from a resident collision landblock.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CellTopology {
+    /// Full EnvCell GUID (`(landblock & 0xFFFF_0000) | selector`).
+    pub cell_id: Guid,
+    /// Authored cell origin in landblock-local coordinates.
+    pub origin: Vector3,
+    /// Whether outdoor visibility contributes to this cell.
+    pub seen_outside: bool,
+    /// Directed potentially visible indoor cells in the same landblock.
+    pub visible_cells: Vec<Guid>,
+    /// Doorway portals connecting this cell to adjacent cells or the outdoor surface.
+    pub portals: Vec<CellPortalTopology>,
+}
+
 impl CollisionScene {
     /// Creates an empty scene.
     pub fn new() -> Self {
@@ -1365,6 +1393,70 @@ impl CollisionScene {
     /// Read the lossless source for queries that do not consume prepared support geometry.
     fn landblock_asset(&self, owner: Guid) -> Option<&LandblockCollisionAsset> {
         self.landblocks.get(&owner).map(|product| &product.asset)
+    }
+
+    /// Projects resident indoor cell connectivity and landblock-space portal geometry for one landblock.
+    pub fn resident_cell_topology(&self, landblock: Guid) -> Option<Vec<CellTopology>> {
+        let owner = landblock_key(landblock);
+        let prefix = owner.0 & 0xffff_0000;
+        let asset = self.landblock_asset(owner)?;
+        let cells = asset
+            .static_geometry
+            .cell_volumes()
+            .iter()
+            .map(|volume| {
+                let cell_id = Guid(prefix | u32::from(volume.cell_selector));
+                let visible_cells = volume
+                    .visibility
+                    .visible_cell_selectors
+                    .iter()
+                    .map(|&sel| Guid(prefix | u32::from(sel)))
+                    .collect();
+                let portals = volume
+                    .portals
+                    .iter()
+                    .map(|portal| {
+                        let (other_cell_id, is_outdoor) = match portal.target {
+                            holtburger_content::CellCollisionPortalTarget::Outdoor => (None, true),
+                            holtburger_content::CellCollisionPortalTarget::EnvCell(sel) => {
+                                (Some(Guid(prefix | u32::from(sel))), false)
+                            }
+                        };
+                        let vertices: Vec<Vector3> = portal
+                            .aperture_vertices
+                            .iter()
+                            .map(|&v| {
+                                volume.placement.origin
+                                    + volume.placement.orientation.rotate_vector(v)
+                            })
+                            .collect();
+                        let center = if vertices.is_empty() {
+                            volume.placement.origin
+                        } else {
+                            let sum = vertices
+                                .iter()
+                                .copied()
+                                .fold(Vector3::zero(), |acc, v| acc + v);
+                            sum * (1.0 / vertices.len() as f32)
+                        };
+                        CellPortalTopology {
+                            other_cell_id,
+                            is_outdoor,
+                            center,
+                            vertices,
+                        }
+                    })
+                    .collect();
+                CellTopology {
+                    cell_id,
+                    origin: volume.placement.origin,
+                    seen_outside: volume.visibility.seen_outside,
+                    visible_cells,
+                    portals,
+                }
+            })
+            .collect();
+        Some(cells)
     }
 
     /// Authored retention visibility for an exact resident EnvCell; absence means unavailable.

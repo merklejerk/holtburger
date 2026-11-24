@@ -1,6 +1,23 @@
 import { z } from "zod";
 
-/** Process-wide graphics preferences, independent of servers and characters. */
+/** Opt-in localhost Live API configuration persisted in global AppSettings. */
+const liveApiSettingsSchema = z
+	.object({
+		/** Disabled by default; enabling binds strictly to 127.0.0.1 and rejects browser origins. */
+		enabled: z.boolean(),
+		/** Optional fixed localhost TCP port; null selects an OS-assigned ephemeral port. */
+		port: z.number().int().min(1).max(65_535).nullable(),
+	})
+	.strict();
+export type LiveApiSettings = z.infer<typeof liveApiSettingsSchema>;
+
+/** Safe default: disabled, ephemeral port when enabled. */
+export const DEFAULT_LIVE_API_SETTINGS: LiveApiSettings = {
+	enabled: false,
+	port: null,
+};
+
+/** Process-wide application preferences, independent of servers and characters. */
 export const appSettingsSchema = z
 	.object({
 		/** Automatic delegates backend selection to Chromium. */
@@ -9,6 +26,8 @@ export const appSettingsSchema = z
 		vsync: z.boolean(),
 		/** Use the GPU to composite browser UI surfaces; independent of WebGL rendering. */
 		gpuCompositing: z.boolean(),
+		/** Opt-in localhost Live API settings; defaults to disabled when absent from older files. */
+		liveApi: liveApiSettingsSchema.default(DEFAULT_LIVE_API_SETTINGS),
 	})
 	.strict();
 export type AppSettings = z.infer<typeof appSettingsSchema>;

@@ -104,27 +104,28 @@ pub enum ItemUseCompletion {
 }
 
 impl ClientRuntime {
-    pub(in crate::client) fn query_item_use_target(&self, query: ItemUseTargetQuery) {
+    pub(in crate::client) fn evaluate_item_use_target_readonly(
+        &self,
+        source: Guid,
+        target: Guid,
+    ) -> (bool, Option<f64>) {
         let eligible = matches!(self.conn.state, ClientState::InWorld)
-            && evaluate_item_use(
-                &self.world,
-                &ItemUseIntent::Targeted {
-                    source: query.source,
-                    target: query.target,
-                },
-            )
-            .is_ok();
+            && evaluate_item_use(&self.world, &ItemUseIntent::Targeted { source, target }).is_ok();
+        let lockpick_success_percent = eligible
+            .then(|| self.world.estimate_lockpick_success_percent(source, target))
+            .flatten();
+        (eligible, lockpick_success_percent)
+    }
+
+    pub(in crate::client) fn query_item_use_target(&self, query: ItemUseTargetQuery) {
+        let (eligible, lockpick_success_percent) =
+            self.evaluate_item_use_target_readonly(query.source, query.target);
         let _ = self
             .client_view_event_tx
             .send(ClientViewEvent::ItemUseTargetResult(ItemUseTargetResult {
                 sequence: query.sequence,
                 eligible,
-                lockpick_success_percent: eligible
-                    .then(|| {
-                        self.world
-                            .estimate_lockpick_success_percent(query.source, query.target)
-                    })
-                    .flatten(),
+                lockpick_success_percent,
             }));
     }
 

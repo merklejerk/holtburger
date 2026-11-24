@@ -5,7 +5,6 @@ use holtburger_protocol::messages::{CharacterCreateResponseData, CharacterEntry}
 
 use crate::components::text_input::SingleLineTextInput;
 use crate::pages::selection::creation::{CharacterCreationState, format_creation_errors};
-use crate::state::{EventContext, TickContext};
 use crate::types::{AppAction, AppUiAction, ChatMessageTags, UpdateResult};
 use holtburger_core::errors::format_action_result_message;
 
@@ -69,14 +68,6 @@ impl SelectionState {
     }
 
     pub fn handle_view_event(&mut self, event: ClientViewEvent) -> UpdateResult {
-        self.handle_view_event_with_context(event, &EventContext::default())
-    }
-
-    pub fn handle_view_event_with_context(
-        &mut self,
-        event: ClientViewEvent,
-        _ctx: &EventContext,
-    ) -> UpdateResult {
         match event {
             ClientViewEvent::ActionResult { reason, .. } => {
                 let message = format_action_result_message(&reason);
@@ -265,11 +256,7 @@ impl SelectionState {
         }
     }
 
-    pub fn handle_tick(&mut self, elapsed: f64) -> UpdateResult {
-        self.handle_tick_with_context(elapsed, &TickContext::default())
-    }
-
-    pub fn handle_tick_with_context(&mut self, _elapsed: f64, _ctx: &TickContext) -> UpdateResult {
+    pub fn handle_tick(&mut self, _elapsed: f64) -> UpdateResult {
         UpdateResult::default()
     }
 }

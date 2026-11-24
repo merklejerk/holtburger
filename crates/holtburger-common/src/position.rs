@@ -51,10 +51,12 @@ fn outdoor_cell_id_at(coords: Vector3) -> u32 {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Default)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct WorldPosition {
     pub landblock_id: Guid,
     pub coords: Vector3,
+    #[serde(default = "Quaternion::identity")]
     pub rotation: Quaternion,
 }
 
@@ -728,5 +730,16 @@ mod tests {
             "Heading was {}",
             heading
         );
+    }
+
+    #[test]
+    fn world_position_json_defaults_omitted_rotation_to_identity() {
+        let pos: WorldPosition = serde_json::from_str(
+            r#"{"landblockId": 32834085, "coords": {"x": 50.0, "y": -140.0, "z": 0.0}}"#,
+        )
+        .unwrap();
+        assert_eq!(pos.landblock_id, Guid(32834085));
+        assert_eq!(pos.coords, Vector3::new(50.0, -140.0, 0.0));
+        assert_eq!(pos.rotation, Quaternion::identity());
     }
 }

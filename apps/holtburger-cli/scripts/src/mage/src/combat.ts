@@ -22,6 +22,7 @@ import { isAttackCandidate, ratio } from "./runtime-helpers";
 import { isSkillUsable } from "./skills";
 import type {
 	AttackTarget,
+	FellowshipMember,
 	MageData,
 	MageRuntimeState,
 	MageSpellRecord,
@@ -30,20 +31,21 @@ import type {
 } from "./types";
 
 export function collectMonsterCandidates(
-	self: ScriptSelfView,
-	partyLeader: ScriptPartyMemberView | null,
+	self: SelfView,
+	partyLeader: FellowshipMember | null,
 	maxAttackRange: number,
 	maxAggroDistance: number,
 ): MonsterCandidate[] {
 	const searchRange = Math.min(maxAggroDistance, maxAttackRange);
-	const monsters = HB.nearbyEntities(searchRange, ["monster"]).filter(
-		isAttackCandidate,
-	);
+	const monsters = HB.entities({
+		maxDistance: searchRange,
+		category: "monster",
+	}).filter(isAttackCandidate);
 
 	return monsters
 		.map((monster) => ({
 			guid: monster.guid,
-			weenieId: monster.weenieId,
+			weenieId: monster.wcid,
 			position: monster.position,
 			distanceToSelf: HB.distance(self.guid, monster.guid),
 			distanceToParty: partyLeader
@@ -61,7 +63,7 @@ export function collectMonsterCandidates(
 
 export function maybeRestoreMana(
 	state: MageRuntimeState,
-	self: ScriptSelfView,
+	self: SelfView,
 	spells: MageSpellRecord[],
 ): boolean {
 	if (ratio(self.mana, self.manaMax) >= SELF_MANA_THRESHOLD) {
@@ -91,7 +93,7 @@ export function maybeRestoreMana(
 
 export function maybeRestoreStamina(
 	state: MageRuntimeState,
-	self: ScriptSelfView,
+	self: SelfView,
 	spells: MageSpellRecord[],
 ): boolean {
 	if (ratio(self.stamina, self.staminaMax) >= SELF_STAMINA_THRESHOLD) {
@@ -119,7 +121,7 @@ export function maybeRestoreStamina(
 
 export function maybeRestoreHealth(
 	state: MageRuntimeState,
-	self: ScriptSelfView,
+	self: SelfView,
 	spells: MageSpellRecord[],
 	skills: Map<string, SkillSnapshot>,
 ): boolean {
@@ -178,7 +180,7 @@ export function maybeRestoreHealth(
 
 export function maybeHealPartyMember(
 	state: MageRuntimeState,
-	self: ScriptSelfView,
+	self: SelfView,
 	spells: MageSpellRecord[],
 	skills: Map<string, SkillSnapshot>,
 ): boolean {
@@ -222,7 +224,7 @@ export function maybeHealPartyMember(
 
 export function maybeRevitalizePartyMember(
 	state: MageRuntimeState,
-	self: ScriptSelfView,
+	self: SelfView,
 	spells: MageSpellRecord[],
 ): boolean {
 	const revitalizationTargetGuid = choosePartyRevitalizeTarget(self);
@@ -254,7 +256,7 @@ export function maybeRevitalizePartyMember(
 
 export function maybeCastAttackSpell(
 	state: MageRuntimeState,
-	self: ScriptSelfView,
+	self: SelfView,
 	data: MageData,
 	spells: MageSpellRecord[],
 	skills: Map<string, SkillSnapshot>,

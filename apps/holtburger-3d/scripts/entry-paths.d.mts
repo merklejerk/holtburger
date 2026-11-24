@@ -39,6 +39,8 @@ export type ClientLaunchArgumentName =
 	| "password"
 	| "melee-max-chase-distance"
 	| "launcher-view"
+	| "api"
+	| "api-port"
 	| "ignore-config"
 	| "ignore-world-map-cache"
 	| "settings-file"

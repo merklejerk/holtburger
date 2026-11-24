@@ -1,4 +1,5 @@
 import type { ClientHostAppraisalTuningConfig } from "../src/client/settings/tuning-contract.js";
+import type { LiveApiSettings } from "../src/app/desktop/app-settings-contract.js";
 import {
 	isClientOnlyLaunchArgument,
 	isExplorerOnlyLaunchArgument,
@@ -6,6 +7,30 @@ import {
 	parseExplorerLaunchArgument,
 } from "../scripts/entry-paths.mjs";
 import { resolve } from "node:path";
+
+/** Resolved localhost Live API launch configuration forwarded to the Rust host sidecar. */
+export interface LiveApiLaunchConfiguration {
+	/** Localhost TCP port (`0` requests an OS-assigned ephemeral port). */
+	readonly port: number;
+}
+
+/** Explicit CLI Live API overrides (`--api`, `--api-port`), applied over AppSettings. */
+export interface LiveApiCliOverride {
+	readonly enabled: true;
+	readonly port?: number;
+}
+
+/** Resolves effective sidecar Live API startup from saved AppSettings and optional CLI overrides. */
+export function resolveLiveApiLaunch(
+	settings: LiveApiSettings,
+	override: LiveApiCliOverride | null,
+): LiveApiLaunchConfiguration | undefined {
+	const enabled = override !== null ? override.enabled : settings.enabled;
+	if (!enabled) return undefined;
+	return {
+		port: override?.port ?? settings.port ?? 0,
+	};
+}
 
 /** Session content, credentials, and endpoint resolved by Electron main. */
 export interface ClientLaunchConfiguration {
@@ -19,6 +44,8 @@ export interface ClientLaunchConfiguration {
 	meleeMaxChaseDistance?: number;
 	/** Shared appraisal cooldown and response-timeout bounds forwarded to the native host at startup. */
 	appraisalTuning?: ClientHostAppraisalTuningConfig;
+	/** Opt-in localhost Live API configuration; omitted when disabled. */
+	liveApi?: LiveApiLaunchConfiguration;
 }
 
 /** Offline Explorer session configuration resolved by Electron main or the Explorer Launcher. */
@@ -61,6 +88,8 @@ export interface ParsedClientLaunchArguments {
 	readonly ignoreWorldMapCache: boolean;
 	/** Resolved path for the collection-format settings file. */
 	readonly settingsFile: string | null;
+	/** Optional CLI override enabling/configuring the localhost Live API for this process. */
+	readonly liveApiOverride: LiveApiCliOverride | null;
 	/** Arguments intentionally left for the renderer entry URL (for example --query). */
 	readonly rendererArguments: readonly string[];
 }
@@ -210,6 +239,8 @@ export function parseClientLaunchArguments(
 	let noUpdates = false;
 	let ignoreWorldMapCache = false;
 	let settingsFile: string | null = null;
+	let apiEnabled = false;
+	let apiPort: number | undefined;
 	const rendererArguments: string[] = [];
 	const seen = new Set<string>();
 
@@ -251,6 +282,12 @@ export function parseClientLaunchArguments(
 			if (parsed.value !== undefined)
 				throw new Error("--ignore-world-map-cache does not accept a value");
 			ignoreWorldMapCache = true;
+			continue;
+		}
+		if (name === "api") {
+			if (parsed.value !== undefined)
+				throw new Error("--api does not accept a value");
+			apiEnabled = true;
 			continue;
 		}
 
@@ -297,6 +334,10 @@ export function parseClientLaunchArguments(
 				}
 				initialLauncherView = value;
 				break;
+			case "api-port":
+				apiEnabled = true;
+				apiPort = parsePort(value, "--api-port");
+				break;
 		}
 	}
 
@@ -322,6 +363,12 @@ export function parseClientLaunchArguments(
 		host = resolved.host;
 		port = resolved.port;
 	}
+	const liveApiOverride: LiveApiCliOverride | null = apiEnabled
+		? {
+				enabled: true,
+				...(apiPort === undefined ? {} : { port: apiPort }),
+			}
+		: null;
 	return {
 		startup:
 			account === undefined
@@ -342,6 +389,7 @@ export function parseClientLaunchArguments(
 		noUpdates,
 		ignoreWorldMapCache,
 		settingsFile,
+		liveApiOverride,
 		rendererArguments,
 	};
 }

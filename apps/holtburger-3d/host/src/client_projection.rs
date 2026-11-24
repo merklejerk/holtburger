@@ -1081,6 +1081,8 @@ pub enum ClientHostEvent {
     CameraStarted(ClientCameraStartReceipt),
     PresentationDiscontinuity(ClientPresentationDiscontinuity),
     ExitRequested(ClientExitRequested),
+    ApiState(crate::client_api::ClientApiStateWire),
+    ApiHud(crate::client_api::ClientApiHudEventWire),
 }
 
 /// Wire-safe reason for a selection query that cannot mutate frontend selection.

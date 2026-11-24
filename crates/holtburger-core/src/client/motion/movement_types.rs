@@ -1,6 +1,5 @@
-use holtburger_common::Vector3;
-use holtburger_common::position::WorldPosition;
 use holtburger_protocol::messages::movement::MotionStance;
+use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
 /// Core-owned simulation choice selected explicitly at client composition.
@@ -41,37 +40,36 @@ impl MovementPacketMetadata {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
 pub enum Gait {
     #[default]
     Walk,
     Run,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct AutonomousDriveIntent {
-    pub desired_world_delta: Vector3,
-    pub desired_heading: Option<f32>,
-    pub target_hint: Option<WorldPosition>,
-    pub gait: Gait,
-    pub force_grounded: bool,
-}
-
 /// Signed character motion along the facing axis.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
 pub enum LongitudinalMotion {
     Forward,
     Backward,
 }
 
 /// Signed character motion perpendicular to the facing axis.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
 pub enum LateralMotion {
     Left,
     Right,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
 pub enum Turn {
     Left,
     Right,
@@ -189,32 +187,6 @@ impl CharacterDriveBuilder {
     }
 }
 
-/// Ordered commands from the frontend's client-directed movement controller.
-/// Acquisition is explicit; later updates and cleanup only apply while that source owns control.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum ClientDirectedCommand {
-    /// Acquire and begin displacement immediately.
-    Acquire(AutonomousDriveIntent),
-    /// Acquire with an initial facing correction before the first displacement update.
-    AcquireFacing { heading: f32 },
-    /// Supply displacement for one simulation tick without reacquiring control.
-    Update(AutonomousDriveIntent),
-    /// Stop displacement at the committed position and retain controller ownership.
-    Settle,
-    /// Finish the controller; cannot stop a different movement source.
-    Release,
-}
-
-impl ClientDirectedCommand {
-    /// Whether this command installs a new client-directed movement owner.
-    pub const fn acquires_control(self) -> bool {
-        match self {
-            Self::Acquire(_) | Self::AcquireFacing { .. } => true,
-            Self::Update(_) | Self::Settle | Self::Release => false,
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum PlayerDriveIntent {
     /// Explicitly acquires manual control with the supplied held drive.
@@ -227,8 +199,6 @@ pub enum PlayerDriveIntent {
         state: CharacterDrive,
         duration: Duration,
     },
-    /// Scoped lifecycle of client-generated steering.
-    ClientDirected(ClientDirectedCommand),
     /// Add a signed yaw displacement at the movement authority's current facing.
     RotateFacing {
         /// Accumulated radians; positive follows increasing clockwise AC heading.
@@ -250,7 +220,6 @@ impl PlayerDriveIntent {
             | Self::Stop
             | Self::SnapFacing { .. }
             | Self::RotateFacing { .. } => true,
-            Self::ClientDirected(command) => command.acquires_control(),
             Self::SynchronizeHeld(_) | Self::ReleaseManual => false,
         }
     }
@@ -260,10 +229,7 @@ impl PlayerDriveIntent {
         match self {
             Self::ManualHeld(state) | Self::ManualPulse { state, .. } => !state.is_stationary(),
             Self::SnapFacing { .. } | Self::RotateFacing { .. } => true,
-            Self::SynchronizeHeld(_)
-            | Self::ReleaseManual
-            | Self::ClientDirected(_)
-            | Self::Stop => false,
+            Self::SynchronizeHeld(_) | Self::ReleaseManual | Self::Stop => false,
         }
     }
 }
@@ -271,8 +237,6 @@ impl PlayerDriveIntent {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use holtburger_common::position::WorldPosition;
-    use holtburger_common::{Guid, Quaternion};
 
     #[test]
     fn metadata_can_override_motion_style_without_contact() {
@@ -403,33 +367,5 @@ mod tests {
         assert!(!PlayerDriveIntent::SynchronizeHeld(moving).interrupts_combat());
         assert!(!PlayerDriveIntent::ReleaseManual.interrupts_combat());
         assert!(!PlayerDriveIntent::Stop.interrupts_combat());
-    }
-
-    #[test]
-    fn autonomous_drive_intent_preserves_requested_fields() {
-        let intent = AutonomousDriveIntent {
-            desired_world_delta: Vector3::new(1.0, 2.0, 3.0),
-            desired_heading: Some(1.25),
-            target_hint: Some(WorldPosition {
-                landblock_id: Guid(0x1234_0100),
-                coords: Vector3::new(4.0, 5.0, 6.0),
-                rotation: Quaternion::identity(),
-            }),
-            gait: Gait::Run,
-            force_grounded: true,
-        };
-
-        assert_eq!(intent.desired_world_delta, Vector3::new(1.0, 2.0, 3.0));
-        assert_eq!(intent.desired_heading, Some(1.25));
-        assert_eq!(
-            intent.target_hint,
-            Some(WorldPosition {
-                landblock_id: Guid(0x1234_0100),
-                coords: Vector3::new(4.0, 5.0, 6.0),
-                rotation: Quaternion::identity(),
-            })
-        );
-        assert_eq!(intent.gait, Gait::Run);
-        assert!(intent.force_grounded);
     }
 }

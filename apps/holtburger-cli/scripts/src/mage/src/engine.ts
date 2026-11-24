@@ -13,13 +13,14 @@ import {
 	maybeRestoreMana,
 	maybeRestoreStamina,
 } from "./combat";
-import { partyLeaderMember } from "./party";
+import { currentFellowship, partyLeaderMember } from "./party";
 import {
 	clearNonMageInteraction,
 	followPartyLeader,
 	hasRecentMissedAttack,
 	healingKitUseBlocksPlanning,
 	interruptSpellcast,
+	isFollowingTarget,
 	observeSpellCastBusy,
 	resolveHealingKitUseFromTimeout,
 	resolveCombatTarget,
@@ -33,9 +34,9 @@ import { currentSkills, currentSpellbook } from "./skills";
 import type { AttackTarget, MageRuntimeState } from "./types";
 
 export function runMage(state: MageRuntimeState): void {
-	const self = HB.selfEntity();
+	const self = HB.self();
 	const data = state.data;
-	if (self == null || data == null) {
+	if (self == null || !self.guid || data == null) {
 		return;
 	}
 
@@ -47,11 +48,11 @@ export function runMage(state: MageRuntimeState): void {
 	const attackRange =
 		maxSpellRange([...warAttackSpells, ...voidAttackSpells]) ?? 0;
 
-	if (clearNonMageInteraction(state)) {
+	if (clearNonMageInteraction(state, self)) {
 		return;
 	}
 
-	const party = HB.party();
+	const party = currentFellowship();
 	const partyLeader = partyLeaderMember(party);
 	const separation = updatePartySeparation(
 		state.partySeparationLatched,
@@ -66,8 +67,9 @@ export function runMage(state: MageRuntimeState): void {
 				`follow override -> interrupting spellcast for leader ${partyLeader.guid}`,
 			);
 			interruptSpellcast(state, "follow_override");
-			if (self.busyOperation !== "none") {
-				HB.cancelInteraction();
+			if (self.busy != null) {
+				HB.stopCombat();
+				HB.stopMovement();
 			}
 		}
 
@@ -77,16 +79,17 @@ export function runMage(state: MageRuntimeState): void {
 
 	let bypassBusy = false;
 	if (spellcastBlocksPlanning(state)) {
-		if (self.busyOperation === "spell_cast") {
+		if (self.busy === "spell-cast") {
 			observeSpellCastBusy(state);
 		}
 
 		if (resolveSpellcastFromTimeout(state)) {
 			bypassBusy = true;
-			if (self.busyOperation !== "none") {
-				HB.cancelInteraction();
+			if (self.busy != null) {
+				HB.stopCombat();
+				HB.stopMovement();
 			}
-		} else if (self.busyOperation === "none") {
+		} else if (self.busy == null) {
 			resolveSpellcastFromIdle(state);
 			if (spellcastBlocksPlanning(state)) {
 				return;
@@ -102,7 +105,7 @@ export function runMage(state: MageRuntimeState): void {
 		}
 	}
 
-	if (self.busyOperation !== "none" && !bypassBusy) {
+	if (self.busy != null && !bypassBusy) {
 		return;
 	}
 
@@ -126,7 +129,6 @@ export function runMage(state: MageRuntimeState): void {
 		return;
 	}
 
-	const currentInteraction = HB.currentInteraction();
 	let target: AttackTarget | null = null;
 	const activeCombatTarget = resolveCombatTarget(
 		state,
@@ -138,7 +140,7 @@ export function runMage(state: MageRuntimeState): void {
 		target = {
 			guid: activeCombatTarget.guid,
 			reason: "combat-target",
-			weenieId: activeCombatTarget.weenieId,
+			weenieId: activeCombatTarget.wcid,
 		};
 		logMageInfo(`combat target resolved -> ${describeAttackTarget(target)}`);
 	} else {
@@ -175,9 +177,9 @@ export function runMage(state: MageRuntimeState): void {
 		}
 	}
 
-	if (target != null && currentInteraction?.kind === "Follow") {
+	if (target != null && isFollowingTarget(self)) {
 		logMageInfo(`follow -> combat-target ${target.guid}`);
-		HB.cancelInteraction();
+		HB.stopMovement();
 		return;
 	}
 

@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import {
 	appSettingsSchema,
+	DEFAULT_LIVE_API_SETTINGS,
 	type AppSettings,
 	type GraphicsBackendOption,
 } from "../src/app/desktop/app-settings-contract.js";
@@ -13,8 +14,18 @@ import { replaceLocalFile } from "./replace-local-file.js";
 /** Windows uses accelerated D3D11 presentation with display synchronization off. */
 function defaultAppSettings(platform: NodeJS.Platform): AppSettings {
 	return platform === "win32"
-		? { graphicsBackend: "d3d11", vsync: false, gpuCompositing: true }
-		: { graphicsBackend: "automatic", vsync: true, gpuCompositing: true };
+		? {
+				graphicsBackend: "d3d11",
+				vsync: false,
+				gpuCompositing: true,
+				liveApi: { ...DEFAULT_LIVE_API_SETTINGS },
+			}
+		: {
+				graphicsBackend: "automatic",
+				vsync: true,
+				gpuCompositing: true,
+				liveApi: { ...DEFAULT_LIVE_API_SETTINGS },
+			};
 }
 
 /** Native settings projections share the same restart decision. */
@@ -126,10 +137,16 @@ export class AppSettingsStore {
 		}
 	}
 	get settings(): AppSettings {
-		return { ...this.#settings };
+		return {
+			...this.#settings,
+			liveApi: { ...this.#settings.liveApi },
+		};
 	}
 	get defaults(): AppSettings {
-		return { ...this.#defaults };
+		return {
+			...this.#defaults,
+			liveApi: { ...this.#defaults.liveApi },
+		};
 	}
 	get diagnostic(): string | null {
 		return this.#diagnostic;

@@ -17,21 +17,22 @@ Prepared cells preserve the authored directed visibility lists and SeenOutside f
 containment geometry. Both reduced and full scene products supply those facts to shared world
 retention; the TUI does not infer entity lifetime from its display or geometric distance.
 
-Local approach/follow/scoot policy remains in `navigation.rs`, which submits bounded full-XYZ
-intent pulses toward known destinations. Core validates and commits positions, retains progress
-through known gaps, and reports accepted cell changes. The frontend does not assign a target
-cell to an unrelated position or snap Z at arrival. Local gravity/jumping/stairs are unsupported;
-remote prediction uses shared room-shell/terrain solving without furniture or peer collision.
+Local approach/follow/scoot actions delegate directly to `holtburger-core`'s shared local steering
+(`ClientCommand::StartLocalSteering` / `StopLocalSteering`) under core's Navigation composition.
+Core validates and commits positions, retains progress through known gaps, and reports accepted
+cell changes and terminal `LocalNavigationFinished` outcomes. Local gravity/jumping/stairs are
+unsupported; remote prediction uses shared room-shell/terrain solving without furniture or peer
+collision.
 
 Gameplay requests whose physical eligibility cannot be evaluated in this reduced composition
 are delegated to the server. This allows missile requests without inventing local ground contact;
 known target/range/ownership/busy checks remain shared. h3d retains its physical composition.
 
-- **`src/bin/tui.rs`**: The main executable entry point. Orchestrates terminal lifecycle, logging, and the core event loop.
-- **`src/lib.rs`**: The crate surface. Re-exports the top-level modules used by the binary and by tests: `components`, `navigation`, `pages`, `scripting`, `state`, `theme`, `types`, `update`, `utils`, and `version`.
+- **`src/bin/tui.rs`**: The main executable entry point. Orchestrates terminal lifecycle, logging, Live API mounting (`--api`, `--api-port`), and the core event loop.
+- **`src/lib.rs`**: The crate surface. Re-exports the top-level modules used by the binary and by tests: `components`, `live_api`, `pages`, `scripting`, `state`, `theme`, `types`, `update`, `utils`, and `version`.
 - **`src/state.rs`**: Core application state management. Defines `AppState`, `RenderContext`, and the top-level shell/event plumbing.
-- **`src/navigation.rs`**: Frontend navigation policy and helper logic shared across page reducers.
-- **`src/scripting.rs`**: The CLI scripting bridge. Owns `DeferredScriptSource`, builds `TuiScriptClientView`, and wires the frontend projection into `holtburger-scripting::ScriptHost`.
+- **`src/live_api.rs`**: Mounts `holtburger-live-api::LiveApiEngine` (always active for in-process V8 scripts, plus optional localhost REST/WS server when `--api` is passed) and implements `ClientUiHook` (`ui.selection`, `ui.print`) without stubbing `ClientHudHook`.
+- **`src/scripting/`**: Script directory resolution (`directories.rs`), `.js` basename discovery, and sidecar storage path lookup (`mod.rs`); script execution runs on a dedicated V8 OS thread inside `holtburger-scripting::ScriptHost` directly over `LiveApiEngine`.
 - **`src/update/`**: App-shell transition logic.
     - `app_event.rs`: Handles high-level `AppEvent` values such as ticks, keys, and network view events.
     - `app_action.rs`: Processes semantic `AppAction` intents such as `Log`, `SendCommands`, and `Sequence`.
@@ -73,9 +74,9 @@ The TUI operates in `src/bin/tui.rs` using a `loop` with `tokio::mpsc` and `cros
 
 ### Threading and Ownership
 
-The frontend shell and the core runtime are separate async tasks. `holtburger-core` owns authoritative world mutation and emits `ClientViewEvent`s, while the TUI task owns the local projection, controller state, render state, and script host that are derived from those events.
+The frontend shell and the core runtime are separate async tasks. `holtburger-core` owns authoritative world mutation, exposes read-only query closures via `ClientRuntimeHandle::read`, and emits `ClientViewEvent`s; the TUI task owns local view projection and render state.
 
-This matters for scripting and other frontend-side integrations: anything that needs on-demand reads should query the frontend-owned projection state, not `WorldState` directly. That keeps the core as the single authority and lets the frontend scripting bridge in `src/scripting.rs` live beside `GameState` without requiring shared mutable access to engine internals.
+In-process V8 scripts (`holtburger-scripting::ScriptHost`) run on a dedicated non-Tokio OS thread bound directly to `holtburger-live-api::LiveApiEngine`, executing synchronous `HB.query(...)` and `HB.command(...)` calls against core without blocking the TUI render loop or maintaining a duplicate TUI-side projection bridge.
 
 ### 1. Event Sources
 - **Ticks**: Fixed intervals (default 100ms) for UI animations and network stat updates.
@@ -127,7 +128,7 @@ Each entrypoint returns `UpdateResult`, which carries emitted `ClientCommand`s, 
 - `domains/inventory.rs`: inventory actions, salvage state, weapon-swap coordination, inventory/equipment projection, and inventory notification arming.
 - `domains/lifecycle.rs`: busy, confirmation, status, and other client lifecycle view events.
 - `domains/logopolis.rs`: captured-log state and log-driven UI behavior.
-- `domains/navigation.rs`: interaction/navigation actions, runtime-body projection, frontend navigation policy, navigation interrupts, and navigation tick coordination.
+- `domains/navigation.rs`: interaction/navigation actions, runtime-body projection, and delegation to core local steering (`StartLocalSteering` / `StopLocalSteering`).
 - `domains/object_interaction.rs`: context buffer maintenance plus inspect/read/debug style object interactions.
 - `domains/party.rs`: fellowship projection and party/allegiance actions.
 - `domains/player.rs`: player projection and player-timed maintenance such as enchantment decay.
@@ -143,17 +144,17 @@ Helpers that remain in `state.rs` are reducer internals or page-local support co
 - Drive gameplay behavior through `AppAction`.
 - Drive durable UI-mode changes through `AppUiAction`, wrapped into the normal action pipeline as `AppAction::UiAction`.
 - Project core/client state changes through `ClientViewEvent`.
-- Use `src/scripting.rs` and `domains/script.rs` for the frontend scripting bridge; compile script intents into `AppAction` values instead of reaching into `GameState` directly.
+- Use `src/live_api.rs`, `src/scripting/mod.rs`, and `domains/script.rs` to bridge `holtburger-live-api` and `holtburger-scripting`: gameplay mutations go directly through `LiveApiEngine` / `ClientRuntimeHandle`, while TUI-local selection and chat print requests flow through `TuiUiHook` into `AppAction`.
 - Use `handle_tick` for time-based maintenance and coordination, not ad hoc callers into controller helpers.
 - Treat raw key or mouse simulation as a fallback for widget-local behavior, not the primary integration path.
 
-For script or other external integration layers, compile external intents into `AppAction` values. UI intents should be wrapped as `AppAction::UiAction`. Feed emitted `ClientCommand`s back into the normal app shell flow.
+For TUI-local external UI intents (selection and chat output), route through `TuiUiHook` into `AppAction` values; gameplay queries and mutations go through the shared `LiveApiEngine`.
 
 ### Boundary Rules
 
 - `GameState` is a page host and reducer entry surface, not a bag of general-purpose mutators.
 - Reducer-private policy belongs under `src/pages/game/domains/`, organized by owning subsystem rather than by trigger shape.
-- The scripting runtime is frontend-owned and should remain behind the `AppAction`/`ScriptHost` boundary.
+- In-process scripting (`holtburger-scripting`) shares the same `LiveApiEngine` + `TuiUiHook` boundary as the opt-in `--api` localhost server.
 - Render and layout support remain presentation concerns; they should not become alternative state-transition pathways.
 
 If a new behavior cannot be described cleanly as input handling, an `AppAction`, an `AppUiAction`, a `ClientViewEvent`, or a tick update, revisit the design before adding another direct mutator path.

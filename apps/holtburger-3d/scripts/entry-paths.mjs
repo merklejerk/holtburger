@@ -26,6 +26,8 @@ const CLIENT_ONLY_ARGUMENT_NAMES = new Set([
 	"password",
 	"melee-max-chase-distance",
 	"launcher-view",
+	"api",
+	"api-port",
 ]);
 const EXPLORER_ONLY_ARGUMENT_NAMES = new Set(["weenie-catalog", "location"]);
 const CLIENT_LAUNCH_ARGUMENT_NAMES = new Set([
@@ -50,6 +52,7 @@ const CLIENT_BOOLEAN_ARGUMENT_NAMES = new Set([
 	"no-updates",
 	"ignore-config",
 	"ignore-world-map-cache",
+	"api",
 ]);
 
 function isKnownEntry(value) {

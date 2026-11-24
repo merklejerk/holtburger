@@ -9,9 +9,13 @@ use crate::client::character_motion::{
     CharacterMotionReadiness, CharacterMotionRejection, CharacterMotionSequence, JumpAttempt,
     SequencedCharacterMotionEvent,
 };
+use crate::client::control::ControlSource;
 use crate::client::movement_types::{
-    AutonomousDriveIntent, CharacterDrive, ClientDirectedCommand, ClientMovementPolicy,
-    LongitudinalMotion, MotionStyle, MovementPacketMetadata, PlayerDriveIntent, Turn,
+    CharacterDrive, ClientMovementPolicy, MotionStyle, MovementPacketMetadata, PlayerDriveIntent,
+};
+use crate::client::steering::{
+    LocalNavigationFinished, LocalNavigationOutcome, LocalSteeringRequest, LocalSteeringRuntime,
+    LocalSteeringStatus, LocalSteeringTick,
 };
 use crate::client::types::{
     ClientCharacterMotionFeedback, ClientCharacterMotionOutcome, ClientCharacterMotionRejection,
@@ -29,7 +33,7 @@ use holtburger_world::motion::{
     LocalMotionOutcome, MotionCommand, MotionContact, MotionOrder, SequenceTick,
     ServerDirectedMotionResolution, ServerDirectedMotionState, resolve_server_directed_motion,
 };
-use holtburger_world::spatial::{ContactState, LocalDriveControl, LocalDriveGait};
+use holtburger_world::spatial::ContactState;
 use holtburger_world::{SpatialBodyId, WorldEvent, WorldState};
 use std::time::{Duration, Instant};
 
@@ -179,13 +183,11 @@ pub(crate) struct PreparedMovementTick {
 
 /// Contributions admitted together for one reduced local simulation interval.
 pub(crate) struct LocalNavigationInput {
-    /// Portion of the frontend's requested travel admitted after discarding catch-up time.
-    pub admitted_fraction: f32,
     /// Admitted time available to rate-based sticky pursuit.
     pub interval: Duration,
     /// Relative local yaw, composed with the selected source's rotation once.
     pub facing_rotation: Option<Quaternion>,
-    /// Already advanced authored root; target-directed client movement must not also apply it.
+    /// Already advanced authored root.
     pub authored_offset: Option<RigidTransform>,
     /// Sticky facts sampled before any body moved this interval.
     pub sticky_target: Option<holtburger_world::StickyBodyTarget>,
@@ -211,6 +213,12 @@ pub(crate) struct MovementSystem {
     pending_facing: PendingFacing,
     /// Sole selected source of local locomotion; absence leaves authoritative playback in charge.
     active_movement: Option<ActiveMovement>,
+    /// Control source that acquired the current manual drive/pulse.
+    manual_origin: ControlSource,
+    /// Terminal completions produced by `ActiveMovement::LocalSteered`, drained once per tick.
+    navigation_completions: Vec<LocalNavigationFinished>,
+    /// Resolved `MotionOrder` for the active `LocalSteered` tick, consumed by authored playback.
+    local_steering_order: Option<MotionOrder>,
     /// Lifetime of manual input, retained independently while server playback owns movement.
     manual_input: ManualInputLifetime,
     /// One local authored stop order awaiting the simulation tick that owns cursor advancement.
@@ -242,12 +250,25 @@ pub(crate) struct PendingJumpAttempt {
 /// Ordered input to the movement owner; category must never reorder lifecycle edges.
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum QueuedControlCommand {
-    Drive(PlayerDriveIntent),
+    Drive {
+        origin: ControlSource,
+        intent: PlayerDriveIntent,
+    },
     /// Authored command admitted in the same input order; world owns its playback class.
     Authored(AuthoredMotionIntent),
     CharacterMotion(SequencedCharacterMotionEvent),
     /// Server admission carries target facts captured before later world mutations.
     ServerDirective(Option<ServerDirectedMotionState>),
+    /// Core-owned local steering goal.
+    StartLocalSteering {
+        correlation_id: u64,
+        origin: ControlSource,
+        request: LocalSteeringRequest,
+    },
+    /// Explicit cancellation of active local steering.
+    StopLocalSteering(LocalNavigationOutcome),
+    /// Stops automation-owned movement without disturbing user controls.
+    CancelAutomation,
 }
 
 /// A selected movement source owns only the data needed by its execution mechanism.
@@ -255,8 +276,8 @@ enum QueuedControlCommand {
 enum ActiveMovement {
     /// Drive values live in the character controller; input lifetime is independently retained.
     Manual,
-    /// Client-produced displacement for the current simulation tick.
-    ClientDirected(Option<AutonomousDriveIntent>),
+    /// Core-owned local steering over the shared directed-motion `MotionOrder` reducer.
+    LocalSteered(LocalSteeringRuntime),
     /// Server approach/turn state, including its receipt-time target facts and progress.
     ServerDirected {
         /// Retained command reduction state.
@@ -326,6 +347,9 @@ impl MovementSystem {
             authored_request_feedback: Vec::new(),
             pending_facing: PendingFacing::default(),
             active_movement: None,
+            manual_origin: ControlSource::User,
+            navigation_completions: Vec::new(),
+            local_steering_order: None,
             manual_input: ManualInputLifetime::None,
             pending_manual_playback_stop: false,
             published_motion: None,
@@ -383,6 +407,7 @@ impl MovementSystem {
     }
 
     fn select_server_directive(&mut self, motion: Option<ServerDirectedMotionState>) {
+        self.finish_local_steering(LocalNavigationOutcome::InterruptedByServer);
         self.navigation_progress.reset();
         self.active_movement = motion.map(|state| ActiveMovement::ServerDirected {
             state,
@@ -396,10 +421,23 @@ impl MovementSystem {
         self.pending_manual_playback_stop = false;
     }
 
+    fn finish_local_steering(&mut self, outcome: LocalNavigationOutcome) -> bool {
+        if let Some(ActiveMovement::LocalSteered(steering)) = self.active_movement {
+            self.navigation_completions
+                .push(steering.finish_event(outcome));
+            self.local_steering_order = None;
+            self.active_movement = None;
+            true
+        } else {
+            false
+        }
+    }
+
     /// A terminal movement boundary retires its uncommitted gap samples as one operation.
     /// Budget-free ticks within an active client-directed engagement do not call this.
     fn retire_active_movement(&mut self) {
         self.navigation_progress.reset();
+        self.local_steering_order = None;
         self.active_movement = None;
     }
 
@@ -415,10 +453,19 @@ impl MovementSystem {
     /// authority state here prevents a pre-activation held drive or queued command from resuming
     /// after that rejection boundary. Protocol sequence diagnostics intentionally survive because
     /// the connected session and its server-authored ordering epochs remain continuous.
-    pub(crate) fn retire_movement_epoch(&mut self) {
-        self.queued_control_commands.clear();
+    pub(crate) fn retire_movement_epoch(&mut self, outcome: LocalNavigationOutcome) {
+        self.finish_local_steering(outcome);
+        for queued in std::mem::take(&mut self.queued_control_commands) {
+            if let QueuedControlCommand::StartLocalSteering { correlation_id, .. } = queued {
+                self.navigation_completions.push(LocalNavigationFinished {
+                    correlation_id,
+                    outcome,
+                });
+            }
+        }
         self.character_motion.clear();
         self.manual_input = ManualInputLifetime::None;
+        self.manual_origin = ControlSource::User;
         self.pending_jump_attempt = None;
         self.character_motion_feedback.clear();
         self.authored_request_feedback.clear();
@@ -436,9 +483,21 @@ impl MovementSystem {
         matches!(self.active_movement, Some(ActiveMovement::Manual))
     }
 
+    pub(crate) fn has_local_steering(&self) -> bool {
+        matches!(self.active_movement, Some(ActiveMovement::LocalSteered(_)))
+    }
+
+    pub(crate) fn local_steering_status(&self) -> Option<LocalSteeringStatus> {
+        match self.active_movement {
+            Some(ActiveMovement::LocalSteered(steering)) => Some(steering.status()),
+            _ => None,
+        }
+    }
+
     /// Whether the local adapter, rather than the authoritative snapshot scan, drives this tick.
     pub(crate) fn drives_local_authored_playback_this_tick(&self) -> bool {
         self.has_server_controlled_motion()
+            || self.has_local_steering()
             || self.has_active_manual_drive()
             || self.pending_manual_playback_stop
     }
@@ -451,9 +510,42 @@ impl MovementSystem {
     }
 
     pub(crate) fn enqueue_drive_intent(&mut self, intent: PlayerDriveIntent, now: Instant) {
+        self.enqueue_drive_intent_from(ControlSource::User, intent, now);
+    }
+
+    pub(crate) fn enqueue_drive_intent_from(
+        &mut self,
+        origin: ControlSource,
+        intent: PlayerDriveIntent,
+        now: Instant,
+    ) {
         let _ = now;
         self.queued_control_commands
-            .push(QueuedControlCommand::Drive(intent));
+            .push(QueuedControlCommand::Drive { origin, intent });
+    }
+
+    pub(crate) fn enqueue_start_local_steering(
+        &mut self,
+        correlation_id: u64,
+        origin: ControlSource,
+        request: LocalSteeringRequest,
+    ) {
+        self.queued_control_commands
+            .push(QueuedControlCommand::StartLocalSteering {
+                correlation_id,
+                origin,
+                request,
+            });
+    }
+
+    pub(crate) fn enqueue_stop_local_steering(&mut self, outcome: LocalNavigationOutcome) {
+        self.queued_control_commands
+            .push(QueuedControlCommand::StopLocalSteering(outcome));
+    }
+
+    pub(crate) fn enqueue_cancel_automation(&mut self) {
+        self.queued_control_commands
+            .push(QueuedControlCommand::CancelAutomation);
     }
 
     /// Resolves local support and standing-charge presentation for authored and observed playback.
@@ -514,9 +606,17 @@ impl MovementSystem {
     }
 
     /// A semantic acquisition replaces the selected source and owns its mandatory notification.
-    fn acquire_manual_control(&mut self, until: Option<Instant>) {
+    fn acquire_manual_control(&mut self, origin: ControlSource, until: Option<Instant>) {
+        let interruption = if origin == ControlSource::User {
+            LocalNavigationOutcome::InterruptedByUser
+        } else {
+            LocalNavigationOutcome::Superseded
+        };
+        let displaced_steering = self.finish_local_steering(interruption);
         self.navigation_progress.reset();
-        self.movement_publication_required |= self.has_server_controlled_motion();
+        self.movement_publication_required |=
+            self.has_server_controlled_motion() || displaced_steering;
+        self.manual_origin = origin;
         self.manual_input = match until {
             Some(until) => ManualInputLifetime::Pulse { until },
             None => ManualInputLifetime::Held,
@@ -526,7 +626,12 @@ impl MovementSystem {
         self.pending_manual_playback_stop = false;
     }
 
-    fn ingest_drive_intent(&mut self, command: PlayerDriveIntent, now: Instant) {
+    fn ingest_drive_intent(
+        &mut self,
+        origin: ControlSource,
+        command: PlayerDriveIntent,
+        now: Instant,
+    ) {
         let had_manual_drive = matches!(self.active_movement, Some(ActiveMovement::Manual));
         match command {
             PlayerDriveIntent::SynchronizeHeld(state) => {
@@ -542,28 +647,25 @@ impl MovementSystem {
             }
             PlayerDriveIntent::ManualHeld(state) => {
                 self.character_motion.replace_drive(state);
-                self.acquire_manual_control(None);
+                self.acquire_manual_control(origin, None);
             }
             PlayerDriveIntent::ManualPulse { state, duration } => {
                 self.character_motion.replace_drive(state);
-                self.acquire_manual_control(Some(now + duration));
-            }
-            PlayerDriveIntent::ClientDirected(command) => {
-                self.ingest_client_directed_command(command)
+                self.acquire_manual_control(origin, Some(now + duration));
             }
             PlayerDriveIntent::RotateFacing { delta_radians } => {
-                if self.has_server_controlled_motion() {
+                if self.has_server_controlled_motion() || self.has_local_steering() {
                     self.character_motion.release_input();
-                    self.acquire_manual_control(None);
+                    self.acquire_manual_control(origin, None);
                 }
                 self.pending_facing.delta_radians = normalize_heading(
                     self.pending_facing.delta_radians + normalize_heading(delta_radians),
                 );
             }
             PlayerDriveIntent::SnapFacing { heading } => {
-                if self.has_server_controlled_motion() {
+                if self.has_server_controlled_motion() || self.has_local_steering() {
                     self.character_motion.release_input();
-                    self.acquire_manual_control(None);
+                    self.acquire_manual_control(origin, None);
                 }
                 self.pending_facing = PendingFacing {
                     absolute_heading: Some(heading),
@@ -573,8 +675,13 @@ impl MovementSystem {
             PlayerDriveIntent::Stop => {
                 self.manual_input = ManualInputLifetime::None;
                 let had_server_directive = self.has_server_controlled_motion();
-                self.movement_publication_required |= had_server_directive;
-                self.pending_manual_playback_stop |= had_server_directive;
+                let had_local_steering = self.finish_local_steering(if origin == ControlSource::User {
+                    LocalNavigationOutcome::InterruptedByUser
+                } else {
+                    LocalNavigationOutcome::Cancelled
+                });
+                self.movement_publication_required |= had_server_directive || had_local_steering;
+                self.pending_manual_playback_stop |= had_server_directive || had_local_steering;
                 self.cancel_pending_authored_commands();
                 self.character_motion.release_input();
                 self.pending_jump_attempt = None;
@@ -585,52 +692,7 @@ impl MovementSystem {
         }
     }
 
-    fn ingest_client_directed_command(&mut self, command: ClientDirectedCommand) {
-        if command.acquires_control() {
-            self.navigation_progress.reset();
-            self.movement_publication_required |= self.has_server_controlled_motion();
-            self.character_motion.release_input();
-            self.pending_jump_attempt = None;
-            self.pending_facing = PendingFacing::default();
-            self.cancel_pending_authored_commands();
-            self.pending_manual_playback_stop = self.has_server_controlled_motion();
-        } else if !matches!(
-            self.active_movement,
-            Some(ActiveMovement::ClientDirected(_))
-        ) {
-            return;
-        }
-        match command {
-            ClientDirectedCommand::Acquire(intent) | ClientDirectedCommand::Update(intent) => {
-                self.active_movement = Some(ActiveMovement::ClientDirected(Some(intent)));
-            }
-            ClientDirectedCommand::AcquireFacing { heading } => {
-                self.active_movement = Some(ActiveMovement::ClientDirected(None));
-                self.pending_facing = PendingFacing {
-                    absolute_heading: Some(heading),
-                    delta_radians: 0.0,
-                };
-            }
-            ClientDirectedCommand::Settle => {
-                self.navigation_progress.reset();
-                self.active_movement = Some(ActiveMovement::ClientDirected(None));
-                self.movement_publication_required |= self.published_motion.is_some();
-            }
-            ClientDirectedCommand::Release => {
-                self.retire_active_movement();
-                self.pending_facing = PendingFacing::default();
-                self.movement_publication_required |= self.published_motion.is_some();
-            }
-        }
-    }
-
     fn expire_active_movement(&mut self, now: Instant) {
-        if matches!(
-            self.active_movement,
-            Some(ActiveMovement::ClientDirected(_))
-        ) {
-            self.active_movement = Some(ActiveMovement::ClientDirected(None));
-        }
         if matches!(self.manual_input, ManualInputLifetime::Pulse { until } if now >= until) {
             self.manual_input = ManualInputLifetime::None;
             if self.has_active_manual_drive() {
@@ -638,56 +700,6 @@ impl MovementSystem {
                 self.pending_manual_playback_stop = true;
             }
         }
-    }
-
-    fn autonomous_wire_motion_state(
-        world: &WorldState,
-        intent: AutonomousDriveIntent,
-    ) -> Option<CharacterDrive> {
-        let current_heading = world
-            .local_player_runtime_pose()
-            .unwrap_or_default()
-            .rotation
-            .to_heading();
-        let planar_delta = Vector3::new(
-            intent.desired_world_delta.x,
-            intent.desired_world_delta.y,
-            0.0,
-        );
-        let longitudinal =
-            (planar_delta.length_squared() > 1e-6).then_some(LongitudinalMotion::Forward);
-        let desired_heading = intent.desired_heading.map(normalize_heading).or_else(|| {
-            (planar_delta.length_squared() > 1e-6)
-                .then(|| Vector3::zero().heading_to(&planar_delta))
-        });
-        let turning = if longitudinal.is_some() {
-            None
-        } else {
-            desired_heading.and_then(|desired_heading| {
-                let delta = signed_heading_delta(current_heading, desired_heading);
-                if delta.abs() <= 1e-4 {
-                    None
-                } else if delta > 0.0 {
-                    Some(Turn::Right)
-                } else {
-                    Some(Turn::Left)
-                }
-            })
-        };
-
-        if longitudinal.is_none() && turning.is_none() {
-            return None;
-        }
-
-        // The shared solver owns local realization, but ACE still needs a
-        // MoveToState edge so observers receive motion-state broadcasts.
-        Some(CharacterDrive {
-            gait: intent.gait,
-            longitudinal,
-            lateral: None,
-            turning,
-            turn_rate_scalar: None,
-        })
     }
 
     /// Accept external input before other controllers inspect this tick's movement ownership.
@@ -759,11 +771,72 @@ impl MovementSystem {
                     )
                     .await?,
                 ),
-                Some(ActiveMovement::ClientDirected(Some(intent))) => events.extend(
-                    self.execute_autonomous_drive_intent(intent, world, session, now)
-                        .await?,
-                ),
-                None | Some(ActiveMovement::ClientDirected(None))
+                Some(ActiveMovement::LocalSteered(mut steering)) => {
+                    let support = self.directed_motion_support(world);
+                    let style = world.resolve_player_motion_style().ok().map(MotionCommand);
+                    let steady_order = MotionOrder {
+                        style,
+                        ..MotionOrder::default()
+                    };
+                    match steering.advance(now, world, steady_order, support) {
+                        LocalSteeringTick::Active {
+                            order, wire_drive, ..
+                        } => {
+                            self.active_movement = Some(ActiveMovement::LocalSteered(steering));
+                            self.local_steering_order = Some(order);
+                            if let Some(drive) = wire_drive {
+                                events.extend(
+                                    self.execute_motion_state_at(drive, world, session, now)
+                                        .await?,
+                                );
+                            } else if self.should_send_stop_pulse() {
+                                events.extend(
+                                    self.execute_stop_at(
+                                        now,
+                                        world,
+                                        session,
+                                        MovementPacketMetadata::default(),
+                                        false,
+                                    )
+                                    .await?,
+                                );
+                            }
+                        }
+                        LocalSteeringTick::Settled { order } => {
+                            self.active_movement = Some(ActiveMovement::LocalSteered(steering));
+                            self.local_steering_order = Some(order);
+                            if self.should_send_stop_pulse() {
+                                events.extend(
+                                    self.execute_stop_at(
+                                        now,
+                                        world,
+                                        session,
+                                        MovementPacketMetadata::default(),
+                                        false,
+                                    )
+                                    .await?,
+                                );
+                            }
+                        }
+                        LocalSteeringTick::Finished(outcome) => {
+                            self.navigation_completions
+                                .push(steering.finish_event(outcome));
+                            self.retire_active_movement();
+                            self.pending_manual_playback_stop = true;
+                            events.extend(
+                                self.execute_stop_at(
+                                    now,
+                                    world,
+                                    session,
+                                    MovementPacketMetadata::default(),
+                                    true,
+                                )
+                                .await?,
+                            );
+                        }
+                    }
+                }
+                None
                     if had_active_manual_motion
                         || explicit_stop_requested
                         || self.movement_publication_required =>
@@ -779,9 +852,7 @@ impl MovementSystem {
                         .await?,
                     );
                 }
-                None
-                | Some(ActiveMovement::ClientDirected(None))
-                | Some(ActiveMovement::ServerDirected { .. }) => {}
+                None | Some(ActiveMovement::ServerDirected { .. }) => {}
             }
         }
 
@@ -797,11 +868,10 @@ impl MovementSystem {
     ) -> bool {
         for command in std::mem::take(&mut self.queued_control_commands) {
             match command {
-                QueuedControlCommand::Drive(command) => {
-                    let acquires_client_directed_control = match command {
-                        PlayerDriveIntent::ClientDirected(command) => command.acquires_control(),
-                        _ => false,
-                    };
+                QueuedControlCommand::Drive {
+                    origin,
+                    intent: command,
+                } => {
                     let supersedes_local_command = command.supersedes_local_motion();
                     if supersedes_local_command {
                         world.admit_entity_sticky_target(world.player.guid, None);
@@ -818,13 +888,7 @@ impl MovementSystem {
                             .motion_runtimes
                             .release_local_command(world.player.guid);
                     }
-                    self.ingest_drive_intent(command, now);
-                    // A new controller invalidates the previous presentation owner. Updates from
-                    // that same controller must retain its cursor or a continuously steered body
-                    // will reinstall the first locomotion frame on every simulation interval.
-                    if acquires_client_directed_control {
-                        world.motion_runtimes.clear_locomotion(world.player.guid);
-                    }
+                    self.ingest_drive_intent(origin, command, now);
                 }
                 QueuedControlCommand::Authored(intent) => {
                     world.admit_entity_sticky_target(world.player.guid, None);
@@ -837,6 +901,70 @@ impl MovementSystem {
                     world.motion_runtimes.clear_locomotion(world.player.guid);
                     self.select_server_directive(motion);
                     explicit_stop_requested = false;
+                }
+                QueuedControlCommand::StartLocalSteering {
+                    correlation_id,
+                    origin,
+                    request,
+                } => {
+                    world.admit_entity_sticky_target(world.player.guid, None);
+                    world
+                        .motion_runtimes
+                        .release_local_command(world.player.guid);
+                    let had_server = self.has_server_controlled_motion();
+                    self.finish_local_steering(LocalNavigationOutcome::Superseded);
+                    match LocalSteeringRuntime::start(correlation_id, origin, request, now, world) {
+                        Ok(steering) => {
+                            self.navigation_progress.reset();
+                            self.character_motion.release_input();
+                            self.manual_input = ManualInputLifetime::None;
+                            self.pending_jump_attempt = None;
+                            self.pending_facing = PendingFacing::default();
+                            self.cancel_pending_authored_commands();
+                            self.movement_publication_required |= had_server;
+                            self.pending_manual_playback_stop = false;
+                            self.local_steering_order = None;
+                            self.active_movement = Some(ActiveMovement::LocalSteered(steering));
+                            world.motion_runtimes.clear_locomotion(world.player.guid);
+                        }
+                        Err(_) => {
+                            self.navigation_completions.push(LocalNavigationFinished {
+                                correlation_id,
+                                outcome: LocalNavigationOutcome::TargetLost,
+                            });
+                        }
+                    }
+                }
+                QueuedControlCommand::StopLocalSteering(outcome) => {
+                    if self.finish_local_steering(outcome) {
+                        self.navigation_progress.reset();
+                        self.pending_manual_playback_stop = true;
+                        self.movement_publication_required = true;
+                        explicit_stop_requested = true;
+                    }
+                }
+                QueuedControlCommand::CancelAutomation => {
+                    if matches!(
+                        self.active_movement,
+                        Some(ActiveMovement::LocalSteered(steering))
+                            if steering.origin == ControlSource::Automation
+                    ) && self.finish_local_steering(LocalNavigationOutcome::Cancelled)
+                    {
+                        self.navigation_progress.reset();
+                        self.pending_manual_playback_stop = true;
+                        self.movement_publication_required = true;
+                        explicit_stop_requested = true;
+                    }
+                    if matches!(self.active_movement, Some(ActiveMovement::Manual))
+                        && self.manual_origin == ControlSource::Automation
+                    {
+                        self.manual_input = ManualInputLifetime::None;
+                        self.character_motion.release_input();
+                        self.retire_active_movement();
+                        self.pending_manual_playback_stop = true;
+                        self.movement_publication_required = true;
+                        explicit_stop_requested = true;
+                    }
                 }
             }
         }
@@ -867,7 +995,7 @@ impl MovementSystem {
         } else if matches!(result, CharacterMotionEventResult::ChargeAccepted) {
             // Retail takes control before attempting the jump. A stale/repeated begin or
             // rejected release cannot independently acquire control.
-            self.acquire_manual_control(None);
+            self.acquire_manual_control(ControlSource::User, None);
             world.admit_entity_sticky_target(world.player.guid, None);
         }
         match result {
@@ -932,7 +1060,6 @@ impl MovementSystem {
         input: LocalNavigationInput,
     ) -> Result<Vec<WorldEvent>> {
         let LocalNavigationInput {
-            admitted_fraction,
             interval,
             facing_rotation,
             authored_offset,
@@ -955,46 +1082,34 @@ impl MovementSystem {
             return Ok(Vec::new());
         }
         let mut source_rotation = None;
-        let accepted = match self.active_movement {
-            Some(ActiveMovement::ClientDirected(Some(intent))) => self
-                .navigation_progress
-                .advance(collision, committed, intent, admitted_fraction)?,
-            Some(ActiveMovement::ClientDirected(None)) => {
-                // A frontend pulse is consumed once, so faster simulation ticks may have no
-                // new budget. Preserve intent progress through those ticks; explicit settle,
-                // release, acquisition, and authoritative resets retire it at their owners.
-                None
-            }
-            source => {
-                if let Some(target) = sticky_target {
-                    source_rotation = Some(Quaternion::from_heading(target.heading));
-                    self.navigation_progress
-                        .advance_sticky(collision, committed, target, interval)?
-                } else if let Some(offset) = authored_offset {
-                    let offset = facing_rotation.map_or(offset, |rotation| {
-                        RigidTransform {
-                            translation: Vector3::zero(),
-                            rotation,
-                        }
-                        .combine(&offset)
-                    });
-                    source_rotation = Some(committed.rotation.multiply(&offset.rotation));
-                    let travel = match source {
-                        Some(ActiveMovement::ServerDirected { travel, .. }) => travel,
-                        _ => None,
-                    };
-                    let scale = world
-                        .player_entity()
-                        .context("navigation authored motion requires a player entity")?
-                        .scale
-                        .effective();
-                    self.navigation_progress
-                        .advance_authored(collision, committed, offset, scale, travel)?
-                } else {
-                    self.navigation_progress.reset();
-                    None
+        let accepted = if let Some(target) = sticky_target {
+            source_rotation = Some(Quaternion::from_heading(target.heading));
+            self.navigation_progress
+                .advance_sticky(collision, committed, target, interval)?
+        } else if let Some(offset) = authored_offset {
+            let offset = facing_rotation.map_or(offset, |rotation| {
+                RigidTransform {
+                    translation: Vector3::zero(),
+                    rotation,
                 }
-            }
+                .combine(&offset)
+            });
+            source_rotation = Some(committed.rotation.multiply(&offset.rotation));
+            let travel = match self.active_movement {
+                Some(ActiveMovement::ServerDirected { travel, .. }) => travel,
+                Some(ActiveMovement::LocalSteered(steering)) => steering.travel,
+                _ => None,
+            };
+            let scale = world
+                .player_entity()
+                .context("navigation authored motion requires a player entity")?
+                .scale
+                .effective();
+            self.navigation_progress
+                .advance_authored(collision, committed, offset, scale, travel)?
+        } else {
+            self.navigation_progress.reset();
+            None
         };
         let mut pose = accepted.unwrap_or(committed);
         if let Some(rotation) = source_rotation {
@@ -1033,55 +1148,25 @@ impl MovementSystem {
         std::mem::take(&mut self.character_motion_feedback)
     }
 
-    pub(crate) fn current_local_drive_control(
-        &self,
-        world: &WorldState,
-        _dt: Duration,
-    ) -> Option<LocalDriveControl> {
-        if world.player.guid == Guid::NULL {
-            return None;
-        }
-
-        let body_id = SpatialBodyId::LocalPlayer(world.player.guid);
-
-        let intent = match self.active_movement? {
-            ActiveMovement::ClientDirected(intent) => intent?,
-            ActiveMovement::Manual | ActiveMovement::ServerDirected { .. } => return None,
-        };
-
-        Some(LocalDriveControl {
-            body_id,
-            desired_world_delta: intent.desired_world_delta,
-            desired_heading: intent.desired_heading,
-            target_hint: intent.target_hint,
-            gait: match intent.gait {
-                crate::client::movement_types::Gait::Walk => LocalDriveGait::Walk,
-                crate::client::movement_types::Gait::Run => LocalDriveGait::Run,
-            },
-            force_grounded: intent.force_grounded,
-        })
+    pub(crate) fn take_navigation_completions(&mut self) -> Vec<LocalNavigationFinished> {
+        std::mem::take(&mut self.navigation_completions)
     }
 
-    /// Supplies visual locomotion only for a controller whose displacement is independent of
-    /// authored playback. A settled controller retains explicit idle until it releases ownership.
-    pub(crate) fn client_directed_locomotion_order(
-        &self,
-        world: &WorldState,
-    ) -> Result<Option<MotionOrder>> {
-        let Some(ActiveMovement::ClientDirected(intent)) = self.active_movement else {
-            return Ok(None);
-        };
-        if world.player.guid.is_null() {
-            return Ok(None);
+    fn directed_motion_support(&self, world: &WorldState) -> DirectedMotionSupport {
+        match self.movement_policy {
+            ClientMovementPolicy::Navigation => DirectedMotionSupport::PositionOnly,
+            ClientMovementPolicy::Physical => {
+                let contact = world
+                    .runtime_body_view(SpatialBodyId::LocalPlayer(world.player.guid))
+                    .map_or(ContactState::Unknown, |body| body.contact);
+                let contact = world
+                    .player_entity()
+                    .map_or(MotionContact::RequiresSupport(contact), |entity| {
+                        entity.motion_contact(contact)
+                    });
+                DirectedMotionSupport::Physical(contact)
+            }
         }
-        // No displacement or facing request means this controller explicitly presents idle.
-        let state = intent
-            .and_then(|intent| Self::autonomous_wire_motion_state(world, intent))
-            .unwrap_or_default();
-        let run_rate = world
-            .player_run_rate()
-            .ok_or_else(|| anyhow::anyhow!("client-directed locomotion run-rate is unavailable"))?;
-        Self::local_drive_order(world, state, run_rate).map(Some)
     }
 
     /// Shared command-to-table mapping for authored manual motion and local visual locomotion.
@@ -1111,6 +1196,17 @@ impl MovementSystem {
         let guid = world.player.guid;
         if guid == Guid::NULL {
             return Ok(None);
+        }
+        if matches!(self.active_movement, Some(ActiveMovement::LocalSteered(_))) {
+            let Some(order) = self.local_steering_order else {
+                return Ok(None);
+            };
+            let tick = world
+                .drive_authored_motion_for_body(guid, order, dt)
+                .map_err(|error| {
+                    anyhow::anyhow!("local steering authored playback failed: {error}")
+                })?;
+            return Ok(Some(tick));
         }
         if let Some(ActiveMovement::ServerDirected { state, .. }) = self.active_movement {
             let Some(current_pose) = world.local_player_runtime_pose() else {
@@ -1486,42 +1582,6 @@ impl MovementSystem {
 
         self.send_autonomous_position_sync(now, world, session, metadata)
             .await?;
-
-        Ok(world_events)
-    }
-
-    async fn execute_autonomous_drive_intent(
-        &mut self,
-        intent: AutonomousDriveIntent,
-        world: &mut WorldState,
-        session: &mut Session,
-        now: Instant,
-    ) -> Result<Vec<WorldEvent>> {
-        let world_events = Vec::new();
-
-        if let Some(state) = Self::autonomous_wire_motion_state(world, intent) {
-            self.execute_motion_state_with_metadata_at(
-                state,
-                MovementPacketMetadata::default(),
-                world,
-                session,
-                now,
-            )
-            .await?;
-
-            return Ok(world_events);
-        }
-
-        if self.should_send_stop_pulse() {
-            self.execute_stop_at(
-                now,
-                world,
-                session,
-                MovementPacketMetadata::default(),
-                false,
-            )
-            .await?;
-        }
 
         Ok(world_events)
     }

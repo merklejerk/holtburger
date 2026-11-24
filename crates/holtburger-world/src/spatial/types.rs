@@ -766,22 +766,6 @@ pub enum SpatialBodyEvent {
     },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LocalDriveGait {
-    Walk,
-    Run,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct LocalDriveControl {
-    pub body_id: SpatialBodyId,
-    pub desired_world_delta: Vector3,
-    pub desired_heading: Option<f32>,
-    pub target_hint: Option<WorldPosition>,
-    pub gait: LocalDriveGait,
-    pub force_grounded: bool,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -308,6 +308,11 @@ impl GameState {
         );
         self.chat.log(
             ChatMessageTags::system(),
+            "Live API: /api [status|pause|resume|prompt] inspects, pauses/resumes, or prints an agent prompt"
+                .to_string(),
+        );
+        self.chat.log(
+            ChatMessageTags::system(),
             "Use /help <COMMAND> for detailed help on a specific command. Commands accept / or @."
                 .to_string(),
         );
@@ -481,6 +486,11 @@ impl GameState {
                 "Stop the active long-running script and clear any queued script startup."
                     .to_string(),
             ],
+            "api" => vec![
+                "Usage: /api [status|pause|resume|prompt]".to_string(),
+                "Show the localhost Live API status and endpoint, pause/resume automation, or print a concise starter prompt for AI agents."
+                    .to_string(),
+            ],
             _ => return None,
         };
 
@@ -502,6 +512,86 @@ impl GameState {
         for line in lines {
             self.chat.log(ChatMessageTags::system(), line);
         }
+    }
+
+    fn handle_api_command(&mut self, command: &str, submitted_command: &str) -> UpdateResult {
+        let mut result = UpdateResult::new();
+        let arg = command.strip_prefix("/api").unwrap_or("").trim();
+        let paused = self
+            .script
+            .live_api
+            .as_ref()
+            .is_some_and(|engine| engine.runtime_handle().is_automation_paused());
+        match arg.to_ascii_lowercase().as_str() {
+            "" | "status" => {
+                let server = match &self.script.live_api_endpoint {
+                    Some(endpoint) => format!(
+                        "Live API: {} ({endpoint})",
+                        if paused { "Paused" } else { "Active" }
+                    ),
+                    None => format!(
+                        "Live API: Inactive (launch with --api); automation is {}",
+                        if paused { "paused" } else { "active" }
+                    ),
+                };
+                self.chat.log(ChatMessageTags::system(), server);
+            }
+            "pause" => {
+                if paused {
+                    self.chat.log(
+                        ChatMessageTags::system(),
+                        "Live API automation is already paused.".to_string(),
+                    );
+                } else {
+                    result
+                        .commands
+                        .push(ClientCommand::SetAutomationPaused(true));
+                    self.chat.log(
+                        ChatMessageTags::system(),
+                        "Live API automation paused.".to_string(),
+                    );
+                }
+            }
+            "resume" => {
+                if !paused {
+                    self.chat.log(
+                        ChatMessageTags::system(),
+                        "Live API automation is already active.".to_string(),
+                    );
+                } else {
+                    result
+                        .commands
+                        .push(ClientCommand::SetAutomationPaused(false));
+                    self.chat.log(
+                        ChatMessageTags::system(),
+                        "Live API automation resumed.".to_string(),
+                    );
+                }
+            }
+            "prompt" => {
+                if let Some(endpoint) = &self.script.live_api_endpoint {
+                    self.chat.log(
+                        ChatMessageTags::system(),
+                        format!(
+                            "My Asheron's Call client (Holtburger) has a local Live API at {endpoint} (OpenAPI spec at /v1/openapi.json, no auth)."
+                        ),
+                    );
+                } else {
+                    self.chat.log(
+                        ChatMessageTags::error(),
+                        "Live API is not active for this launch (launch with --api).".to_string(),
+                    );
+                }
+            }
+            _ => {
+                self.chat.log(
+                    ChatMessageTags::system(),
+                    "Usage: /api [status|pause|resume|prompt]".to_string(),
+                );
+            }
+        }
+        result.merge(self.finish_input_command_submission(submitted_command));
+        result.with_redraw(true)
     }
 
     fn handle_options_command(&mut self, command: &str, submitted_command: &str) -> UpdateResult {
@@ -955,6 +1045,9 @@ impl GameState {
             _ if command.starts_with("/option") => {
                 self.handle_options_command(command, submitted_command)
             }
+            _ if command == "/api" || command.starts_with("/api ") => {
+                self.handle_api_command(command, submitted_command)
+            }
             _ => {
                 result.merge(self.finish_input_command_submission(submitted_command));
                 result
@@ -993,6 +1086,36 @@ mod tests {
                 AppAction::UiAction { action: AppUiAction::FinishInputCommandSubmission { command: submitted } }
                     if submitted == command)));
         }
+    }
+
+    #[test]
+    fn api_command_reports_status_and_toggles_automation_pause() {
+        let mut state = GameState::new(Guid(1), "Player".into(), "World".into());
+        state.script.live_api_endpoint = Some("http://127.0.0.1:42000".into());
+
+        let status = state.handle_prefixed_command("/api");
+        assert!(status.commands.is_empty());
+        assert!(state.chat.messages.iter().any(|m| {
+            m.text == "Live API: Active (http://127.0.0.1:42000)"
+        }));
+
+        let pause = state.handle_prefixed_command("/api pause");
+        assert!(matches!(
+            pause.commands.as_slice(),
+            [ClientCommand::SetAutomationPaused(true)]
+        ));
+
+        let prompt = state.handle_prefixed_command("/api prompt");
+        assert!(prompt.commands.is_empty());
+        assert!(state.chat.messages.iter().any(|m| {
+            m.text == "My Asheron's Call client (Holtburger) has a local Live API at http://127.0.0.1:42000 (OpenAPI spec at /v1/openapi.json, no auth)."
+        }));
+
+        let bad = state.handle_prefixed_command("/api bogus");
+        assert!(bad.commands.is_empty());
+        assert!(state.chat.messages.iter().any(|m| {
+            m.text == "Usage: /api [status|pause|resume|prompt]"
+        }));
     }
 
     #[test]
@@ -1215,21 +1338,35 @@ mod tests {
         state.chat_input.input.set_text("/script ping the script");
         state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
 
-        let host = {
-            let view = crate::scripting::TuiScriptClientView {
-                directories: &state.script.directories,
-                data: &state.data,
-                view: &state.view,
-                server_time: None,
-                script_name: None,
-            };
-
-            holtburger_scripting::ScriptHost::spawn(
-                holtburger_scripting::ScriptSource::new("script-command-test", ""),
-                &view,
-            )
-            .expect("script host should spawn")
-        };
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .expect("test tokio runtime");
+        let _guard = rt.enter();
+        let mut runtime = holtburger_core::ClientRuntime::synthetic_in_world(
+            "test-account",
+            Some("World".to_string()),
+        );
+        let handle = runtime.create_handle();
+        let engine = holtburger_live_api::LiveApiEngine::start(
+            handle,
+            holtburger_live_api::LiveApiEngineConfig {
+                client_kind: "holtburger-cli",
+                catalogs: None,
+                ui: None,
+                hud: None,
+            },
+        );
+        let host = holtburger_scripting::ScriptHost::spawn(
+            holtburger_scripting::ScriptSource::new("script-command-test", ""),
+            String::new(),
+            engine,
+            rt.handle().clone(),
+            holtburger_scripting::ScriptHostConfig::default(),
+            holtburger_scripting::ScriptStorage::default(),
+        )
+        .expect("script host should spawn");
 
         state.script.host = Some(host);
 

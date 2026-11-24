@@ -152,29 +152,41 @@ impl ClientRuntime {
         Ok(())
     }
 
-    pub(in crate::client) fn preview_salvage(&mut self, request: SalvagePreviewRequest) {
-        let evaluation = {
-            // Busy actions do not invalidate read-only previews.
-            if self.conn.state != ClientState::InWorld || self.world.player.guid != request.player {
-                SalvageEvaluation::Rejected {
-                    reason: "The originating character is no longer in the world.".into(),
-                }
-            } else {
-                let tool = match request.tool {
-                    SalvageToolSelection::Exact { guid } => {
-                        find_salvage_tool(&self.world, Some(guid)).filter(|tool| tool.guid == guid)
-                    }
-                    SalvageToolSelection::Discover { preferred } => {
-                        find_salvage_tool(&self.world, preferred)
-                    }
-                };
-                match tool {
-                    Some(tool) => self.world.evaluate_salvage(tool, &request.items),
-                    None => SalvageEvaluation::Rejected {
-                        reason: "You do not have an Ust in your inventory.".into(),
-                    },
-                }
+    pub(in crate::client) fn evaluate_salvage_readonly(
+        &self,
+        tool: SalvageToolSelection,
+        items: &[Guid],
+    ) -> SalvageEvaluation {
+        if self.conn.state != ClientState::InWorld || self.world.player.guid.is_null() {
+            return SalvageEvaluation::Rejected {
+                reason: "The originating character is no longer in the world.".into(),
+            };
+        }
+        let tool = match tool {
+            SalvageToolSelection::Exact { guid } => {
+                find_salvage_tool(&self.world, Some(guid)).filter(|tool| tool.guid == guid)
             }
+            SalvageToolSelection::Discover { preferred } => {
+                find_salvage_tool(&self.world, preferred)
+            }
+        };
+        match tool {
+            Some(tool) => self.world.evaluate_salvage(tool, items),
+            None => SalvageEvaluation::Rejected {
+                reason: "You do not have an Ust in your inventory.".into(),
+            },
+        }
+    }
+
+    pub(in crate::client) fn preview_salvage(&mut self, request: SalvagePreviewRequest) {
+        let evaluation = if self.conn.state != ClientState::InWorld
+            || self.world.player.guid != request.player
+        {
+            SalvageEvaluation::Rejected {
+                reason: "The originating character is no longer in the world.".into(),
+            }
+        } else {
+            self.evaluate_salvage_readonly(request.tool, &request.items)
         };
         let evaluation = self.character.salvage_approval.record(evaluation);
         let _ = self

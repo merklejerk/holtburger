@@ -64,6 +64,7 @@ import type {
 	RendererFrameDiagnosticsSnapshot,
 	RendererFrameFeedback,
 	WorldIndicatorInput,
+	WorldOverlayBatchInput,
 } from "../renderer/renderer";
 import type { RuntimeLight } from "../environment/runtime-lights";
 import {
@@ -266,6 +267,7 @@ export class FramePresentationCoordinator {
 	#presentationLights: readonly RuntimeLight[] = [];
 	/** Atomic frontend-resolved precise-jump marker and optional trajectory. */
 	#worldIndicator: WorldIndicatorInput | null = null;
+	#worldOverlays: WorldOverlayBatchInput | null = null;
 	/** Optional Explorer 6-DOF transform gizmo visual; Client always leaves this null. */
 	#transformGizmo: TransformGizmoVisual | null = null;
 	/**
@@ -530,6 +532,11 @@ export class FramePresentationCoordinator {
 	/** Replace the complete presentation-only world indicator without touching scene authority. */
 	setWorldIndicator(indicator: WorldIndicatorInput | null): void {
 		this.#worldIndicator = indicator;
+	}
+
+	/** Replace additive world-space overlays (e.g. Live API HUD rings/polylines). */
+	setWorldOverlays(overlays: WorldOverlayBatchInput | null): void {
+		this.#worldOverlays = overlays;
 	}
 
 	/** Replace the presentation-only Explorer transform gizmo without touching scene authority. */
@@ -887,6 +894,7 @@ export class FramePresentationCoordinator {
 				},
 			],
 			worldIndicator: this.#worldIndicator,
+			worldOverlays: this.#worldOverlays,
 			transformGizmo: this.#transformGizmo,
 			summonLeashes,
 		});

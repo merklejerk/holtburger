@@ -182,6 +182,16 @@ export const LOCAL_COMMANDS = {
 			"Use /assets retry to retry failed presentation content without reconnecting. Replacing mounted archives still requires restarting with the repaired asset location.",
 		],
 	},
+	api: {
+		...invocation(["api"], "[status|pause|resume|prompt]"),
+		description: "Inspect, pause/resume, or copy an agent prompt for the Live API.",
+		details: [
+			"/api or /api status shows whether the localhost Live API is active, its endpoint, and whether automation is paused.",
+			"/api pause immediately stops active automation steering/combat and blocks further automation commands.",
+			"/api resume re-enables automation commands.",
+			"/api prompt copies a one-line starter prompt with your live endpoint to the clipboard.",
+		],
+	},
 	waypoint: {
 		...invocation(["waypoint", "wp"], "[coordinates|clear]"),
 		description: "Show, set, or clear your map waypoint.",

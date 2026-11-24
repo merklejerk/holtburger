@@ -3,6 +3,7 @@ use std::fmt;
 use std::ops::{BitAnd, BitOr, Shl, Shr};
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Guid(pub u32);
 
 impl fmt::UpperHex for Guid {

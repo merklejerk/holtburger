@@ -70,6 +70,7 @@ async fn disconnect_before_startup_permanently_closes_launch_admission() {
             password: String::new(),
             melee_max_chase_distance: None,
             appraisal_tuning: None,
+            live_api: None,
         })
         .await
         .unwrap_err();

@@ -41,7 +41,9 @@ pub use actuation::{authored_grounded_actuation, grounded_character_actuation};
 pub use directed::{
     DirectedMotionSupport, DirectedMotionTravel, ServerDirectedMotionFailure,
     ServerDirectedMotionResolution, ServerDirectedMotionState, ServerDirectedMotionStep,
-    ServerDirectedTarget, begin_server_directed_motion, resolve_server_directed_motion,
+    ServerDirectedTarget, begin_local_move_to_object, begin_local_move_to_position,
+    begin_local_turn_to_heading, begin_local_turn_to_object, begin_server_directed_motion,
+    resolve_server_directed_motion,
 };
 pub use observed::{
     LocomotionPresentationSource, OBSERVED_ANGULAR_IDLE_RATE_RADIANS,

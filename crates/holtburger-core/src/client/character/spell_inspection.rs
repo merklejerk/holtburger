@@ -192,6 +192,28 @@ impl ClientRuntime {
         }
     }
 
+    pub(in crate::client) fn evaluate_spell_inspection_readonly(
+        &self,
+        spell_id: u32,
+    ) -> SpellInspectionOutcome {
+        let player = (self.conn.state == crate::client::ClientState::InWorld
+            && !self.world.player.guid.is_null())
+            .then_some(self.world.player.guid);
+        match (player, self.world.spell_catalog.get(spell_id)) {
+            (None, _) => SpellInspectionOutcome::Pending,
+            (Some(_), None) => SpellInspectionOutcome::Missing,
+            (Some(_), Some(spell)) => {
+                match spellbook_range_metres(spell, &self.world.player.skills) {
+                    Some(range_metres) => SpellInspectionOutcome::Ready {
+                        range_metres,
+                        formula: self.inspect_spell_formula(spell),
+                    },
+                    None => SpellInspectionOutcome::Pending,
+                }
+            }
+        }
+    }
+
     pub(in crate::client) fn query_spell_inspection(&mut self, query: SpellInspectionQuery) {
         self.refresh_spell_inspection_context();
         let context = self.spell_inspection_context();

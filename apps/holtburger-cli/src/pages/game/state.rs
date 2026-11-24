@@ -2,6 +2,7 @@ use holtburger_common::Guid;
 use holtburger_core::ClientViewEvent;
 use holtburger_core::client::types::ClientCommand;
 use holtburger_core::client::types::{ActiveCharacterConfirmation, BusyOperationKind};
+use holtburger_live_api::LiveApiEngine;
 use holtburger_protocol::messages::combat::CombatMode;
 use holtburger_scripting::{ScriptHost, ScriptHostConfig};
 use holtburger_world::context::WorldContext;
@@ -10,10 +11,6 @@ use holtburger_world::entity::Entity;
 use ratatui::text::Line;
 use std::time::{Duration, Instant};
 
-use crate::navigation::{
-    NavigationInput, NavigationInteractionChange, NavigationSnapshot, NavigationTick,
-    NavigationUpdate, ResolvedNavigationTarget, TuiNavigation,
-};
 use crate::pages::game::GameData;
 use crate::pages::game::layout::LayoutMode;
 use crate::pages::game::panels::chat::ChatState;
@@ -21,7 +18,7 @@ use crate::pages::game::panels::chat_input::ChatInputState;
 use crate::pages::game::panels::dashboard::DashboardState;
 use crate::pages::game::panels::logopolis::LogopolisState;
 use crate::scripting::ScriptDirectories;
-use crate::state::{EventContext, QueuedScriptStartup, TickContext};
+use crate::state::QueuedScriptStartup;
 use crate::types::{
     AppAction, AppNotification, AppUiAction, ChatMessageTags, ContextView, DashboardTab,
     FocusedPane, InspectTarget, Interaction, LocalConfirmation, RedrawPriority, UpdateResult,
@@ -53,6 +50,12 @@ pub(crate) struct GameScriptState {
     pub(crate) host_config: ScriptHostConfig,
     /// Startup-selected roots retained by this character session.
     pub(crate) directories: ScriptDirectories,
+    /// Shared Live API engine backing in-process V8 scripts.
+    pub(crate) live_api: Option<LiveApiEngine>,
+    /// Localhost Live API HTTP endpoint when `--api` is enabled.
+    pub(crate) live_api_endpoint: Option<String>,
+    /// Tokio runtime handle used by the dedicated V8 OS thread to await `LiveApiEngine`.
+    pub(crate) rt_handle: Option<tokio::runtime::Handle>,
 }
 
 pub(crate) const SCRIPT_TICK_INTERVAL: Duration = Duration::from_millis(100);
@@ -161,15 +164,6 @@ impl GameState {
     }
 
     pub fn handle_view_event(&mut self, event: ClientViewEvent) -> UpdateResult {
-        self.handle_view_event_with_context(event, &EventContext::default())
-    }
-
-    pub fn handle_view_event_with_context(
-        &mut self,
-        event: ClientViewEvent,
-        ctx: &EventContext,
-    ) -> UpdateResult {
-        let workflow_before = self.script_workflow_projection();
         let inventory_before = self.data.inventory.clone();
         let mut result = domains::reduce_view_event(self, &event);
         if let Some(notification) =
@@ -179,38 +173,24 @@ impl GameState {
                 .actions
                 .push(AppAction::Notification { notification });
         }
-        self.sync_script_host_for_view_event(
-            ctx.server_time,
-            &event,
-            &workflow_before,
-            &mut result,
-        );
-        self.drain_notifications(ctx.server_time, &mut result);
+        self.drain_notifications(&mut result);
         result
     }
 
     pub fn handle_action(&mut self, action: AppAction) -> Option<UpdateResult> {
         let mut result = domains::reduce_action(self, action)?;
-        self.drain_notifications(None, &mut result);
+        self.drain_notifications(&mut result);
         Some(result)
     }
 
     pub fn handle_tick(&mut self, elapsed: f64) -> UpdateResult {
-        self.handle_tick_with_context(elapsed, &TickContext::default())
-    }
-
-    pub fn handle_tick_with_context(&mut self, elapsed: f64, ctx: &TickContext) -> UpdateResult {
         let mut result = domains::reduce_tick(self, elapsed);
-        self.sync_script_host_for_tick(ctx.server_time, elapsed, &mut result);
-        self.drain_notifications(ctx.server_time, &mut result);
+        self.sync_script_host_for_tick(elapsed, &mut result);
+        self.drain_notifications(&mut result);
         result
     }
 
-    fn drain_notifications(
-        &mut self,
-        server_time: Option<(f64, Instant)>,
-        result: &mut UpdateResult,
-    ) {
+    fn drain_notifications(&mut self, result: &mut UpdateResult) {
         let mut pending_notifications = std::collections::VecDeque::new();
         let mut retained_actions = Vec::new();
 
@@ -231,8 +211,6 @@ impl GameState {
                 },
             )
             .unwrap_or_default();
-
-            self.sync_script_host_for_notification(server_time, &notification, result);
 
             {
                 let notification_redraw = notification_result.effective_redraw_priority();
@@ -328,7 +306,6 @@ struct GamePageRuntimeState {
     inspection_refresh: Option<domains::object_interaction::InspectionRefresh>,
     last_trade_initiation: Option<(Instant, Guid)>,
     open_party_tab_on_next_fellowship_update: bool,
-    navigation: TuiNavigation,
     inventory_notifications: InventoryNotificationState,
     logopolis: Option<LogopolisState>,
 }

@@ -679,20 +679,6 @@ fn test_self_movement_capabilities(
     }
 }
 
-fn collision_scene_for_interest(interest: &SimulationSceneInterest) -> CollisionScene {
-    let mut scene = CollisionScene::new();
-    for owner in interest.owners() {
-        scene
-            .insert(LandblockCollisionAsset {
-                landblock_id: owner.0,
-                terrain: TerrainCollisionSurface::empty(),
-                static_geometry: LandblockColliders::default(),
-            })
-            .unwrap();
-    }
-    scene
-}
-
 fn flat_collision_scene_for_interest(interest: &SimulationSceneInterest) -> CollisionScene {
     let mut scene = CollisionScene::new();
     for owner in interest.owners() {
@@ -2094,12 +2080,7 @@ async fn world_activation_retires_pre_portal_movement_epoch() {
         .expect("destination activation should leave movement idle");
 
     assert!(!client.movement.has_active_manual_drive());
-    assert_eq!(
-        client
-            .movement
-            .current_local_drive_control(&client.world, Duration::from_millis(30)),
-        None
-    );
+    assert!(!client.movement.has_local_steering());
 }
 
 #[tokio::test]
@@ -3076,50 +3057,6 @@ fn simulation_build_projection_returns_none_without_projectable_remote() {
 }
 
 #[tokio::test]
-async fn simulation_build_projection_carries_active_autonomous_drive() {
-    let mut client = builder::build_test_client(ClientState::InWorld);
-    let guid = Guid(0x0102_0304);
-    let now = Instant::now();
-    client
-        .world
-        .seed_local_player_entity(guid, "Player", outdoor_pose(0.0, 0.0, 0.0));
-
-    client.movement.enqueue_drive_intent(
-        movement_types::PlayerDriveIntent::ClientDirected(
-            crate::client::movement_types::ClientDirectedCommand::Acquire(
-                movement_types::AutonomousDriveIntent {
-                    desired_world_delta: Vector3::new(3.0, 4.0, 0.0),
-                    desired_heading: Some(1.5),
-                    target_hint: Some(pose_at(0x1000_0100, 30.0, 40.0, 0.0)),
-                    gait: movement_types::Gait::Run,
-                    force_grounded: true,
-                },
-            ),
-        ),
-        now,
-    );
-
-    client
-        .movement
-        .tick(now, &mut client.world, &mut client.session)
-        .await
-        .expect("movement tick should activate autonomous drive for the current frame");
-
-    let local_drive = client
-        .movement
-        .current_local_drive_control(&client.world, physics_dt())
-        .expect("active autonomous drive should remain a movement-owned actuation input");
-    assert_eq!(local_drive.body_id, SpatialBodyId::LocalPlayer(guid));
-    assert_eq!(local_drive.desired_world_delta, Vector3::new(3.0, 4.0, 0.0));
-    assert_eq!(local_drive.desired_heading, Some(1.5));
-    assert_eq!(
-        local_drive.gait,
-        holtburger_world::spatial::LocalDriveGait::Run
-    );
-    assert!(local_drive.force_grounded);
-}
-
-#[tokio::test]
 async fn simulation_build_projection_discovers_nearby_actor() {
     let mut client = builder::build_test_client(ClientState::InWorld);
     let player_guid = Guid(0x0102_0304);
@@ -3271,103 +3208,6 @@ async fn simulation_tick_leaves_a_pose_only_local_player_authoritative() {
         WorldEvent::RuntimeBodyChanged {
             body_id: SpatialBodyId::LocalPlayer(_)
         }
-    )));
-}
-
-#[tokio::test]
-async fn simulation_tick_uses_the_installed_scene_snapshot_for_local_transaction() {
-    let mut client = builder::build_test_client(ClientState::InWorld);
-    let guid = Guid(0x0102_0304);
-    let now = Instant::now();
-    let player_pose = outdoor_pose(0.0, 0.0, 0.0);
-
-    client
-        .world
-        .seed_local_player_entity(guid, "Player", player_pose);
-    let definition = PhysicalBodyDefinition::free_sphere(
-        PhysicalSphereSet::new(
-            holtburger_common::Sphere {
-                center: Vector3::zero(),
-                radius: 0.5,
-            },
-            None,
-        )
-        .expect("test sphere should be valid"),
-    )
-    .expect("test physical definition should be valid");
-    let body_id = SpatialBodyId::LocalPlayer(guid);
-    client
-        .world
-        .scene
-        .set_dynamic_physical_body(
-            body_id,
-            Some(dynamic_definition(
-                definition,
-                PhysicalBodyResponsePolicy {
-                    restitution: PhysicalRestitution::Inelastic,
-                    friction: PhysicalFriction::DEFAULT,
-                    surface_motion: PhysicalSurfaceMotion::Stable,
-                    align_path: false,
-                },
-            )),
-            PhysicalCollisionFilter::ALL,
-            None,
-        )
-        .expect("seeded local player should have a canonical body");
-
-    let interest =
-        SimulationSceneInterest::prefetch_neighborhood(player_pose, CLIENT_COLLISION_OWNER_RADIUS)
-            .expect("non-null player residency should demand collision");
-    let collision = collision_snapshot(interest.clone(), collision_scene_for_interest(&interest));
-
-    client.movement.enqueue_drive_intent(
-        movement_types::PlayerDriveIntent::ClientDirected(
-            crate::client::movement_types::ClientDirectedCommand::Acquire(
-                movement_types::AutonomousDriveIntent {
-                    desired_world_delta: Vector3::new(1.0, 0.0, 0.0),
-                    desired_heading: Some(0.0),
-                    target_hint: None,
-                    gait: movement_types::Gait::Run,
-                    force_grounded: true,
-                },
-            ),
-        ),
-        now,
-    );
-    client
-        .movement
-        .tick(now, &mut client.world, &mut client.session)
-        .await
-        .expect("movement tick should activate the autonomous drive");
-
-    let events = simulation::tick(
-        now,
-        physics_dt(),
-        &mut client.world,
-        &mut client.movement,
-        Some(&collision),
-    )
-    .expect("ready collision products should permit the local transaction");
-
-    let body = client
-        .world
-        .scene
-        .body(body_id)
-        .expect("local player body should remain registered");
-    assert!(body.pose.coords.x > player_pose.coords.x);
-    assert_eq!(
-        client
-            .world
-            .player_position()
-            .expect("authoritative player pose should remain available"),
-        player_pose
-    );
-    assert!(events.events.iter().any(|event| matches!(
-        event,
-        WorldEvent::RuntimeBodyAdvanced {
-            body_id: event_id,
-            ..
-        } if *event_id == body_id
     )));
 }
 

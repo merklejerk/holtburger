@@ -1,7 +1,11 @@
+use crate::client::control::{
+    ClientCommandEnvelope, CommandAdmission, CommandRejection, ControlSource,
+};
 use crate::client::progression::{
     ClientProgressionEvaluation, ClientProgressionFeedback, ClientProgressionQuote,
     ClientProgressionRejection,
 };
+use crate::client::steering::LocalNavigationOutcome;
 use crate::client::types::{
     ActionResultReason, ActionResultSource, CharacterManagementOperation, ChatTellTarget,
     ClientCommand, ClientExitCause, ClientViewEvent,
@@ -14,7 +18,6 @@ use holtburger_common::Guid;
 use holtburger_protocol::messages::game_action::*;
 use holtburger_protocol::messages::game_message::GameMessage;
 use holtburger_protocol::messages::*;
-use holtburger_world::interaction::EntityUseRejection;
 use holtburger_world::progression::{ProgressionIntent, StatTarget};
 use std::time::Instant;
 
@@ -112,7 +115,195 @@ impl ClientRuntime {
         Ok(())
     }
 
+    #[cfg(test)]
     pub(in crate::client) async fn handle_command(&mut self, cmd: ClientCommand) -> Result<()> {
+        self.handle_command_envelope(ClientCommandEnvelope::user(cmd))
+            .await
+    }
+
+    pub(in crate::client) async fn handle_command_envelope(
+        &mut self,
+        envelope: ClientCommandEnvelope,
+    ) -> Result<()> {
+        let ClientCommandEnvelope {
+            origin,
+            command: cmd,
+            ack,
+        } = envelope;
+        let reply = |ack: Option<tokio::sync::oneshot::Sender<CommandAdmission>>,
+                     admission: CommandAdmission| {
+            if let Some(tx) = ack {
+                let _ = tx.send(admission);
+            }
+        };
+
+        if origin == ControlSource::Automation && self.is_automation_paused() {
+            reply(ack, CommandAdmission::Rejected(CommandRejection::AutomationPaused));
+            return Ok(());
+        }
+
+        if let ClientCommand::SetAutomationPaused(paused) = cmd {
+            self.automation_paused
+                .store(paused, std::sync::atomic::Ordering::Release);
+            if paused {
+                self.movement.enqueue_cancel_automation();
+                if let Err(error) = self.cancel_automation_combat().await {
+                    reply(
+                        ack,
+                        CommandAdmission::Rejected(CommandRejection::Failed {
+                            message: error.to_string(),
+                        }),
+                    );
+                    return Err(error);
+                }
+            }
+            let _ = self
+                .client_view_event_tx
+                .send(ClientViewEvent::AutomationPausedChanged(paused));
+            reply(
+                ack,
+                CommandAdmission::Accepted {
+                    correlation_id: None,
+                },
+            );
+            return Ok(());
+        }
+
+        if let ClientCommand::StartLocalSteering(request) = cmd {
+            if self.portal.activation.is_some() || !matches!(self.conn.state, ClientState::InWorld)
+            {
+                reply(ack, CommandAdmission::Rejected(CommandRejection::NotInWorld));
+                return Ok(());
+            }
+            if let Err(message) =
+                crate::client::steering::LocalSteeringRuntime::validate_against_world(
+                    request,
+                    &self.world,
+                )
+            {
+                reply(
+                    ack,
+                    CommandAdmission::Rejected(CommandRejection::Validation {
+                        message: message.to_string(),
+                    }),
+                );
+                return Ok(());
+            }
+            let correlation_id = self.mint_correlation_id();
+            self.movement
+                .enqueue_start_local_steering(correlation_id, origin, request);
+            reply(
+                ack,
+                CommandAdmission::Accepted {
+                    correlation_id: Some(correlation_id),
+                },
+            );
+            return Ok(());
+        }
+
+        if let ClientCommand::StopLocalSteering = cmd {
+            let outcome = if origin == ControlSource::User {
+                LocalNavigationOutcome::InterruptedByUser
+            } else {
+                LocalNavigationOutcome::Cancelled
+            };
+            self.movement.enqueue_stop_local_steering(outcome);
+            reply(
+                ack,
+                CommandAdmission::Accepted {
+                    correlation_id: None,
+                },
+            );
+            return Ok(());
+        }
+
+        // Fail fast on lifecycle / busy mismatches for admitted commands so callers awaiting
+        // settlement receive a structured rejection instead of hanging until timeout.
+        if origin == ControlSource::Automation {
+            match &cmd {
+                ClientCommand::SelectCharacter(_)
+                    if !matches!(self.conn.state, ClientState::CharacterSelection) =>
+                {
+                    reply(
+                        ack,
+                        CommandAdmission::Rejected(CommandRejection::InvalidLifecycleState {
+                            expected: "character-selection".into(),
+                        }),
+                    );
+                    return Ok(());
+                }
+                ClientCommand::Logout if !matches!(self.conn.state, ClientState::InWorld) => {
+                    reply(
+                        ack,
+                        CommandAdmission::Rejected(CommandRejection::InvalidLifecycleState {
+                            expected: "in-world".into(),
+                        }),
+                    );
+                    return Ok(());
+                }
+                ClientCommand::Use { .. } | ClientCommand::CastSpell { .. } => {
+                    if !matches!(self.conn.state, ClientState::InWorld) {
+                        reply(ack, CommandAdmission::Rejected(CommandRejection::NotInWorld));
+                        return Ok(());
+                    }
+                    if let Some(active) = self.character.active_busy_operation.as_ref() {
+                        reply(
+                            ack,
+                            CommandAdmission::Rejected(CommandRejection::Busy {
+                                active: active.operation.kind(),
+                            }),
+                        );
+                        return Ok(());
+                    }
+                }
+                ClientCommand::ReadBookPage {
+                    player, page_index, ..
+                } => {
+                    if !matches!(self.conn.state, ClientState::InWorld)
+                        || *player != self.world.player.guid
+                    {
+                        reply(ack, CommandAdmission::Rejected(CommandRejection::NotInWorld));
+                        return Ok(());
+                    }
+                    if i32::try_from(*page_index).is_err() {
+                        reply(
+                            ack,
+                            CommandAdmission::Rejected(CommandRejection::Validation {
+                                message: format!("book page index {page_index} exceeds i32 wire range"),
+                            }),
+                        );
+                        return Ok(());
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        let correlation_id = match &cmd {
+            ClientCommand::SubmitItemUse(request) => Some(u64::from(request.sequence)),
+            ClientCommand::SubmitSalvage(request) => Some(u64::from(request.sequence)),
+            ClientCommand::VendorTrade(request) => Some(u64::from(request.sequence)),
+            _ => None,
+        };
+
+        let result = self.handle_command_with_origin(origin, cmd).await;
+        match &result {
+            Ok(()) => reply(ack, CommandAdmission::Accepted { correlation_id }),
+            Err(error) => reply(
+                ack,
+                CommandAdmission::Rejected(CommandRejection::Failed {
+                    message: error.to_string(),
+                }),
+            ),
+        }
+        result
+    }
+
+    async fn handle_command_with_origin(
+        &mut self,
+        origin: ControlSource,
+        cmd: ClientCommand,
+    ) -> Result<()> {
         #[cfg(feature = "runtime-fixture")]
         if let Some(capture) = &mut self.runtime_fixture {
             capture.record_command(&cmd)?;
@@ -272,7 +463,12 @@ impl ClientRuntime {
             | ClientCommand::UninviteFromParty { .. } => self.handle_party_command(cmd).await,
 
             ClientCommand::DriveSelf(_) | ClientCommand::ControlCharacter(_) => {
-                self.handle_movement_command(cmd).await
+                self.handle_movement_command(origin, cmd).await
+            }
+            ClientCommand::StartLocalSteering(_)
+            | ClientCommand::StopLocalSteering
+            | ClientCommand::SetAutomationPaused(_) => {
+                unreachable!("handled in handle_command_envelope")
             }
 
             ClientCommand::SetPreciseJumpAim(request) => {
@@ -349,7 +545,9 @@ impl ClientRuntime {
             | ClientCommand::CastSpell { .. }
             | ClientCommand::BeginCombatEngagement { .. }
             | ClientCommand::UpdateCombatProfile(_)
-            | ClientCommand::StopCombatEngagement { .. } => self.handle_combat_command(cmd).await,
+            | ClientCommand::StopCombatEngagement { .. } => {
+                self.handle_combat_command(origin, cmd).await
+            }
 
             ClientCommand::Ping
             | ClientCommand::RequestCurrentApplicationState
@@ -384,7 +582,10 @@ impl ClientRuntime {
             // A refused begin still acknowledges its sequence, without retaining an attack.
             ClientCommand::BeginCombatEngagement {
                 intent_sequence, ..
-            } if self.combat_engagement.admit_intent(intent_sequence) => {
+            } if self
+                .combat_engagement
+                .admit_intent(ControlSource::User, intent_sequence) =>
+            {
                 let _ = self
                     .client_view_event_tx
                     .send(ClientViewEvent::CombatStatusUpdated(
@@ -822,15 +1023,9 @@ impl ClientRuntime {
                         holtburger_world::interaction::entity_use_rejection(&self.world, guid)
                 {
                     // Retail rejects before sending Use or incrementing busy state.
-                    let message = match rejection {
-                        EntityUseRejection::Door { name } => {
-                            format!("You can't open or close this {name} that way")
-                        }
-                        EntityUseRejection::Object { name } => format!("The {name} cannot be used"),
-                    };
                     self.emit_action_result(
                         ActionResultSource::Client,
-                        ActionResultReason::General(message),
+                        ActionResultReason::General(rejection.to_string()),
                     );
                     return Ok(());
                 }
@@ -1053,7 +1248,11 @@ impl ClientRuntime {
         }
     }
 
-    async fn handle_movement_command(&mut self, cmd: ClientCommand) -> Result<()> {
+    async fn handle_movement_command(
+        &mut self,
+        origin: ControlSource,
+        cmd: ClientCommand,
+    ) -> Result<()> {
         match cmd {
             ClientCommand::DriveSelf(intent) => {
                 if self.portal.activation.is_some()
@@ -1067,7 +1266,8 @@ impl ClientRuntime {
                 if intent.interrupts_combat() {
                     self.interrupt_combat_for_player_movement();
                 }
-                self.movement.enqueue_drive_intent(intent, Instant::now());
+                self.movement
+                    .enqueue_drive_intent_from(origin, intent, Instant::now());
                 Ok(())
             }
             ClientCommand::ControlCharacter(event) => {
@@ -1999,7 +2199,9 @@ mod tests {
             .movement
             .prepare_tick(Instant::now(), &mut client.world);
         client.bump_world_generation();
-        client.movement.retire_movement_epoch();
+        client
+            .movement
+            .retire_movement_epoch(crate::client::steering::LocalNavigationOutcome::Teleported);
         client
             .handle_command(ClientCommand::SoulEmote {
                 token: "wave".into(),

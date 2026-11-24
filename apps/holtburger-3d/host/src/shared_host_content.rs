@@ -546,6 +546,7 @@ mod tests {
                             password: String::new(),
                             melee_max_chase_distance: None,
                             appraisal_tuning: None,
+                            live_api: None,
                         },
                     }),
                 )

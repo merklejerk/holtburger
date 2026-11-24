@@ -2,6 +2,7 @@ import { runMage } from "./engine";
 import { MAX_PARTY_DISTANCE } from "./constants";
 import { loadMageConfig } from "./runtime-config";
 import { filterMageDataSpells, loadMageDataWithStatus } from "./runtime-data";
+import { entitySummary } from "./runtime-helpers";
 import { createInitialState, resetState } from "./state";
 import {
 	cancelCombatPlanning,
@@ -18,6 +19,7 @@ import {
 	resolveSpellcastFromWeenieError,
 	resolveHealingKitUseFromChatMessage,
 } from "./runtime-actions";
+import type { MageCombatFeedback } from "./types";
 
 const state = createInitialState();
 
@@ -45,7 +47,8 @@ function handleMessageEvent(
 		spellcastRequest?.targetName ??
 		(spellcastRequest?.targetGuid == null
 			? null
-			: (HB.entity(spellcastRequest.targetGuid)?.name?.trim() ?? null));
+			: (entitySummary(HB.entity(spellcastRequest.targetGuid))?.name?.trim() ??
+				null));
 
 	logMageInfo(
 		`${sourceLabel} received: message="${message}" pendingTargetName="${pendingTargetName}"`,
@@ -66,96 +69,109 @@ function handleMessageEvent(
 	}
 }
 
-function handleCombatFeedbackEvent(feedback: ScriptCombatFeedback): void {
-	if (resolveSpellcastFromCombatFeedback(state, feedback)) {
-		runMage(state);
+function handleApiEvent(apiEvent: JsonObject): void {
+	const kind = typeof apiEvent.kind === "string" ? apiEvent.kind : "";
+	switch (kind) {
+		case "chat":
+		case "tell":
+		case "channel-message": {
+			const message =
+				typeof apiEvent.message === "string" ? apiEvent.message : "";
+			const speaker = apiEvent.speaker as { name?: unknown } | null | undefined;
+			const sender = typeof speaker?.name === "string" ? speaker.name : null;
+			handleMessageEvent(message, sender, kind);
+			return;
+		}
+		case "combat-feedback": {
+			const detail = apiEvent.detail as MageCombatFeedback | undefined;
+			if (detail != null && resolveSpellcastFromCombatFeedback(state, detail)) {
+				runMage(state);
+			}
+			return;
+		}
+		case "teleport-started": {
+			cancelCombatPlanning(state);
+			return;
+		}
+		case "error-notice": {
+			if (
+				apiEvent.source === "weenie" &&
+				resolveSpellcastFromWeenieError(state)
+			) {
+				runMage(state);
+			}
+			return;
+		}
+		case "busy-state-changed": {
+			if (apiEvent.busy === "spell-cast") {
+				observeSpellCastBusy(state);
+			}
+			if (apiEvent.busy == null) {
+				resolveSpellcastFromIdle(state);
+				runMage(state);
+			}
+			return;
+		}
+		case "entity-despawned": {
+			const guid = typeof apiEvent.guid === "number" ? apiEvent.guid : null;
+			if (guid == null) {
+				return;
+			}
+			if (state.combatTargetGuid === guid) {
+				clearCombatTarget(state);
+			}
+			clearAttackHistory(state, guid);
+			clearHealingKitHistory(state, guid);
+			clearVulnerabilityAttemptHistory(state, guid);
+			return;
+		}
+		default:
+			return;
 	}
 }
 
 HB.onEvent((event) => {
 	switch (event.kind) {
-		case "chat_message": {
-			handleMessageEvent(event.data.message, event.data.sender, "chat_message");
-			return;
-		}
-		case "combat_feedback": {
-			handleCombatFeedbackEvent(event.data);
-			return;
-		}
-		case "teleport_started": {
-			cancelCombatPlanning(state);
-			return;
-		}
-		case "weenie_error": {
-			if (resolveSpellcastFromWeenieError(state)) {
-				runMage(state);
+		case "started": {
+			resetState(state);
+			const loadStatus = loadMageDataWithStatus();
+			state.config = loadMageConfig(loadStatus.data);
+			state.data = filterMageDataSpells(
+				loadStatus.data,
+				state.config.bannedSpellIds,
+			);
+			state.maxPartyDistance =
+				parsePositiveNumberArg(event.args, "max-party-dist") ??
+				MAX_PARTY_DISTANCE;
+			state.maxAggroDistance =
+				parsePositiveNumberArg(event.args, "aggro-dist") ??
+				state.maxAggroDistance;
+			logMageInfo("started");
+			if (state.data == null) {
+				HB.print(
+					`mage script started without usable mage data (json=${loadStatus.hasJson}, bin=${loadStatus.hasBin})`,
+					"warn",
+				);
+			} else {
+				HB.print(
+					`loaded mage data: ${Object.keys(state.data.spells).length} spells, ${Object.keys(state.data.skills).length} skills`,
+					"info",
+				);
 			}
+			runMage(state);
 			return;
 		}
-		case "workflow": {
-			if (event.data.kind === "busy_operation_changed") {
-				if (event.data.data.busy === "spell_cast") {
-					observeSpellCastBusy(state);
-				}
-
-				if (event.data.data.busy === "none") {
-					resolveSpellcastFromIdle(state);
-					runMage(state);
-					return;
-				}
-			}
+		case "stopped": {
+			resetState(state);
 			return;
 		}
-		case "entity_disappeared": {
-			if (state.combatTargetGuid === event.data.guid) {
-				clearCombatTarget(state);
-			}
-			clearAttackHistory(state, event.data.guid);
-			clearHealingKitHistory(state, event.data.guid);
-			clearVulnerabilityAttemptHistory(state, event.data.guid);
+		case "tick": {
+			state.elapsedSeconds += event.elapsed;
+			runMage(state);
 			return;
 		}
-		case "lifecycle": {
-			switch (event.data.kind) {
-				case "started": {
-					resetState(state);
-					const loadStatus = loadMageDataWithStatus();
-					state.config = loadMageConfig(loadStatus.data);
-					state.data = filterMageDataSpells(
-						loadStatus.data,
-						state.config.bannedSpellIds,
-					);
-					state.maxPartyDistance =
-						parsePositiveNumberArg(event.data.data.args, "max-party-dist") ??
-						MAX_PARTY_DISTANCE;
-					state.maxAggroDistance =
-						parsePositiveNumberArg(event.data.data.args, "aggro-dist") ??
-						state.maxAggroDistance;
-					logMageInfo("started");
-					if (state.data == null) {
-						HB.print(
-							"warn",
-							`mage script started without usable mage data (json=${loadStatus.hasJson}, bin=${loadStatus.hasBin})`,
-						);
-					} else {
-						HB.print(
-							"info",
-							`loaded mage data: ${Object.keys(state.data.spells).length} spells, ${Object.keys(state.data.skills).length} skills`,
-						);
-					}
-					runMage(state);
-					return;
-				}
-				case "stopped": {
-					resetState(state);
-					return;
-				}
-				case "tick": {
-					state.elapsedSeconds += event.data.data.elapsedSeconds;
-					runMage(state);
-					return;
-				}
-			}
+		case "api": {
+			handleApiEvent(event.event);
 			return;
 		}
 		default:

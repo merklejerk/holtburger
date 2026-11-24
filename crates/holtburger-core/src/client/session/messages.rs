@@ -1260,7 +1260,7 @@ mod tests {
     use super::*;
     use crate::DynamicEntityEvent;
     use crate::client::movement_types::{CharacterDrive, PlayerDriveIntent};
-    use crate::client::{ClientState, PHYSICS_TICK_MS, PendingOperation, builder};
+    use crate::client::{ClientState, PendingOperation, builder};
     use holtburger_common::position::WorldPosition;
     use holtburger_common::properties::{
         PropertyDataId, PropertyInt64, PropertyString, PropertyUpdate,
@@ -1354,7 +1354,9 @@ mod tests {
         assert!(!client.movement.has_server_controlled_motion());
         client.conn.state = ClientState::InWorld;
         client
-            .handle_combat_command(ClientCommand::BeginCombatEngagement {
+            .handle_combat_command(
+                crate::client::control::ControlSource::User,
+                ClientCommand::BeginCombatEngagement {
                 target: Guid(2),
                 intent_sequence: 1,
                 profile: ClientAttackProfile::Missile {
@@ -2669,14 +2671,6 @@ mod tests {
             .expect("server-controlled movement should retain the local runtime body");
         assert_eq!(body.pose, start);
         assert!(client.movement.has_server_controlled_motion());
-        assert_eq!(
-            client.movement.current_local_drive_control(
-                &client.world,
-                std::time::Duration::from_millis(PHYSICS_TICK_MS),
-            ),
-            None,
-            "server directives must not leak into the autonomous velocity controller",
-        );
         assert!(client.world.scene.apply_runtime_body_contact(
             holtburger_world::SpatialBodyId::LocalPlayer(player_guid),
             holtburger_world::ContactState::Grounded,

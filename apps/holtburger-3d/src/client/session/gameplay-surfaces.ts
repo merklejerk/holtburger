@@ -38,6 +38,7 @@ import type {
 } from "./host-contract";
 import type { ClientGameplayPresentationDiagnostics } from "./gameplay-presentation";
 import type {
+	ClientApiState,
 	ClientAppearanceOption,
 	ClientAppearanceOptions,
 	ClientAttackProfile,
@@ -203,6 +204,13 @@ export interface ClientGameplaySettingsSurface {
 	readonly onInspectionPreviewHeightChange: (height: number) => void;
 }
 
+/** Optional localhost Live API indicator & pause toggle surfaced in the character HUD header. */
+export interface ClientLiveApiHudControls {
+	readonly state: ClientApiState;
+	readonly pausePending: boolean;
+	readonly onTogglePaused: () => void;
+}
+
 /** Active character identity, vitals, character sheet, enchantments, appearance, gameplay options, and jump charge/aim. */
 export interface ClientGameplayCharacterSurface {
 	/** Cold identity for character-scoped map search selection. */
@@ -213,6 +221,8 @@ export interface ClientGameplayCharacterSurface {
 	readonly accountName: string | null;
 	/** Imperative transport display reader, independent of world presentation. */
 	readonly readConnection: () => ClientConnectionObservation | null;
+	/** Present only while the localhost Live API server is active. */
+	readonly liveApi?: ClientLiveApiHudControls | null;
 	readonly vitals: readonly ClientVital[];
 	/** Lifecycle-owned permission to present critical-vital warnings. */
 	readonly vitalWarningsEnabled: boolean;

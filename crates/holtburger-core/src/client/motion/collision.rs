@@ -550,6 +550,11 @@ impl ClientCollisionCoordinator {
         self.entity_response_override.is_some()
     }
 
+    /// Whether physical dynamic-entity obstruction is currently active for local movement.
+    pub(in crate::client) fn entity_collision_enabled(&self) -> bool {
+        matches!(self.bodies, ClientBodyPolicy::Physical(_)) && !self.entity_collision_disabled()
+    }
+
     /// Retains character policy across body preparation gaps, applying it immediately when possible.
     /// A request overtaken by character teardown acknowledges the already accepted state.
     pub(in crate::client) fn set_entity_collision_disabled(

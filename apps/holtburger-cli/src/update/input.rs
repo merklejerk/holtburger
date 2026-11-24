@@ -71,6 +71,9 @@ mod tests {
             queued_script_startup: None,
             script_host_config: Default::default(),
             script_directories: Default::default(),
+            live_api_engine: None,
+            live_api_endpoint: None,
+            tokio_handle: None,
         }
     }
 

@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 
 /// Built-in travel actions; spell casting and privileged map teleport are separate behaviors.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum RecallDestination {
     /// Normal lifestone binding, stored by ACE as Sanctuary.

@@ -13,7 +13,7 @@ import {
 	maybeRestoreStamina,
 	maybeRevitalizePartyMember,
 } from "./combat";
-import type { MageSpellRecord } from "./types";
+import type { Fellowship, FellowshipMember, MageSpellRecord } from "./types";
 import { createInitialState } from "./state";
 import { resolveCombatTarget } from "./runtime-actions";
 
@@ -22,15 +22,16 @@ const testGlobal = globalThis as typeof globalThis & {
 		debugLog: typeof HB.debugLog;
 		distance: (left: Guid, right: Guid) => number;
 		castSpell: (spellId: number, targetGuid: Guid | null) => void;
-		party: () => ScriptPartyView | null;
-		entityExists: (guid: Guid) => boolean;
-		selfEntity: () => ScriptSelfView | null;
-		entity: (guid?: Guid) => ScriptSelfView | ScriptEntityView | null;
+		social: () => { fellowship: Fellowship | null };
+		self: () => SelfView;
+		entity: (guid?: Guid) => EntityDetail | null;
+		entities?: (filter?: EntityFilter) => EntitySummary[];
 	};
 };
 
 const recordedCasts: Array<{ spellId: number; targetGuid: Guid | null }> = [];
-let activeSelf: ScriptSelfView | null = null;
+let activeSelf: SelfView;
+activeSelf = sampleSelf({ stamina: 1, mana: 1 });
 
 testGlobal.HB = {
 	debugLog: () => undefined,
@@ -38,10 +39,9 @@ testGlobal.HB = {
 	castSpell: (spellId, targetGuid) => {
 		recordedCasts.push({ spellId, targetGuid });
 	},
-	party: () => null,
-	entityExists: () => false,
-	selfEntity: () => activeSelf,
-	entity: () => activeSelf,
+	social: () => ({ fellowship: null }),
+	self: () => activeSelf,
+	entity: () => null,
 };
 
 test("maybeRestoreStamina casts a stamina recovery spell when stamina is low", () => {
@@ -98,17 +98,19 @@ test("maybeRevitalizePartyMember casts revitalize on low stamina party members",
 		3,
 		(1 + PARTY_REVITALIZE_THRESHOLD) / 2,
 	);
-	const entityByGuid = new Map<Guid, ScriptEntityView>([
-		[lowStaminaMember.guid, sampleEntity()],
-		[higherStaminaMember.guid, sampleEntity()],
+	const entityByGuid = new Map<Guid, EntityDetail>([
+		[lowStaminaMember.guid, sampleEntityDetail(sampleEntity())],
+		[higherStaminaMember.guid, sampleEntityDetail(sampleEntity())],
 	]);
 	testGlobal.HB = {
 		...testGlobal.HB,
-		party: () => ({
-			leaderGuid: self.guid,
-			members: [lowStaminaMember, higherStaminaMember],
+		social: () => ({
+			fellowship: {
+				name: "Test Fellowship",
+				leader_guid: self.guid,
+				members: [lowStaminaMember, higherStaminaMember],
+			},
 		}),
-		entityExists: (guid) => entityByGuid.has(guid),
 		entity: (guid?: Guid) =>
 			guid == null ? null : (entityByGuid.get(guid) ?? null),
 		distance: () => HEALING_DISTANCE / 2,
@@ -140,28 +142,30 @@ function makeSpell(overrides: Partial<MageSpellRecord>): MageSpellRecord {
 	};
 }
 
-function sampleSelf(
-	vitals: Pick<ScriptSelfView, "stamina" | "mana">,
-): ScriptSelfView {
-	const self = {
+function sampleSelf(vitals: Pick<SelfView, "stamina" | "mana">): SelfView {
+	const self: SelfView = {
 		guid: 1 as Guid,
 		name: "Self",
 		position: {
-			landblockId: 1 as Guid,
+			landblock_id: 1 as Guid,
 			coords: { x: 0, y: 0, z: 0 },
 			rotation: { w: 1, x: 0, y: 0, z: 0 },
 		},
+		heading: 0,
 		health: 100,
 		healthMax: 100,
-		encumbrance: 0,
-		capacity: 0,
-		busyOperation: "none",
-		heading: 0,
-		combatMode: 0 as unknown as CombatMode,
 		staminaMax: 1,
 		manaMax: 1,
+		pyreals: 0,
+		burden: 0,
+		combatMode: "peace",
+		busy: null,
+		confirmation: null,
+		spellCastTarget: null,
+		navigation: null,
+		serverTime: 0,
 		...vitals,
-	} as ScriptSelfView;
+	};
 	activeSelf = self;
 	return self;
 }
@@ -169,61 +173,72 @@ function sampleSelf(
 function samplePartyMember(
 	guid: number,
 	staminaPercent: number,
-): ScriptPartyMemberView {
+): FellowshipMember {
 	return {
 		guid: guid as Guid,
 		name: `Party ${guid}`,
-		healthPercent: 1,
-		staminaPercent,
-		manaPercent: 1,
+		level: 50,
+		max_health: 100,
+		max_stamina: 100,
+		max_mana: 100,
+		current_health: 100,
+		current_stamina: Math.round(staminaPercent * 100),
+		current_mana: 100,
 	};
 }
 
-function sampleEntity(): ScriptEntityView {
+function sampleEntity(): EntitySummary {
 	return {
-		isHostile: false,
-		container: 0,
-		wielder: 0,
-		distanceToSelf: 0,
 		guid: 999 as Guid,
 		name: "Entity",
-		weenieId: null,
-		kind: "player",
+		wcid: null,
+		category: "player",
+		isHostile: false,
+		isDead: false,
+		isVendor: false,
 		position: {
-			landblockId: 1 as Guid,
+			landblock_id: 1 as Guid,
 			coords: { x: 0, y: 0, z: 0 },
 			rotation: { w: 1, x: 0, y: 0, z: 0 },
 		},
-		motionCommand: { kind: "walk_forward" },
-		profile: null,
+		distanceToSelf: 0,
+		healthFraction: 1,
+		stackCount: null,
+		container: null,
+		wielder: null,
+	};
+}
+
+function sampleEntityDetail(summary: EntitySummary): EntityDetail {
+	return {
+		summary,
+		facts: null,
+		properties: null,
+		creatureProfile: null,
+		weaponProfile: null,
+		armorProfile: null,
 	};
 }
 
 // Exercise acquisition and retention with the same script-facing contract.
 test("mage acquires only hostile monsters and drops a retained summon", () => {
 	const self = sampleSelf({ stamina: 1, mana: 1 });
-	const mob: ScriptEntityView = {
+	const mob: EntitySummary = {
 		...sampleEntity(),
 		guid: 2 as Guid,
-		kind: "monster",
+		category: "monster",
 		isHostile: true,
 	};
-	const summon: ScriptEntityView = {
+	const summon: EntitySummary = {
 		...mob,
 		guid: 3 as Guid,
 		isHostile: false,
 	};
-	const pvp: ScriptEntityView = { ...mob, guid: 4 as Guid, kind: "player" };
+	const pvp: EntitySummary = { ...mob, guid: 4 as Guid, category: "player" };
 	const context = {
 		...testGlobal.HB,
-		nearbyEntities: () => [
-			summon,
-			mob,
-			pvp,
-			{ ...mob, motionCommand: { kind: "dead" } },
-		],
-		entityExists: () => true,
-		entity: () => mob,
+		entities: () => [summon, mob, pvp, { ...mob, isDead: true }],
+		entity: () => sampleEntityDetail(mob),
 		distance: () => 0,
 	};
 	testGlobal.HB = context;
@@ -240,7 +255,7 @@ test("mage acquires only hostile monsters and drops a retained summon", () => {
 	assert.equal(resolveCombatTarget(state, self, null, 10), null);
 	assert.equal(state.combatTargetGuid, null);
 	mob.isHostile = true;
-	mob.motionCommand = { kind: "dead" };
+	mob.isDead = true;
 	state.combatTargetGuid = mob.guid;
 	assert.equal(resolveCombatTarget(state, self, null, 10), null);
 	assert.equal(state.combatTargetGuid, null);

@@ -279,6 +279,8 @@ pub enum HostEvent {
     ClientCameraStarted(holtburger_core::ClientCameraStartReceipt),
     ClientPresentationDiscontinuity(crate::client_projection::ClientPresentationDiscontinuity),
     ClientExitRequested(crate::client_projection::ClientExitRequested),
+    ClientApiState(crate::client_api::ClientApiStateWire),
+    ClientApiHud(crate::client_api::ClientApiHudEventWire),
     ExplorerFixedTick(ExplorerFixedTickEnvelope),
     ExplorerPossessionEventOutcomes(Vec<PossessionEventOutcome>),
     ExplorerPhysicalFlyMotion(PhysicalFlyMotionPath),
@@ -805,6 +807,10 @@ impl ClientEventSink for StdioEventSink {
             crate::client_projection::ClientHostEvent::ExitRequested(exit) => {
                 HostEvent::ClientExitRequested(exit)
             }
+            crate::client_projection::ClientHostEvent::ApiState(state) => {
+                HostEvent::ClientApiState(state)
+            }
+            crate::client_projection::ClientHostEvent::ApiHud(hud) => HostEvent::ClientApiHud(hud),
         };
         self.send(event)
     }
@@ -1485,6 +1491,7 @@ mod tests {
                     password: "secret".to_string(),
                     melee_max_chase_distance: None,
                     appraisal_tuning: None,
+                    live_api: None,
                 },
             })
             .required_mode(),

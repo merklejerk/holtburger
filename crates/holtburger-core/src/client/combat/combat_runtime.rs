@@ -1,5 +1,6 @@
 //! Shared combat request execution; world and existing operation owners retain state.
 use crate::client::combat_engagement::CombatControlEffect;
+use crate::client::control::ControlSource;
 use crate::client::movement_types::ClientMovementPolicy;
 use crate::client::types::{
     ActionResultReason, ActionResultSource, ClientAttackProfile, ClientCommand, ClientViewEvent,
@@ -342,8 +343,19 @@ impl ClientRuntime {
             .await
     }
 
+    /// Stops any active combat engagement originated by `ControlSource::Automation`.
+    pub(in crate::client) async fn cancel_automation_combat(&mut self) -> Result<()> {
+        let previous = self.combat_engagement.status();
+        if self.combat_engagement.stop_if_automation() {
+            self.emit_combat_status_if_changed(previous);
+            self.advance_combat_engagement(Instant::now()).await?;
+        }
+        Ok(())
+    }
+
     pub(in crate::client) async fn handle_combat_command(
         &mut self,
+        origin: ControlSource,
         command: ClientCommand,
     ) -> Result<()> {
         if !matches!(self.conn.state, ClientState::InWorld) {
@@ -357,7 +369,7 @@ impl ClientRuntime {
                 intent_sequence,
             } => {
                 let previous = self.combat_engagement.status();
-                if !self.combat_engagement.admit_intent(intent_sequence) {
+                if !self.combat_engagement.admit_intent(origin, intent_sequence) {
                     return Ok(());
                 }
                 if self.world.player_is_dead() {
@@ -371,7 +383,8 @@ impl ClientRuntime {
                     return Ok(());
                 }
                 let profile = profile.normalized();
-                self.combat_engagement.begin(
+                self.combat_engagement.begin_from(
+                    origin,
                     target,
                     profile,
                     Instant::now(),
@@ -395,7 +408,7 @@ impl ClientRuntime {
             }
             ClientCommand::StopCombatEngagement { intent_sequence } => {
                 let previous = self.combat_engagement.status();
-                if !self.combat_engagement.admit_intent(intent_sequence) {
+                if !self.combat_engagement.admit_intent(origin, intent_sequence) {
                     return Ok(());
                 }
                 self.combat_engagement.stop();

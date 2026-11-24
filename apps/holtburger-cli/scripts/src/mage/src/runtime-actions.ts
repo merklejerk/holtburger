@@ -7,10 +7,13 @@ import {
 	SPELL_REPEAT_SECONDS,
 	VULN_REPEAT_SECONDS,
 } from "./constants";
-import { isAttackCandidate } from "./runtime-helpers";
+import { entitySummary, isAttackCandidate } from "./runtime-helpers";
 import { isMonsterCandidateInCombatRange } from "./domain/targeting";
 import type {
 	AttackRaySnapshot,
+	FellowshipMember,
+	MageChatMessage,
+	MageCombatFeedback,
 	MageResolvedSpellcast,
 	MageRuntimeState,
 	MageSpellRecord,
@@ -20,6 +23,32 @@ import type {
 	MageSpellcastRequest,
 	MonsterCandidate,
 } from "./types";
+
+type NavigationGoalStatus = {
+	goal?: {
+		kind?: string;
+		target?: Guid;
+	};
+};
+
+function steeringGoal(self: SelfView): NavigationGoalStatus["goal"] | null {
+	if (
+		self.navigation == null ||
+		typeof self.navigation !== "object" ||
+		Array.isArray(self.navigation)
+	) {
+		return null;
+	}
+	return (self.navigation as NavigationGoalStatus).goal ?? null;
+}
+
+export function isFollowingTarget(self: SelfView, targetGuid?: Guid): boolean {
+	const goal = steeringGoal(self);
+	if (goal?.kind !== "follow") {
+		return false;
+	}
+	return targetGuid == null || goal.target === targetGuid;
+}
 
 export function logMageInfo(message: string): void {
 	HB.debugLog(`mage: ${message}`);
@@ -79,7 +108,7 @@ export function spellcastBlocksPlanning(state: MageRuntimeState): boolean {
 
 export function resolveSpellcastFromChatMessage(
 	state: MageRuntimeState,
-	chatEvent: Pick<ScriptChatEvent, "sender" | "message">,
+	chatEvent: MageChatMessage,
 	targetName: string | null,
 ): boolean {
 	const request = currentSpellcastRequest(state);
@@ -122,7 +151,7 @@ export function resolveSpellcastFromChatMessage(
 
 export function resolveSpellcastFromCombatFeedback(
 	state: MageRuntimeState,
-	feedback: ScriptCombatFeedback,
+	feedback: MageCombatFeedback,
 ): boolean {
 	const request = currentSpellcastRequest(state);
 	if (request == null || request.kind !== "attack") {
@@ -130,18 +159,15 @@ export function resolveSpellcastFromCombatFeedback(
 	}
 
 	switch (feedback.kind) {
-		case "victim_notification":
-		case "killer_notification":
+		case "victim-notification":
+		case "killer-notification":
 			return finalizeSpellcast(state, { kind: "succeeded" }) != null;
-		case "attack_done":
-			return feedback.data.error !== "None"
+		case "attack-done":
+			return feedback.ok === false ||
+				(feedback.error != null && feedback.error !== "None")
 				? resolveSpellcastFromWeenieError(state)
 				: false;
-		case "attack_commenced":
-		case "attacker_notification":
-		case "defender_notification":
-		case "evasion_attacker_notification":
-		case "evasion_defender_notification":
+		default:
 			return false;
 	}
 }
@@ -268,11 +294,11 @@ export function failedVulnAttemptCount(
 
 export function hasRecentMissedAttack(
 	state: MageRuntimeState,
-	self: ScriptSelfView,
+	self: SelfView,
 	target: MonsterCandidate,
 ): boolean {
 	const record = state.attackPolicy.lastMissedAttackByTarget.get(target.guid);
-	if (record == null) {
+	if (record == null || self.position == null) {
 		return false;
 	}
 
@@ -358,21 +384,16 @@ export function setCombatTarget(
 
 export function resolveCombatTarget(
 	state: MageRuntimeState,
-	self: ScriptSelfView,
-	partyLeader: ScriptPartyMemberView | null,
+	self: SelfView,
+	partyLeader: FellowshipMember | null,
 	maxAttackRange: number,
-): ScriptEntityView | null {
+): EntitySummary | null {
 	const combatTargetGuid = state.combatTargetGuid;
 	if (combatTargetGuid == null) {
 		return null;
 	}
 
-	if (!HB.entityExists(combatTargetGuid)) {
-		clearCombatTarget(state);
-		return null;
-	}
-
-	const entity = HB.entity(combatTargetGuid);
+	const entity = entitySummary(HB.entity(combatTargetGuid));
 	if (entity == null) {
 		clearCombatTarget(state);
 		return null;
@@ -384,7 +405,7 @@ export function resolveCombatTarget(
 
 	const candidate = {
 		guid: entity.guid,
-		weenieId: entity.weenieId,
+		weenieId: entity.wcid,
 		position: entity.position,
 		distanceToSelf: HB.distance(self.guid, entity.guid),
 		distanceToParty:
@@ -406,31 +427,31 @@ export function resolveCombatTarget(
 
 export function followPartyLeader(
 	state: MageRuntimeState,
-	self: ScriptSelfView,
-	partyLeader: ScriptPartyMemberView | null,
+	self: SelfView,
+	partyLeader: FellowshipMember | null,
 ): boolean {
-	const currentInteraction = HB.currentInteraction();
+	const currentGoal = steeringGoal(self);
 
 	if (partyLeader == null) {
-		if (currentInteraction?.kind === "Follow") {
-			HB.cancelInteraction();
+		if (currentGoal?.kind === "follow") {
+			HB.stopMovement();
 		}
 		return false;
 	}
 
 	if (partyLeader.guid === self.guid) {
 		if (
-			currentInteraction?.kind === "Follow" &&
-			currentInteraction.data.guid !== partyLeader.guid
+			currentGoal?.kind === "follow" &&
+			currentGoal.target !== partyLeader.guid
 		) {
-			HB.cancelInteraction();
+			HB.stopMovement();
 		}
 		return false;
 	}
 
 	if (
-		currentInteraction?.kind === "Follow" &&
-		currentInteraction.data.guid === partyLeader.guid
+		currentGoal?.kind === "follow" &&
+		currentGoal.target === partyLeader.guid
 	) {
 		return true;
 	}
@@ -441,19 +462,18 @@ export function followPartyLeader(
 		FOLLOW_REPEAT_SECONDS,
 		() => {
 			logMageInfo(`follow -> ${partyLeader.guid}`);
-			if (currentInteraction != null) {
-				HB.cancelInteraction();
-			}
+			HB.stopCombat();
 			HB.follow(partyLeader.guid);
 		},
 	);
 }
 
 export function firstHealingKit(): Guid | null {
-	for (const container of HB.inventory()) {
+	const inventory = HB.inventory();
+	for (const container of inventory.containers) {
 		for (const itemGuid of container.items) {
-			const item = HB.entity(itemGuid);
-			if (item?.kind === "healing_kit") {
+			const item = entitySummary(HB.entity(itemGuid));
+			if (item?.category === "healing_kit") {
 				return item.guid;
 			}
 		}
@@ -479,7 +499,7 @@ export function useHealingKitOnTarget(
 		return false;
 	}
 
-	const target = HB.entity(targetGuid);
+	const target = entitySummary(HB.entity(targetGuid));
 	state.healingKitPolicy.pendingUse = {
 		targetGuid,
 		targetName: normalizeCastName(target?.name?.trim() ?? null),
@@ -489,7 +509,7 @@ export function useHealingKitOnTarget(
 	logMageInfo(
 		`heal-kit start -> ${describeHealingKitUse(state.healingKitPolicy.pendingUse)} at ${state.elapsedSeconds.toFixed(2)}s`,
 	);
-	HB.useWith(kitGuid, targetGuid);
+	HB.useItem(kitGuid, targetGuid);
 	return true;
 }
 
@@ -499,7 +519,7 @@ export function healingKitUseBlocksPlanning(state: MageRuntimeState): boolean {
 
 export function resolveHealingKitUseFromChatMessage(
 	state: MageRuntimeState,
-	chatEvent: Pick<ScriptChatEvent, "sender" | "message">,
+	chatEvent: MageChatMessage,
 	targetName: string | null,
 ): boolean {
 	const request = state.healingKitPolicy.pendingUse;
@@ -554,20 +574,30 @@ export function resolveHealingKitUseFromTimeout(
 	return true;
 }
 
-export function clearNonMageInteraction(state: MageRuntimeState): boolean {
-	const interaction = HB.currentInteraction();
-	if (interaction?.kind !== "Attack" && interaction?.kind !== "Approach") {
-		return false;
+export function clearNonMageInteraction(
+	state: MageRuntimeState,
+	self: SelfView,
+): boolean {
+	const combat = HB.combat();
+	if (combat.state !== "idle" && combat.target != null) {
+		return issueAction(state, `cancel:combat:${combat.target}`, 0.5, () => {
+			HB.stopCombat();
+		});
 	}
 
-	return issueAction(
-		state,
-		`cancel:${interaction.kind}:${interaction.data.guid}`,
-		0.5,
-		() => {
-			HB.cancelInteraction();
-		},
-	);
+	const goal = steeringGoal(self);
+	if (goal?.kind === "approach") {
+		return issueAction(
+			state,
+			`cancel:approach:${goal.target ?? 0}`,
+			0.5,
+			() => {
+				HB.stopMovement();
+			},
+		);
+	}
+
+	return false;
 }
 
 function createSpellcastRequest(
@@ -575,8 +605,9 @@ function createSpellcastRequest(
 	spell: MageSpellRecord,
 	targetGuid: Guid | null,
 ): MageSpellcastRequest {
-	const self = HB.selfEntity();
-	const target = targetGuid == null ? null : HB.entity(targetGuid);
+	const self = HB.self();
+	const target =
+		targetGuid == null ? null : entitySummary(HB.entity(targetGuid));
 	const targetName = normalizeCastName(target?.name?.trim() ?? null);
 
 	return {
@@ -588,7 +619,7 @@ function createSpellcastRequest(
 		kind: spellcastKindForSpell(spell),
 		issuedAt: state.elapsedSeconds,
 		attackRay:
-			spell.type === "attack" && self != null && target != null
+			spell.type === "attack" && self?.position != null && target != null
 				? createAttackRaySnapshot(self.position, target.position)
 				: null,
 	};
@@ -740,7 +771,7 @@ function logSpellcastResolution(
 }
 
 function isResistMessage(
-	chatEvent: Pick<ScriptChatEvent, "sender" | "message">,
+	chatEvent: MageChatMessage,
 	targetName: string | null,
 ): boolean {
 	const message = chatEvent.message.trim().toLowerCase();
@@ -768,7 +799,7 @@ function isResistMessage(
 
 function isVulnerabilityLandingMessage(
 	request: MageSpellcastRequest,
-	chatEvent: Pick<ScriptChatEvent, "sender" | "message">,
+	chatEvent: MageChatMessage,
 	targetName: string | null,
 ): boolean {
 	if (targetName == null || request.spellName == null) {
@@ -782,7 +813,7 @@ function isVulnerabilityLandingMessage(
 
 function isAttackLandingMessage(
 	request: MageSpellcastRequest,
-	chatEvent: Pick<ScriptChatEvent, "sender" | "message">,
+	chatEvent: MageChatMessage,
 	targetName: string | null,
 ): boolean {
 	logMageInfo(
@@ -811,7 +842,7 @@ function isAttackLandingMessage(
 }
 
 function isAttackBlockedMessage(
-	chatEvent: Pick<ScriptChatEvent, "sender" | "message">,
+	chatEvent: MageChatMessage,
 	targetName: string | null,
 ): boolean {
 	if (targetName == null) {
@@ -858,8 +889,8 @@ function isSimilarAttackRay(
 	right: AttackRaySnapshot,
 ): boolean {
 	if (
-		left.from.landblockId !== right.from.landblockId ||
-		left.to.landblockId !== right.to.landblockId
+		left.from.landblock_id !== right.from.landblock_id ||
+		left.to.landblock_id !== right.to.landblock_id
 	) {
 		return false;
 	}
@@ -895,7 +926,7 @@ function attackVectorBetween(
 	from: WorldPosition,
 	to: WorldPosition,
 ): Vector3 | null {
-	if (from.landblockId !== to.landblockId) {
+	if (from.landblock_id !== to.landblock_id) {
 		return null;
 	}
 
@@ -930,7 +961,7 @@ function attackDistanceBucket(distance: number): number {
 
 function cloneWorldPosition(position: WorldPosition): WorldPosition {
 	return {
-		landblockId: position.landblockId,
+		landblock_id: position.landblock_id,
 		coords: {
 			x: position.coords.x,
 			y: position.coords.y,
@@ -974,7 +1005,7 @@ function clearHealingKitUse(state: MageRuntimeState): void {
 }
 
 function isHealingKitFailureMessage(
-	chatEvent: Pick<ScriptChatEvent, "sender" | "message">,
+	chatEvent: MageChatMessage,
 	targetName: string | null,
 ): boolean {
 	if (!isOwnHealingChatSender(chatEvent)) {
@@ -998,7 +1029,7 @@ function isHealingKitFailureMessage(
 }
 
 function isHealingKitSuccessMessage(
-	chatEvent: Pick<ScriptChatEvent, "sender" | "message">,
+	chatEvent: MageChatMessage,
 	targetName: string | null,
 ): boolean {
 	if (!isOwnHealingChatSender(chatEvent)) {
@@ -1020,15 +1051,13 @@ function isHealingKitSuccessMessage(
 	);
 }
 
-function isOwnHealingChatSender(
-	chatEvent: Pick<ScriptChatEvent, "sender" | "message">,
-): boolean {
+function isOwnHealingChatSender(chatEvent: MageChatMessage): boolean {
 	const sender = normalizeCastName(chatEvent.sender?.trim() ?? null);
 	if (sender == null) {
 		return true;
 	}
 
-	const selfName = normalizeCastName(HB.selfEntity()?.name?.trim() ?? null);
+	const selfName = normalizeCastName(HB.self()?.name?.trim() ?? null);
 	if (selfName == null) {
 		return true;
 	}

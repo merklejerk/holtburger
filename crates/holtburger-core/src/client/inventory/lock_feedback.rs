@@ -125,19 +125,24 @@ impl ClientRuntime {
         }
     }
 
+    /// Returns the lock-rejection message when `OpenFailDueToLock` already arrived before `UseDone`.
+    pub(in crate::client) fn pending_lock_rejection_message(&self) -> Option<String> {
+        let pending = self.character.lock_use.as_ref().filter(|pending| {
+            matches!(
+                pending.phase,
+                LockUsePhase::AwaitingCompletion { rejected: true }
+            )
+        })?;
+        let entity = self.valid_lock_entity(pending)?;
+        Some(format!("The {} is locked", entity.name()))
+    }
+
     /// Consume once, and validate the retained incarnation and original deadline at publication.
     fn publish_lock_rejection(&mut self) {
         let Some(pending) = self.character.lock_use.take() else {
             return;
         };
-        let Some(entity) = self.world.entities.get(pending.target).filter(|entity| {
-            Instant::now() < pending.deadline
-                && self.conn.world_generation == pending.world_generation
-                && u64::from(entity.instance_sequence()) == pending.generation
-                // Housing permission failures are not evidence of a pickable lock. Custom/remapped
-                // storage templates and another player's same-target sound remain ambiguous.
-                && entity.wcid != Some(RETAIL_HOUSING_STORAGE_WCID)
-        }) else {
+        let Some(entity) = self.valid_lock_entity(&pending) else {
             return;
         };
         self.emit_action_result(
@@ -151,6 +156,17 @@ impl ClientRuntime {
                 None => ActionResultReason::General(format!("The {} is locked", entity.name())),
             },
         );
+    }
+
+    fn valid_lock_entity(&self, pending: &LockUse) -> Option<&holtburger_world::entity::Entity> {
+        self.world.entities.get(pending.target).filter(|entity| {
+            Instant::now() < pending.deadline
+                && self.conn.world_generation == pending.world_generation
+                && u64::from(entity.instance_sequence()) == pending.generation
+                // Housing permission failures are not evidence of a pickable lock. Custom/remapped
+                // storage templates and another player's same-target sound remain ambiguous.
+                && entity.wcid != Some(RETAIL_HOUSING_STORAGE_WCID)
+        })
     }
 
     /// Interpret lock sounds before scene/audio admission; use completion arrives independently.
@@ -261,8 +277,15 @@ mod tests {
                 receive_lock_sound(&mut client, Guid(7)).await;
             }
             let mut order = Vec::new();
+            let mut busy_failed_locked = false;
             while let Ok(event) = events.try_recv() {
                 match event {
+                    ClientViewEvent::BusyOperationFinished {
+                        result: crate::BusyOperationResult::Failed { message },
+                        ..
+                    } if message == "The Door is locked" => {
+                        busy_failed_locked = true;
+                    }
                     ClientViewEvent::ItemUseFinished(finished) => {
                         assert_eq!(finished.sequence, 41);
                         order.push("finished");
@@ -283,6 +306,7 @@ mod tests {
                 }
             }
             assert_eq!(order, ["finished", "locked"]);
+            assert_eq!(busy_failed_locked, sound_first);
             receive_lock_sound(&mut client, Guid(7)).await;
             while let Ok(event) = events.try_recv() {
                 assert!(!matches!(

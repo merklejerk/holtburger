@@ -8,10 +8,13 @@ repository.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+async-trait.workspace = true
+base64 = "0.22"
 holtburger-content.workspace = true
 holtburger-common.workspace = true
 holtburger-core.workspace = true
 holtburger-dat.workspace = true
+holtburger-live-api.workspace = true
 holtburger-protocol.workspace = true
 holtburger-world.workspace = true
 serde.workspace = true
@@ -31,6 +34,7 @@ rayon.workspace = true
 env_logger.workspace = true
 
 [dev-dependencies]
+holtburger-core = { workspace = true, features = ["test-support"] }
 holtburger-world = { workspace = true, features = ["test-support"] }
 
 [target."cfg(windows)".dependencies]

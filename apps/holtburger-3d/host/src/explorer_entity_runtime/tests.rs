@@ -1737,8 +1737,7 @@ fn releasing_possession_stops_authored_travel() {
     let before = simulation
         .physical_body_snapshot(SpatialBodyId::Entity(guid))
         .unwrap()
-        .pose
-        .coords;
+        .pose;
     for step in 1..=15 {
         runtime
             .tick_physical_collection(
@@ -1750,11 +1749,10 @@ fn releasing_possession_stops_authored_travel() {
     let after = simulation
         .physical_body_snapshot(SpatialBodyId::Entity(guid))
         .unwrap()
-        .pose
-        .coords;
+        .pose;
 
     assert!(
-        (after - before).length() < 0.05,
+        before.distance_to(&after) < 0.05,
         "a released entity keeps no authored momentum: {before:?} -> {after:?}"
     );
 }

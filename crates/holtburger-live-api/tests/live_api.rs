@@ -664,9 +664,18 @@ async fn localhost_server_guards_openapi_long_poll_ws_and_discovery() {
         .await
         .unwrap();
     assert!(logout_resp.accepted);
-    tokio::time::sleep(Duration::from_millis(80)).await;
-    let updated: Value =
-        serde_json::from_str(&std::fs::read_to_string(&discovery_path).unwrap()).unwrap();
+    let mut updated = Value::Null;
+    for _ in 0..40 {
+        if let Ok(raw) = std::fs::read_to_string(&discovery_path)
+            && let Ok(json) = serde_json::from_str::<Value>(&raw)
+        {
+            updated = json;
+            if updated["lifecycle"] == "logging-out" {
+                break;
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
     assert_eq!(updated["lifecycle"], "logging-out");
 
     drop(server);

@@ -712,10 +712,10 @@ function sampleDetail(overrides: Partial<EntitySummary>): EntityDetail {
 			...overrides,
 		},
 		facts: null,
-		properties: null,
 		creatureProfile: null,
 		weaponProfile: null,
 		armorProfile: null,
+		spellBook: [],
 	};
 }
 
@@ -724,6 +724,7 @@ function sampleSelfEntity(): SelfView {
 		guid: 1 as Guid,
 		name: "Self",
 		position: makePosition(0, 0, 0),
+		outdoorCoords: null,
 		heading: 0,
 		health: 100,
 		healthMax: 100,
@@ -765,7 +766,7 @@ function sampleAttackRay(): AttackRaySnapshot {
 
 function makePosition(x: number, y: number, z: number): WorldPosition {
 	return {
-		landblock_id: 1 as Guid,
+		landblockId: 1 as Guid,
 		coords: { x, y, z },
 		rotation: { w: 1, x: 0, y: 0, z: 0 },
 	};

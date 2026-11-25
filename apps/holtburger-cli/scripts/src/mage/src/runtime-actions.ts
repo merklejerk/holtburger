@@ -889,8 +889,8 @@ function isSimilarAttackRay(
 	right: AttackRaySnapshot,
 ): boolean {
 	if (
-		left.from.landblock_id !== right.from.landblock_id ||
-		left.to.landblock_id !== right.to.landblock_id
+		left.from.landblockId !== right.from.landblockId ||
+		left.to.landblockId !== right.to.landblockId
 	) {
 		return false;
 	}
@@ -926,7 +926,7 @@ function attackVectorBetween(
 	from: WorldPosition,
 	to: WorldPosition,
 ): Vector3 | null {
-	if (from.landblock_id !== to.landblock_id) {
+	if (from.landblockId !== to.landblockId) {
 		return null;
 	}
 
@@ -961,18 +961,22 @@ function attackDistanceBucket(distance: number): number {
 
 function cloneWorldPosition(position: WorldPosition): WorldPosition {
 	return {
-		landblock_id: position.landblock_id,
+		landblockId: position.landblockId,
 		coords: {
 			x: position.coords.x,
 			y: position.coords.y,
 			z: position.coords.z,
 		},
-		rotation: {
-			w: position.rotation.w,
-			x: position.rotation.x,
-			y: position.rotation.y,
-			z: position.rotation.z,
-		},
+		...(position.rotation == null
+			? {}
+			: {
+					rotation: {
+						w: position.rotation.w,
+						x: position.rotation.x,
+						y: position.rotation.y,
+						z: position.rotation.z,
+					},
+				}),
 	};
 }
 

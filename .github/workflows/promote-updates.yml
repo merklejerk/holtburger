@@ -28,12 +28,9 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  publish:
+  build:
     runs-on: ubuntu-22.04
     timeout-minutes: 15
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       # Release events identify data; publication always executes trusted main.
       - uses: actions/checkout@v7
@@ -60,6 +57,15 @@ jobs:
       - uses: actions/upload-pages-artifact@v5
         with:
           path: site/build
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
       - name: Deploy website and update feeds
         id: deployment
         uses: actions/deploy-pages@v5

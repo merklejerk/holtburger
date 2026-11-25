@@ -147,10 +147,11 @@ function sampleSelf(vitals: Pick<SelfView, "stamina" | "mana">): SelfView {
 		guid: 1 as Guid,
 		name: "Self",
 		position: {
-			landblock_id: 1 as Guid,
+			landblockId: 1 as Guid,
 			coords: { x: 0, y: 0, z: 0 },
 			rotation: { w: 1, x: 0, y: 0, z: 0 },
 		},
+		outdoorCoords: null,
 		heading: 0,
 		health: 100,
 		healthMax: 100,
@@ -197,7 +198,7 @@ function sampleEntity(): EntitySummary {
 		isDead: false,
 		isVendor: false,
 		position: {
-			landblock_id: 1 as Guid,
+			landblockId: 1 as Guid,
 			coords: { x: 0, y: 0, z: 0 },
 			rotation: { w: 1, x: 0, y: 0, z: 0 },
 		},
@@ -213,10 +214,10 @@ function sampleEntityDetail(summary: EntitySummary): EntityDetail {
 	return {
 		summary,
 		facts: null,
-		properties: null,
 		creatureProfile: null,
 		weaponProfile: null,
 		armorProfile: null,
+		spellBook: [],
 	};
 }
 

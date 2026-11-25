@@ -43,9 +43,12 @@ For failed connections, see [Help](/holtburger/3d/help/).
 
 Open **App settings** in the launcher to manage application-wide preferences:
 
-- **Graphics:** Choose a graphics backend and toggle **Synchronize frames with the display (VSync)** or **Use GPU compositing**. Apply changes with **Save and restart**; **Use defaults** restores your platform’s choices.
+- **Graphics:** Choose a graphics backend and toggle **Synchronize frames with the display (VSync)** or **Use GPU compositing**. Changing graphics settings switches the primary button to **Save and restart**.
 - **Content:** Set or change the default [game-data folder](/holtburger/startup/game-data/) shared by the client and World Explorer without restarting.
+- **Live API:** Enable the opt-in localhost [Live API](/holtburger/live-api/) for future client launches and optionally pick a fixed port (leave blank for automatic discovery).
 - **Diagnostics:** View current graphics details and **Copy hardware info** when reporting visual issues.
+
+All editable tabs share the same **Use defaults**, **Cancel**, and **Save** / **Save and restart** actions at the bottom of the dialog.
 
 For explanations of each graphics setting, see [graphics troubleshooting](/holtburger/3d/help/#before-the-game-opens). If pieces of the interface briefly disappear, see [Windows UI flickering](/holtburger/3d/help/#windows-ui-flickering).
 

@@ -92,13 +92,14 @@ Example: `/run hello a first test` with the [hello example](/holtburger/tui/scri
 
 ## Client and character options
 
-| Command                                      | Action                                |
-| -------------------------------------------- | ------------------------------------- |
-| `/options`, `/option`                        | List supported character options      |
-| `/option SETTING on` / `/option SETTING off` | Change one option                     |
-| `/version`                                   | Show build version and revision       |
-| `/clear`                                     | Clear chat and the current input line |
-| `/quit`, `/exit`                             | Exit the client                       |
-| `/logopolis`                                 | Open Logopolis                        |
+| Command                                      | Action                                                                                                                   |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `/options`, `/option`                        | List supported character options                                                                                         |
+| `/option SETTING on` / `/option SETTING off` | Change one option                                                                                                        |
+| `/api [status\|pause\|resume\|prompt]`       | Inspect localhost [Live API](/holtburger/live-api/) status, pause/resume automation, or copy the AI agent starter prompt |
+| `/version`                                   | Show build version and revision                                                                                          |
+| `/clear`                                     | Clear chat and the current input line                                                                                    |
+| `/quit`, `/exit`                             | Exit the client                                                                                                          |
+| `/logopolis`                                 | Open Logopolis                                                                                                           |
 
 Examples: `/option trade-chat on`, `/option share-xp off`. Use `/options` for the current setting names.

@@ -51,8 +51,8 @@ omit speculative reassurance and implementation distinctions.
 - Check the implemented workflow and release availability before describing it.
 - Distinguish retail behavior, common plugin workflows and Holtburger behavior.
 - No unsupported uniqueness, superiority, plugin parity or profile-import claims.
-- h3d prioritizes active play. The TUI suits automation. Neither is a judgment
-  about how people play; future h3d scripting is direction, not current support.
+- h3d prioritizes active play. Both clients support the opt-in localhost Live API for external tools, bots, and AI agents; the TUI additionally embeds a lightweight JavaScript runtime for headless automation. Neither is a judgment
+  about how people play; in-client h3d plugins and embedded scripting remain future direction, not current support.
 - Label download calls to action without a release-channel qualifier. Mention nightlies only where necessary
   for support or development.
 - Keep implementation details in developer material unless they explain a useful

@@ -116,8 +116,9 @@
 				to game state and actions and bundled combat scripts to study and adapt.
 			</p>
 			<p>
-				h3d’s focus on active play is a design direction. Plugins and scripting
-				are planned there too; the TUI already gives automation its own home.
+				Want headless automation without running a 3D window? The TUI gives
+				JavaScript bots a lightweight home of their own, backed by the same
+				engine as the Live API.
 			</p>
 			<p><a href={guide('tui')}>Explore the terminal client →</a></p>
 		</div>
@@ -135,6 +136,26 @@
 			>
 			<figcaption>The terminal client.</figcaption>
 		</figure>
+	</section>
+
+	<section class="foundation-spread">
+		<DecorativeArt name="qalabar" class="editorial-vignette" />
+		<div>
+			<h2>Built for bots, tools,<br />and AI agents</h2>
+			<p>
+				Both the 3D and terminal clients include an opt-in, localhost-only Live
+				API with typed state snapshots, spatial previews, real-time events, and
+				3D overlays (ground rings, route polylines, and HUD toasts) over REST
+				and WebSocket.
+			</p>
+			<p>
+				It was designed from the start to be agent-friendly: type
+				<code>/api prompt</code> in chat, paste the copied line into your AI agent,
+				and it discovers the client through a token-efficient guide and OpenAPI 3.1
+				schema.
+			</p>
+			<p><a href={guide('live-api')}>Explore the Live API →</a></p>
+		</div>
 	</section>
 
 	<section class="explorer-spread">

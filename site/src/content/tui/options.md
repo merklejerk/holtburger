@@ -35,6 +35,13 @@ After saving the [hello example](/holtburger/tui/scripting/), add `--character B
 
 `-Q` does not mean quiet or headless. Use an external supervisor if you want an exit to cause a restart.
 
+## Live API
+
+| Option            | Meaning                                                                            |
+| ----------------- | ---------------------------------------------------------------------------------- |
+| `--api`           | Enable the localhost [Live API](/holtburger/live-api/) server on an automatic port |
+| `--api-port PORT` | Bind the localhost Live API to a specific port (implies `--api`)                   |
+
 ## Logs and diagnostics
 
 | Option                       | Meaning                                                       |

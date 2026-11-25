@@ -29,6 +29,7 @@ Holtburger’s UX, rendering and physics take their own direction. The game know
 | Tools & crafting         | [Keys and lockpicks](/holtburger/3d/locks/) get an integrated helper. [Crafting and salvage](/holtburger/3d/crafting/) offer success-chance confirmation and mixed-material salvage estimates. Giving remembers your recipient while you browse items.                                                                                                                                                                                                                    |
 | Housing & contracts      | [Housing](/holtburger/3d/housing/) combines map searches, payment auto-fill and home management. The [Journal](/holtburger/3d/journal/) adds search, status filters, repeat timers and mapped destinations.                                                                                                                                                                                                                                                               |
 | Character appearance     | [Live in-world barbershop previews](/holtburger/3d/appearance/) and helmet/cloak visibility toggles conveniently beside your equipment.                                                                                                                                                                                                                                                                                                                                   |
+| Automation & Live API    | Opt-in localhost [Live API](/holtburger/live-api/) in both 3D and terminal clients for bots, companion tools, and AI agents—with typed REST/WebSocket snapshots, spatial previews, OpenAPI 3.1, and `/api prompt` agent onboarding.                                                                                                                                                                                                                                       |
 
 </IllustratedProse>
 
@@ -40,6 +41,6 @@ These tools are built in. Existing Decal plugins and profiles cannot be imported
 
 ## Plugins, scripts and automation
 
-h3d prioritizes streamlined, active play. It has no plugin system yet; plugins and scripting are planned, with automation among their intended uses.
+h3d prioritizes streamlined, active play, and both clients now include an opt-in localhost [Live API](/holtburger/live-api/) for external bots, companion tools, and AI agents. In-client plugins and embedded 3D scripting remain future direction.
 
-The [terminal client](/holtburger/tui/) already supports JavaScript and bundled fighter/mage scripts. It is the preferred form factor for macros and bots without running a full 3D client. Trade and buff services need scripts tailored to those tasks.
+The [terminal client](/holtburger/tui/) also supports embedded JavaScript and bundled fighter/mage scripts. It is the preferred form factor for headless macros and bots without running a full 3D client. Trade and buff services need scripts tailored to those tasks.

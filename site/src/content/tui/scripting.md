@@ -39,7 +39,7 @@ To start at launch, add `--character NAME --run hello` to your connection comman
 
 ## Runtime and events
 
-The TUI loads one JavaScript file into an embedded Deno Core runtime. `HB` is the API global; `Holtburger` is an alias. Bundle dependencies into one file: the runtime does not provide Node or full Deno APIs, a browser DOM, runtime `import()`/`require()`, unrestricted filesystem access or general-purpose networking.
+The TUI loads one JavaScript file into an embedded Deno Core runtime backed by the same engine as the localhost [Live API](/holtburger/live-api/). `HB` is the API global; `Holtburger` is an alias. Bundle dependencies into one file: the runtime does not provide Node or full Deno APIs, a browser DOM, runtime `import()`/`require()`, unrestricted filesystem access or general-purpose networking.
 
 Register handlers with `HB.onEvent(handler)`. They run synchronously in registration order, so keep each handler short. Check for missing state and wait for feedback before repeating an action; submitting an action does not mean it has finished.
 

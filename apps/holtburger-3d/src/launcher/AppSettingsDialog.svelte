@@ -65,14 +65,9 @@
 	/** Brief acknowledgement in the copy button after a successful clipboard write. */
 	let copied = $state<"hardware" | "failure" | null>(null);
 	let copyStatus = $state<string | null>(null);
-	/** Brief acknowledgement after persisting the default content directory or Live API settings. */
-	let contentSaved = $state(false);
-	let liveApiSaved = $state(false);
 	const CONFIRMATION_MS = 2_000;
 	/** Replaced on each confirmation and cleared when the dialog closes. */
 	let copyConfirmationTimer: ReturnType<typeof setTimeout> | null = null;
-	let contentSavedTimer: ReturnType<typeof setTimeout> | null = null;
-	let liveApiSavedTimer: ReturnType<typeof setTimeout> | null = null;
 
 	const normalizedContentDraft = $derived(
 		loaded === null
@@ -81,29 +76,44 @@
 				? null
 				: loaded.contentDraft.trim(),
 	);
-	const canSaveContent = $derived(
+	const graphicsDirty = $derived(
+		loaded !== null &&
+			(loaded.draft.graphicsBackend !==
+				loaded.snapshot.settings.graphicsBackend ||
+				loaded.draft.vsync !== loaded.snapshot.settings.vsync ||
+				loaded.draft.gpuCompositing !==
+					loaded.snapshot.settings.gpuCompositing),
+	);
+	const restartNeeded = $derived(
+		loaded !== null && (loaded.snapshot.restartRequired || graphicsDirty),
+	);
+	const liveApiPortBaseline = $derived(
+		loaded === null || loaded.snapshot.settings.liveApi.port === null
+			? ""
+			: String(loaded.snapshot.settings.liveApi.port),
+	);
+	const liveApiDirty = $derived(
+		loaded !== null &&
+			(loaded.draft.liveApi.enabled !==
+				loaded.snapshot.settings.liveApi.enabled ||
+				(loaded.draft.liveApi.enabled &&
+					loaded.apiPortDraft.trim() !== liveApiPortBaseline)),
+	);
+	const contentDirty = $derived(
 		loaded !== null &&
 			(normalizedContentDraft !== loaded.content.location ||
 				loaded.content.diagnostic !== null ||
 				loaded.content.attentionMessage !== null),
 	);
-
-	function clearContentSaved(): void {
-		if (contentSavedTimer !== null) clearTimeout(contentSavedTimer);
-		contentSavedTimer = null;
-		contentSaved = false;
-	}
-	function clearLiveApiSaved(): void {
-		if (liveApiSavedTimer !== null) clearTimeout(liveApiSavedTimer);
-		liveApiSavedTimer = null;
-		liveApiSaved = false;
-	}
+	const hasChanges = $derived(restartNeeded || contentDirty || liveApiDirty);
 
 	function parseApiPortDraft(raw: string): number | null {
 		const trimmed = raw.trim();
 		if (trimmed === "") return null;
 		if (!/^[0-9]+$/.test(trimmed))
-			throw new Error("Live API port must be a whole number between 1 and 65535.");
+			throw new Error(
+				"Live API port must be a whole number between 1 and 65535.",
+			);
 		const parsed = Number(trimmed);
 		if (!Number.isSafeInteger(parsed) || parsed < 1 || parsed > 65_535)
 			throw new Error("Live API port must be between 1 and 65535.");
@@ -113,8 +123,6 @@
 	async function load(): Promise<void> {
 		operation = "loading";
 		failure = null;
-		clearContentSaved();
-		clearLiveApiSaved();
 		try {
 			const [snapshot, content] = await Promise.all([
 				transport.appSettings(),
@@ -139,44 +147,60 @@
 			operation = "idle";
 		}
 	}
-	async function saveAndRestart(): Promise<void> {
-		if (loaded === null || operation !== "idle") return;
-		operation = "saving";
+	function resetDefaults(): void {
+		if (loaded === null) return;
 		failure = null;
-		try {
-			await transport.saveAppSettings({
-				...loaded.draft,
-				liveApi: { ...loaded.snapshot.settings.liveApi },
-			});
-			await transport.restart();
-		} catch (error) {
-			failure = error instanceof Error ? error.message : String(error);
-		} finally {
-			operation = "idle";
-		}
+		loaded.draft = {
+			...loaded.snapshot.defaults,
+			liveApi: { ...loaded.snapshot.defaults.liveApi },
+		};
+		loaded.apiPortDraft =
+			loaded.snapshot.defaults.liveApi.port === null
+				? ""
+				: String(loaded.snapshot.defaults.liveApi.port);
 	}
-	async function saveLiveApi(): Promise<void> {
-		if (loaded === null || operation !== "idle") return;
-		clearLiveApiSaved();
+	async function save(): Promise<void> {
+		if (loaded === null || operation !== "idle" || !hasChanges) return;
 		operation = "saving";
 		failure = null;
 		try {
+			const graphicsChanged = graphicsDirty;
+			const shouldRestart = restartNeeded;
+			const shouldSaveAppSettings = graphicsChanged || liveApiDirty;
+			const shouldSaveContent = contentDirty;
 			const port = loaded.draft.liveApi.enabled
 				? parseApiPortDraft(loaded.apiPortDraft)
 				: loaded.snapshot.settings.liveApi.port;
-			const nextSettings: AppSettings = {
-				...loaded.snapshot.settings,
-				liveApi: { ...loaded.draft.liveApi, port },
-			};
-			await transport.saveAppSettings(nextSettings);
-			loaded.snapshot = { ...loaded.snapshot, settings: nextSettings };
-			loaded.draft.liveApi = { ...nextSettings.liveApi };
-			loaded.apiPortDraft = port === null ? "" : String(port);
-			liveApiSaved = true;
-			liveApiSavedTimer = setTimeout(() => {
-				liveApiSaved = false;
-				liveApiSavedTimer = null;
-			}, CONFIRMATION_MS);
+
+			if (shouldSaveAppSettings) {
+				const nextSettings: AppSettings = {
+					...loaded.draft,
+					liveApi: { ...loaded.draft.liveApi, port },
+				};
+				await transport.saveAppSettings(nextSettings);
+				loaded.snapshot = {
+					...loaded.snapshot,
+					settings: nextSettings,
+					restartRequired: loaded.snapshot.restartRequired || graphicsChanged,
+				};
+				loaded.draft = {
+					...nextSettings,
+					liveApi: { ...nextSettings.liveApi },
+				};
+				loaded.apiPortDraft = port === null ? "" : String(port);
+			}
+			if (shouldSaveContent) {
+				const saved = await transport.saveDefaultContent(
+					normalizedContentDraft,
+				);
+				loaded.content = saved;
+				loaded.contentDraft = saved.location ?? "";
+			}
+			if (shouldRestart) {
+				await transport.restart();
+			} else {
+				onCancel();
+			}
 		} catch (error) {
 			failure = error instanceof Error ? error.message : String(error);
 		} finally {
@@ -191,28 +215,7 @@
 			const picked = await transport.chooseContentPath(normalizedContentDraft);
 			if (picked !== null) {
 				loaded.contentDraft = picked;
-				clearContentSaved();
 			}
-		} catch (error) {
-			failure = error instanceof Error ? error.message : String(error);
-		} finally {
-			operation = "idle";
-		}
-	}
-	async function saveDefaultContent(): Promise<void> {
-		if (loaded === null || operation !== "idle" || !canSaveContent) return;
-		clearContentSaved();
-		operation = "saving";
-		failure = null;
-		try {
-			const saved = await transport.saveDefaultContent(normalizedContentDraft);
-			loaded.content = saved;
-			loaded.contentDraft = saved.location ?? "";
-			contentSaved = true;
-			contentSavedTimer = setTimeout(() => {
-				contentSaved = false;
-				contentSavedTimer = null;
-			}, CONFIRMATION_MS);
 		} catch (error) {
 			failure = error instanceof Error ? error.message : String(error);
 		} finally {
@@ -250,8 +253,6 @@
 	});
 	onDestroy(() => {
 		if (copyConfirmationTimer !== null) clearTimeout(copyConfirmationTimer);
-		if (contentSavedTimer !== null) clearTimeout(contentSavedTimer);
-		if (liveApiSavedTimer !== null) clearTimeout(liveApiSavedTimer);
 	});
 </script>
 
@@ -339,7 +340,6 @@
 								id={`${id}-default-content`}
 								class="ui-input"
 								bind:value={loaded.contentDraft}
-								oninput={clearContentSaved}
 								placeholder="Automatic discovery"
 								disabled={busy}
 							/>
@@ -353,7 +353,6 @@
 										disabled={busy}
 										onclick={() => {
 											if (loaded) loaded.contentDraft = "";
-											clearContentSaved();
 										}}>×</button
 									>
 								{/if}
@@ -399,7 +398,6 @@
 							type="checkbox"
 							name="liveApiEnabled"
 							bind:checked={loaded.draft.liveApi.enabled}
-							onchange={clearLiveApiSaved}
 							disabled={busy}
 						/> Enable localhost Live API</label
 					>
@@ -410,7 +408,6 @@
 							class="ui-input"
 							inputmode="numeric"
 							bind:value={loaded.apiPortDraft}
-							oninput={clearLiveApiSaved}
 							placeholder="Automatic (ephemeral)"
 							disabled={busy || !loaded.draft.liveApi.enabled}
 						/>
@@ -474,83 +471,22 @@
 	</div>
 	{#if failure}<p role="alert">{failure}</p>{/if}
 	<div class="ui-dialog-actions">
-		{#if selected === "graphics"}
-			{#if loaded}
-				<button
-					class="ui-button"
-					disabled={busy}
-					onclick={() => {
-						if (loaded) {
-							loaded.draft = {
-								...loaded.snapshot.defaults,
-								liveApi: { ...loaded.draft.liveApi },
-							};
-						}
-					}}>Use defaults</button
-				>
-			{:else if operation !== "loading"}
-				<button class="ui-button" disabled={busy} onclick={() => void load()}
-					>Retry</button
-				>
-			{/if}
-		{:else if selected === "content"}
-			{#if loaded}
-				<button
-					class="ui-button"
-					disabled={busy || loaded.contentDraft === ""}
-					onclick={() => {
-						if (loaded) loaded.contentDraft = "";
-						clearContentSaved();
-					}}>Use automatic</button
-				>
-			{:else if operation !== "loading"}
-				<button class="ui-button" disabled={busy} onclick={() => void load()}
-					>Retry</button
-				>
-			{/if}
-		{:else if selected === "live-api"}
-			{#if loaded}
-				<button
-					class="ui-button"
-					disabled={busy}
-					onclick={() => {
-						if (loaded) {
-							loaded.draft.liveApi = { ...loaded.snapshot.defaults.liveApi };
-							loaded.apiPortDraft = "";
-							clearLiveApiSaved();
-						}
-					}}>Use defaults</button
-				>
-			{:else if operation !== "loading"}
-				<button class="ui-button" disabled={busy} onclick={() => void load()}
-					>Retry</button
-				>
-			{/if}
+		{#if loaded}
+			<button class="ui-button" disabled={busy} onclick={resetDefaults}
+				>Use defaults</button
+			>
+		{:else if operation !== "loading"}
+			<button class="ui-button" disabled={busy} onclick={() => void load()}
+				>Retry</button
+			>
 		{/if}
 		<button class="ui-button" disabled={busy} onclick={onCancel}>Cancel</button>
-		{#if selected === "graphics"}
-			<button
-				class="ui-button"
-				disabled={busy || loaded === null}
-				onclick={() => void saveAndRestart()}>Save and restart</button
-			>
-		{:else if selected === "content"}
-			<button
-				class="ui-button"
-				aria-live="polite"
-				disabled={busy || !canSaveContent}
-				onclick={() => void saveDefaultContent()}
-				>{contentSaved ? "Saved!" : "Save"}</button
-			>
-		{:else if selected === "live-api"}
-			<button
-				class="ui-button"
-				aria-live="polite"
-				disabled={busy || loaded === null}
-				onclick={() => void saveLiveApi()}
-				>{liveApiSaved ? "Saved!" : "Save"}</button
-			>
-		{/if}
+		<button
+			class="ui-button"
+			disabled={busy || loaded === null || !hasChanges}
+			onclick={() => void save()}
+			>{restartNeeded ? "Save and restart" : "Save"}</button
+		>
 	</div>
 </UiDialog>
 

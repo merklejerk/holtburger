@@ -393,10 +393,14 @@ figcaption {
 .terminal-spread,
 .explorer-spread {
 	display: grid;
-	grid-template-columns: 0.8fr 1.2fr;
+	grid-template-columns: 1.2fr 0.8fr;
 	gap: 2.5rem;
 	align-items: start;
 	padding-block: 2.5rem 1rem;
+}
+.terminal-spread > div,
+.explorer-spread > div {
+	order: 2;
 }
 .terminal-plate,
 .explorer-spread .media-figure {
@@ -1001,6 +1005,10 @@ figcaption {
 		grid-template-columns: minmax(0, 1fr);
 		gap: 1rem;
 		padding-block: 1.5rem;
+	}
+	.terminal-spread > div,
+	.explorer-spread > div {
+		order: 0;
 	}
 	.foundation-spread {
 		padding-block: 2rem;

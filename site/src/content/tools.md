@@ -18,6 +18,10 @@ For launching Explorer directly from a terminal, see the [Windows](/holtburger/s
 
 </IllustratedProse>
 
+## Live API
+
+Both the 3D and terminal clients include an opt-in, localhost-only HTTP/WebSocket API for external bots, companion tools, and AI agents. See [Live API & AI agents](/holtburger/live-api/) for enabling it in the launcher or CLI and using `/api prompt` to connect an agent.
+
 ## Data utilities
 
 Terminal-client bundles also include `dat-tool` and `dat2hba`. Use their `--help` output for available inspection and conversion commands. Ordinary TUI play uses the prepared data in the bundle; ordinary 3D play can use a retail installation directly.

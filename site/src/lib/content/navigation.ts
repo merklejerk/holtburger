@@ -157,6 +157,15 @@ export const navigation = [
 		]
 	},
 	{
+		title: 'Automation & API',
+		links: [
+			{
+				slug: 'live-api',
+				label: 'Live API & AI agents'
+			}
+		]
+	},
+	{
 		title: 'Terminal client',
 		links: [
 			{

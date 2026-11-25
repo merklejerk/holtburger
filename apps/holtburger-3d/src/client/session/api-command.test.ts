@@ -92,7 +92,7 @@ describe("runClientApiCommand", () => {
 			(m) => messages.push(m),
 		);
 		expect(messages.at(-1)?.message).toBe(
-			"Usage: /api [status|pause|resume|prompt|say MESSAGE]",
+			"Usage: /api [status|pause|resume|prompt|say <message>]",
 		);
 	});
 
@@ -180,7 +180,7 @@ describe("runClientApiCommand", () => {
 			sendMessage,
 			(m) => messages.push(m),
 		);
-		expect(messages.at(-1)?.message).toBe("Usage: /bot MESSAGE");
+		expect(messages.at(-1)?.message).toBe("Usage: /bot <message>");
 
 		await runClientApiCommand(
 			"/bot hello",

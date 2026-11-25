@@ -183,7 +183,7 @@ export const LOCAL_COMMANDS = {
 		],
 	},
 	api: {
-		...invocation(["api"], "[status|pause|resume|prompt|say MESSAGE]"),
+		...invocation(["api"], "[status|pause|resume|prompt|say <message>]"),
 		description:
 			"Inspect, pause/resume, message, or copy an agent prompt for the Live API.",
 		details: [
@@ -191,14 +191,14 @@ export const LOCAL_COMMANDS = {
 			"/api pause immediately stops active automation steering/combat and blocks further automation commands.",
 			"/api resume re-enables automation commands.",
 			"/api prompt copies a one-line starter prompt with your live endpoint to the clipboard.",
-			"/api say MESSAGE (alias: /bot MESSAGE) sends a local message to connected Live API clients without transmitting to the game server.",
+			"/api say <message> (alias: /bot <message>) sends a local message to connected Live API clients without transmitting to the game server.",
 		],
 	},
 	bot: {
-		...invocation(["bot"], "MESSAGE"),
+		...invocation(["bot"], "<message>"),
 		description: "Send a local message to connected Live API clients.",
 		details: [
-			"Shorthand alias for /api say MESSAGE. Delivered locally as an automation user-message event and never sent to the game server.",
+			"Shorthand alias for /api say <message>. Delivered locally as an automation user-message event and never sent to the game server.",
 		],
 	},
 	waypoint: {

@@ -49,7 +49,7 @@ export async function runClientApiCommand(
 	const rawArg = (apiMatch?.[1] ?? "").trim();
 	const sayMatch = /^say(?:\s+([\s\S]*))?$/i.exec(rawArg);
 	if (sayMatch !== null) {
-		await dispatchUserMessage(sayMatch[1] ?? "", "/api say MESSAGE");
+		await dispatchUserMessage(sayMatch[1] ?? "", "/api say <message>");
 		return true;
 	}
 

@@ -19,8 +19,8 @@ use holtburger_live_api::hooks::{
 };
 use holtburger_live_api::server::{LiveApiServerConfig, LiveApiServerHandle, start_server};
 use holtburger_live_api::types::{
-    ApiCommand, ApiEvent, ApiEventTopic, ApiPreviewRequest, ApiQuery, CommandRequest,
-    CommandResponse, EventsPage, WaitPolicy, WaitUntil, WsClientFrame,
+    ApiCommand, ApiEvent, ApiEventTopic, ApiPreviewRequest, ApiPreviewResponse, ApiQuery,
+    CommandRequest, CommandResponse, EventsPage, WaitPolicy, WaitUntil, WsClientFrame,
     WsServerFrame,
 };
 use holtburger_live_api::{LiveApiEngine, LiveApiEngineConfig};
@@ -183,6 +183,11 @@ async fn engine_reads_previews_wait_settled_pause_and_ring_wraparound() {
         .unwrap();
     assert_eq!(detail.summary.name, "Drudge Skulker");
     assert_eq!(detail.summary.wcid, Some(192));
+    let facts = detail.facts.expect("entity detail should include typed facts");
+    assert!(
+        !facts.blocks_movement,
+        "entities with null landblockId must not report blocksMovement"
+    );
     let props = detail.properties.expect("properties=true should include raw props");
     assert_eq!(props.ints.get("Level"), Some(&12));
 
@@ -194,7 +199,33 @@ async fn engine_reads_previews_wait_settled_pause_and_ring_wraparound() {
         })
         .await
         .unwrap();
-    assert!(preview.get("eligible").is_some());
+    assert!(matches!(preview, ApiPreviewResponse::ItemUseTarget(_)));
+
+    // Outdoor coordinate conversion preview round-trips cleanly.
+    let outdoor = engine
+        .preview(ApiPreviewRequest::OutdoorCoords {
+            coords: Some("42.3N, 15.8E".into()),
+            position: None,
+        })
+        .await
+        .unwrap();
+    let ApiPreviewResponse::OutdoorCoords(converted) = outdoor else {
+        panic!("expected OutdoorCoords preview response, got {outdoor:?}");
+    };
+    assert_eq!(converted.outdoor_coords.label, "42.3N, 15.8E");
+    assert!(!converted.position.is_indoors());
+
+    let roundtrip = engine
+        .preview(ApiPreviewRequest::OutdoorCoords {
+            coords: None,
+            position: Some(converted.position),
+        })
+        .await
+        .unwrap();
+    let ApiPreviewResponse::OutdoorCoords(back) = roundtrip else {
+        panic!("expected OutdoorCoords preview response, got {roundtrip:?}");
+    };
+    assert_eq!(back.outdoor_coords.label, "42.3N, 15.8E");
 
     // Selection hook round-trip emits selection-changed; unmounted hud hook returns UnsupportedCapability.
     let seq_before_sel = engine.event_log().latest_seq();
@@ -338,7 +369,30 @@ async fn localhost_server_guards_openapi_long_poll_ws_and_discovery() {
     let host_body: Value = host_resp.json().await.unwrap();
     assert_eq!(host_body["code"], "forbidden_host");
 
-    // 2. GET /v1/openapi.json returns valid OpenAPI 3.1 covering routes & schemas.
+    // 2. GET / returns the Markdown agent guide with live capabilities and OpenAPI breadcrumb.
+    let guide_resp = http
+        .get(format!("{base}/"))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap();
+    let guide_ct = guide_resp
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    assert!(
+        guide_ct.starts_with("text/markdown"),
+        "expected text/markdown content-type, got {guide_ct}"
+    );
+    let guide_body = guide_resp.text().await.unwrap();
+    assert!(guide_body.contains("**Client**: `h3d`"));
+    assert!(guide_body.contains("`h3d.hud`"));
+    assert!(guide_body.contains("/v1/openapi.json"));
+    assert!(guide_body.contains("[Label](0xHEX)"));
+
+    // 3. GET /v1/openapi.json returns valid OpenAPI 3.1 covering routes & schemas.
     let spec: Value = http
         .get(format!("{base}/v1/openapi.json"))
         .send()
@@ -365,14 +419,63 @@ async fn localhost_server_guards_openapi_long_poll_ws_and_discovery() {
         "/v1/screenshot",
         "/v1/preview",
         "/v1/command",
+        "/v1/ws",
     ] {
         assert!(paths.contains_key(required), "missing OpenAPI path {required}");
     }
     let schemas = spec["components"]["schemas"]
         .as_object()
         .expect("openapi components.schemas");
-    assert!(schemas.contains_key("ApiCommand"));
-    assert!(schemas.contains_key("ApiEvent"));
+    for required_schema in [
+        "ApiCommand",
+        "ApiEvent",
+        "ApiQuery",
+        "ApiPreviewRequest",
+        "ApiPreviewResponse",
+        "CommandOutcome",
+        "CombatFeedbackDetail",
+        "EntityFactsView",
+        "WeaponProfileView",
+        "FellowshipView",
+        "AllegianceView",
+        "SpellInspectionPreview",
+        "SpellCastReadinessView",
+        "SpellCastingRouteView",
+        "WsClientFrame",
+        "WsServerFrame",
+        "ConfirmationType",
+        "OutdoorCoordsView",
+    ] {
+        assert!(
+            schemas.contains_key(required_schema),
+            "missing OpenAPI schema {required_schema}"
+        );
+    }
+
+    // Anti-drift check: every concrete `/v1/...` path and `components.schemas.<Name>` mentioned in
+    // GET / exists in OpenAPI.
+    for raw in guide_body.split(|c: char| {
+        !matches!(c, 'a'..='z' | 'A'..='Z' | '0'..='9' | '/' | '-' | '_' | '.')
+    }) {
+        let token = raw.trim_end_matches('.');
+        if let Some(rest) = token.strip_prefix("/v1/")
+            && !rest.is_empty()
+            && token != "/v1/openapi.json"
+        {
+            assert!(
+                paths.contains_key(token),
+                "GET / agent guide references '{token}' which is not in OpenAPI paths"
+            );
+        }
+        if let Some(schema_name) = token.strip_prefix("components.schemas.")
+            && !schema_name.is_empty()
+        {
+            assert!(
+                schemas.contains_key(schema_name),
+                "GET / agent guide references schema '{schema_name}' which is not in OpenAPI components.schemas"
+            );
+        }
+    }
     assert!(
         paths["/v1/info"]["get"]["summary"].as_str().is_some(),
         "OpenAPI routes should declare summaries"
@@ -478,6 +581,22 @@ async fn localhost_server_guards_openapi_long_poll_ws_and_discovery() {
             assert_eq!(result["name"], "TestBot");
         }
         other => panic!("expected response frame, got {other:?}"),
+    }
+
+    // Invalid WS frame preserves caller correlation `id` in the error reply.
+    ws.send(WsMessage::Text(
+        r#"{"kind":"query","id":77,"query":{"kind":"nonexistent-query"}}"#.into(),
+    ))
+    .await
+    .unwrap();
+    let err_msg = ws.next().await.unwrap().unwrap();
+    let err_frame: WsServerFrame = serde_json::from_str(err_msg.to_text().unwrap()).unwrap();
+    match err_frame {
+        WsServerFrame::Error { id, error } => {
+            assert_eq!(id, 77);
+            assert_eq!(error.code, ApiErrorCode::InvalidRequest);
+        }
+        other => panic!("expected error frame with preserved id, got {other:?}"),
     }
 
     let sub_frame = serde_json::to_string(&WsClientFrame::Subscribe {
@@ -648,7 +767,8 @@ async fn dx_fixes_use_rejection_contained_distance_and_flat_appraisal() {
         err.message
     );
 
-    // 2. Contained inventory item has distance_to_self == None while world mob has ~4.0m.
+    // 2. Contained inventory item has distance_to_self == None while world mob has ~4.0m,
+    //    and `EntityFilter.container` returns only items inside that container.
     let entities = engine.entities(EntityFilter::default()).await.unwrap();
     let key_summary = entities
         .iter()
@@ -656,6 +776,26 @@ async fn dx_fixes_use_rejection_contained_distance_and_flat_appraisal() {
         .expect("pack item in entities");
     assert_eq!(key_summary.container, Some(player_guid));
     assert_eq!(key_summary.distance_to_self, None);
+
+    let contained = engine
+        .entities(EntityFilter {
+            container: Some(player_guid),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(contained.len(), 1);
+    assert_eq!(contained[0].guid, pack_item_guid);
+    let pack_detail = engine.entity_detail(pack_item_guid, false).await.unwrap();
+    assert!(
+        !pack_detail.facts.expect("pack item facts").blocks_movement,
+        "contained inventory items must not report blocksMovement = true"
+    );
+    let door_detail = engine.entity_detail(door_guid, false).await.unwrap();
+    assert!(
+        door_detail.facts.expect("door facts").blocks_movement,
+        "placed solid world doors should report blocksMovement = true"
+    );
 
     let mob_summary = entities
         .iter()
@@ -757,9 +897,151 @@ async fn dx_fixes_use_rejection_contained_distance_and_flat_appraisal() {
         .unwrap();
     assert!(appraisal_res.settled);
     let outcome = appraisal_res.outcome.expect("appraisal settlement outcome");
-    assert_eq!(outcome["factsOnly"], false);
-    assert_eq!(outcome["status"], "rejected");
+    match outcome {
+        holtburger_live_api::types::CommandOutcome::Appraisal(appraisal) => {
+            assert!(!appraisal.facts_only);
+            assert_eq!(appraisal.status, AppraisalStatus::Rejected);
+        }
+        other => panic!("expected Appraisal command outcome, got {other:?}"),
+    }
 
+    // 7. SetCombatMode settles on CombatModeUpdated and Inventory settles on EntityFactsChanged.
+    let event_tx_combat = event_tx.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(25)).await;
+        let _ = event_tx_combat.send(ClientViewEvent::CombatModeUpdated {
+            mode: holtburger_protocol::messages::combat::CombatMode::Melee,
+        });
+    });
+    let mode_res = engine
+        .execute(
+            ApiCommand::SetCombatMode {
+                mode: holtburger_live_api::types::CombatModeSpec::Melee,
+            },
+            WaitPolicy {
+                until: WaitUntil::Settled,
+                timeout_ms: 2_000,
+            },
+        )
+        .await
+        .unwrap();
+    assert!(mode_res.settled);
+    match mode_res.outcome.expect("combat mode outcome") {
+        holtburger_live_api::types::CommandOutcome::CombatMode(cm) => {
+            assert_eq!(cm.mode, "melee");
+            assert!(cm.matched);
+        }
+        other => panic!("expected CombatMode outcome, got {other:?}"),
+    }
+
+    // Already-in-container inventory move settles immediately without timing out.
+    let noop_inv = engine
+        .execute(
+            ApiCommand::Inventory {
+                intent: holtburger_core::client::inventory_plan::InventoryIntent {
+                    item: pack_item_guid,
+                    target: holtburger_core::client::inventory_plan::InventoryTarget::Container {
+                        guid: player_guid,
+                    },
+                },
+            },
+            WaitPolicy {
+                until: WaitUntil::Settled,
+                timeout_ms: 2_000,
+            },
+        )
+        .await
+        .unwrap();
+    assert!(noop_inv.settled);
+    match noop_inv.outcome.expect("inventory outcome") {
+        holtburger_live_api::types::CommandOutcome::Inventory(inv) => {
+            assert_eq!(inv.item, pack_item_guid);
+            assert_eq!(inv.settled_by, "already-in-target");
+        }
+        other => panic!("expected Inventory outcome, got {other:?}"),
+    }
+
+    // Pausing automation must reject settling precheck commands (never short-circuit while paused).
+    engine
+        .runtime_handle()
+        .send_user(holtburger_core::ClientCommand::SetAutomationPaused(true))
+        .unwrap();
+    // Wait until the runtime processes the user pause command.
+    let _ = engine.runtime_handle().read(|_| ()).await;
+    let paused_err = engine
+        .execute(
+            ApiCommand::SetCombatMode {
+                mode: holtburger_live_api::types::CombatModeSpec::Peace,
+            },
+            WaitPolicy {
+                until: WaitUntil::Settled,
+                timeout_ms: 2_000,
+            },
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(paused_err.code, ApiErrorCode::AutomationPaused);
+
+    let _ = shutdown_tx.send(());
+    task.abort();
+}
+
+#[tokio::test]
+async fn start_server_does_not_deadlock_before_client_task_is_spawned() {
+    let mut client =
+        ClientRuntime::synthetic_in_world("pre_spawn_acct", Some("PreSpawnWorld".into()));
+    let handle = client.create_handle();
+    let discovery_dir = tempdir().unwrap();
+
+    // Mirrors h3d startup, where `start_server` is awaited before `client` is spawned.
+    let server = tokio::time::timeout(
+        Duration::from_secs(2),
+        start_server(
+            handle,
+            LiveApiServerConfig {
+                client_kind: "h3d",
+                port: 0,
+                catalogs: None,
+                ui: None,
+                hud: None,
+                discovery_dir: Some(discovery_dir.path().to_path_buf()),
+                write_discovery: true,
+            },
+        ),
+    )
+    .await
+    .expect("start_server must not block waiting for an unspawned client runtime")
+    .expect("start_server should succeed");
+
+    let discovery_path = server
+        .discovery_path()
+        .expect("discovery file written")
+        .to_path_buf();
+
+    let (shutdown_tx, shutdown_rx) = oneshot::channel();
+    let task = tokio::spawn(client.run_synthetic(shutdown_rx));
+
+    // Once the client loop runs, the background pump hydrates discovery metadata from the runtime.
+    let mut hydrated = false;
+    for _ in 0..40 {
+        if let Ok(raw) = std::fs::read_to_string(&discovery_path)
+            && let Ok(json) = serde_json::from_str::<Value>(&raw)
+            && json["account"] == "pre_spawn_acct"
+            && json["world"] == "PreSpawnWorld"
+            && json["lifecycle"] == "entering-world"
+        {
+            hydrated = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    assert!(
+        hydrated,
+        "discovery metadata should hydrate once client starts; last contents: {:?}",
+        std::fs::read_to_string(&discovery_path)
+    );
+
+    drop(server);
     let _ = shutdown_tx.send(());
     task.abort();
 }

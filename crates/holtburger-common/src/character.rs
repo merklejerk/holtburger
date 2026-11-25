@@ -188,6 +188,7 @@ pub enum CharacterOption {
     Display,
     FromRepr,
 )]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub enum ConfirmationType {
     Undefined = 0x00,
     SwearAllegiance = 0x01,

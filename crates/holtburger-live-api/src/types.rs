@@ -59,6 +59,22 @@ pub enum LifecyclePhaseView {
     },
 }
 
+impl LifecyclePhaseView {
+    /// Kebab-case phase identifier matching the serialized `kind` tag.
+    pub fn phase_label(&self) -> &'static str {
+        match self {
+            Self::Connecting => "connecting",
+            Self::Authenticating => "authenticating",
+            Self::CharacterSelection { .. } => "character-selection",
+            Self::EnteringWorld { .. } => "entering-world",
+            Self::PortalSpace { .. } => "portal-space",
+            Self::InWorld => "in-world",
+            Self::LoggingOut => "logging-out",
+            Self::Exiting { .. } => "exiting",
+        }
+    }
+}
+
 /// Top-level metadata returned by `GET /v1/info`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -83,9 +99,23 @@ pub struct ApiInfo {
 #[serde(rename_all = "camelCase")]
 pub struct ConfirmationView {
     pub request_id: u64,
-    pub confirmation_type: String,
+    pub confirmation_type: holtburger_common::ConfirmationType,
     pub context: u32,
     pub text: String,
+}
+
+/// Outdoor AC map coordinates corresponding to an outdoor `WorldPosition`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct OutdoorCoordsView {
+    /// Signed unbiased latitude in degrees (North positive, South negative).
+    pub lat: f32,
+    /// Signed unbiased longitude in degrees (East positive, West negative).
+    pub lon: f32,
+    /// Elevation in world meters (`coords.z`).
+    pub alt: f32,
+    /// Standard AC map notation (e.g. `"42.3N, 15.8E"`).
+    pub label: String,
 }
 
 /// Current local-player vitals, pose, combat stance, busy state, and economy summary.
@@ -95,6 +125,8 @@ pub struct SelfView {
     pub guid: Guid,
     pub name: Option<String>,
     pub position: Option<WorldPosition>,
+    /// Outdoor AC map coordinates when outdoors; `null` indoors or when position is unavailable.
+    pub outdoor_coords: Option<OutdoorCoordsView>,
     pub heading: Option<f32>,
     pub health: u32,
     pub health_max: u32,
@@ -122,7 +154,8 @@ pub struct EntityFilter {
     /// Comma-separated entity categories to include: `player`, `npc`, `vendor`, `monster`,
     /// `weapon`, `apparel`, `container`, `item`, `consumable`, `money`, `key`, `writable`,
     /// `healing_kit`, `mana_stone`, `door`, `portal`, `life_stone`, `chest`, `wand`, `tool`,
-    /// `static_object`, `unknown`.
+    /// `static_object`, `unknown`. Note: puzzle levers, switches, and triggers do not have a
+    /// dedicated category and often appear under `door`, `item`, `static_object`, or `unknown`.
     #[serde(default)]
     pub category: Option<String>,
     /// Case-insensitive substring match against the entity name.
@@ -131,6 +164,10 @@ pub struct EntityFilter {
     /// Exact Weenie Class ID (WCID) filter.
     #[serde(default)]
     pub wcid: Option<u32>,
+    /// Restrict results to entities directly contained inside this container GUID (e.g. a backpack
+    /// or `InventoryView.openWorldContainer`).
+    #[serde(default)]
+    pub container: Option<Guid>,
     /// Maximum number of nearest entities to return (results are sorted by ascending `distanceToSelf`).
     #[serde(default)]
     pub limit: Option<usize>,
@@ -149,6 +186,8 @@ pub struct EntitySummary {
     pub is_vendor: bool,
     pub position: WorldPosition,
     pub distance_to_self: Option<f32>,
+    /// Target health fraction in `[0.0, 1.0]`; `null` on remote creatures until selected/targeted
+    /// (retail AC only reports creature health on demand).
     pub health_fraction: Option<f32>,
     pub stack_count: Option<u32>,
     pub container: Option<Guid>,
@@ -168,15 +207,84 @@ pub struct EntityPropertiesView {
     pub iids: BTreeMap<String, Guid>,
 }
 
+/// Public interaction capability derived from an entity's `ItemUseable` flags.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum ItemUseCapabilityView {
+    /// Required public description facts have not arrived.
+    Unavailable,
+    /// Public useability explicitly disallows direct use (e.g. a lever-controlled door).
+    Unsupported,
+    /// Can be used directly without a second target object.
+    Direct,
+    /// Authored Ust salvage tool.
+    SalvageTool,
+    /// Requires a second compatible target object (`use-item` with `source` and `target`).
+    Targeted,
+}
+
+/// Lock-tool classification on keys and lockpicks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum LockToolView {
+    Key,
+    Lockpick { bonus: Option<i32> },
+}
+
+/// Derived client gameplay facts on an entity (`EntityDetail.facts`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct EntityFactsView {
+    pub use_capability: ItemUseCapabilityView,
+    pub is_locked: Option<bool>,
+    /// Server-reported open state on doors and containers (`PropertyBool::Open`), when present.
+    pub is_open: Option<bool>,
+    /// `true` when the entity is physically solid to dynamic collision; flips to `false` when a
+    /// door opens or an object becomes ethereal/hidden.
+    pub blocks_movement: bool,
+    pub lock_tool: Option<LockToolView>,
+    pub owned_by_player: bool,
+    pub can_pick_up: bool,
+    pub world_container_content: bool,
+    pub can_receive_give: bool,
+    pub can_trade: bool,
+    pub can_offer_trade: bool,
+    pub is_hostile: bool,
+    pub is_corpse: bool,
+    pub corpse_open: bool,
+    pub item_capacity: Option<u32>,
+    pub pack_capacity: Option<u32>,
+    pub summon_owner: Option<Guid>,
+}
+
+/// Decoded weapon combat stats (`EntityDetail.weaponProfile`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct WeaponProfileView {
+    pub damage_type: u32,
+    pub weapon_time: u32,
+    /// Numeric `SkillType` ID from the server weapon profile.
+    pub weapon_skill: u32,
+    /// Decoded `SkillType` variant name matching `/v1/self/sheet` and appraisal (e.g. `"LightWeapons"`, `"MissileWeapons"`).
+    pub weapon_skill_name: Option<String>,
+    pub damage: u32,
+    pub damage_variance: f64,
+    pub damage_mod: f64,
+    pub weapon_length: f64,
+    pub max_velocity: f64,
+    pub weapon_offense: f64,
+    pub max_velocity_estimated: u32,
+}
+
 /// Detailed entity view returned by `GET /v1/entities/{guid}`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct EntityDetail {
     pub summary: EntitySummary,
-    pub facts: Option<Value>,
+    pub facts: Option<EntityFactsView>,
     pub armor_profile: Option<Value>,
     pub creature_profile: Option<Value>,
-    pub weapon_profile: Option<Value>,
+    pub weapon_profile: Option<WeaponProfileView>,
     pub spell_book: Vec<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub properties: Option<EntityPropertiesView>,
@@ -198,6 +306,7 @@ pub struct ContainerView {
 pub struct InventoryView {
     pub pyreals: Option<u32>,
     pub burden: Option<f32>,
+    /// Carried containers plus the currently open world container (`openWorldContainer`), if any.
     pub containers: Vec<ContainerView>,
     pub open_world_container: Option<Guid>,
     pub projectile_supply: Value,
@@ -209,6 +318,8 @@ pub struct EquippedItemView {
     pub guid: Guid,
     pub name: Option<String>,
     pub equip_mask: u32,
+    /// Decoded kebab-case `EquipMask` slot names (e.g. `["melee-weapon"]`, `["caster"]`, `["chest-armor"]`).
+    pub slots: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -298,13 +409,118 @@ pub struct VendorView {
     pub items: Vec<VendorItemView>,
 }
 
+/// One active member in the local player's fellowship.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct FellowshipMemberView {
+    pub guid: Guid,
+    pub name: String,
+    pub level: u32,
+    pub max_health: u32,
+    pub max_stamina: u32,
+    pub max_mana: u32,
+    pub current_health: u32,
+    pub current_stamina: u32,
+    pub current_mana: u32,
+    pub share_loot: bool,
+}
+
+/// Active fellowship state (`SocialView.fellowship`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct FellowshipView {
+    pub name: String,
+    pub leader_guid: Option<Guid>,
+    pub share_xp: bool,
+    pub even_share: bool,
+    pub open: bool,
+    pub is_locked: bool,
+    pub members: Vec<FellowshipMemberView>,
+}
+
+/// One member entry in an allegiance hierarchy.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AllegianceMemberView {
+    pub guid: Guid,
+    pub name: String,
+    pub title: Option<String>,
+    pub rank: u16,
+    pub level: Option<u32>,
+    pub online: bool,
+    pub contributed_xp: u32,
+}
+
+/// Resolved allegiance hierarchy profile (`AllegianceView.profile`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AllegianceProfileView {
+    pub name: String,
+    pub rank: u32,
+    pub total_members: u32,
+    pub total_descendants: u32,
+    pub monarch: Option<AllegianceMemberView>,
+    pub patron: Option<AllegianceMemberView>,
+    #[serde(rename = "self")]
+    pub self_member: Option<AllegianceMemberView>,
+    pub direct_vassals: Vec<AllegianceMemberView>,
+}
+
+/// Current allegiance snapshot (`SocialView.allegiance`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AllegianceView {
+    pub player_guid: Option<Guid>,
+    pub refreshing: bool,
+    pub can_swear: bool,
+    pub profile: Option<AllegianceProfileView>,
+}
+
+/// One character entry on the friends list (`SocialView.friends`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct FriendView {
+    pub guid: Guid,
+    pub name: String,
+    pub online: bool,
+}
+
+/// One squelched character or account record (`SquelchView.characters`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SquelchCharacterView {
+    pub guid: Guid,
+    pub name: String,
+    pub account: bool,
+    pub coverage: String,
+    pub removal_scope: Option<String>,
+}
+
+/// Global squelch filter summary (`SquelchView.globals`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SquelchGlobalView {
+    pub name: String,
+    pub coverage: String,
+}
+
+/// Squelch/ignore database summary (`SocialView.squelch`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SquelchView {
+    pub accounts: BTreeMap<String, Guid>,
+    pub characters: Vec<SquelchCharacterView>,
+    pub globals: SquelchGlobalView,
+}
+
+/// Combined social state (`GET /v1/social`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SocialView {
-    pub fellowship: Option<Value>,
-    pub allegiance: Value,
-    pub friends: Option<Value>,
-    pub squelch: Option<Value>,
+    pub fellowship: Option<FellowshipView>,
+    pub allegiance: AllegianceView,
+    pub friends: Option<Vec<FriendView>>,
+    pub squelch: Option<SquelchView>,
     pub contracts: Option<Value>,
 }
 
@@ -403,6 +619,18 @@ pub const MAX_RAYCAST_BATCH: usize = 64;
 /// Default player-body sphere radius (meters) used by `sphere-sweep` previews when omitted.
 pub const DEFAULT_SPHERE_SWEEP_RADIUS: f32 = 0.35;
 
+/// Ordinary-cast targeting route for a spellbook spell.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum SpellCastingRouteView {
+    /// Targets the caster directly regardless of selection.
+    SelfTarget,
+    /// Requires no target object.
+    Untargeted,
+    /// Requires an explicit target selection (`aim.selection`).
+    SelectedTarget,
+}
+
 /// Static spell metadata from `SpellCatalog`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -414,6 +642,10 @@ pub struct SpellDefinitionView {
     pub icon_id: u32,
     pub category: u32,
     pub bitfield: u32,
+    /// True when the spell is beneficial (buff/heal/etc.) rather than harmful.
+    pub is_beneficial: bool,
+    /// Decoded targeting route (`self-target`, `untargeted`, or `selected-target`).
+    pub casting_route: SpellCastingRouteView,
     pub base_mana: u32,
     pub base_range_constant: f32,
     pub base_range_mod: f32,
@@ -474,6 +706,10 @@ pub enum RestPostureSpec {
     Lying,
 }
 
+/// Outgoing in-game chat action. In h3d clients (including recipients), outdoor coordinates
+/// (e.g. `42.3N, 15.8E`) render as clickable waypoints and `[Label](0xHEX)` spans (1..=8
+/// case-insensitive hex digits for a non-zero `u32`) render as clickable entity selection tags;
+/// other clients display plain text.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum ChatCommandSpec {
@@ -618,9 +854,139 @@ pub enum ApiPreviewRequest {
         #[serde(default)]
         radius: Option<f32>,
     },
+    /// Converts between printed AC outdoor map coordinates (e.g. `"42.3N, 15.8E"`) and a
+    /// `WorldPosition`, sampling exact terrain `z` when the target landblock is resident.
+    /// Provide exactly one of `coords` or `position`.
+    #[serde(rename_all = "camelCase")]
+    OutdoorCoords {
+        /// Printed AC outdoor map coordinates (e.g. `"42.3N, 15.8E"` or `"12.5S 8.2W"`).
+        #[serde(default)]
+        coords: Option<String>,
+        /// Outdoor `WorldPosition` to convert to AC map coordinates.
+        #[serde(default)]
+        position: Option<WorldPosition>,
+    },
+}
+
+/// Result of `ApiPreviewRequest::ItemUseTarget`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ItemUseTargetPreview {
+    pub eligible: bool,
+    pub lockpick_success_percent: Option<f64>,
+}
+
+/// Result of `ApiPreviewRequest::Salvage`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum SalvagePreview {
+    Ready { tool: Guid, bags: Value },
+    PendingDetails { tool: Guid, items: Vec<Guid> },
+    Rejected { reason: String },
+}
+
+/// One ray result within `RaycastPreview`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RaycastHitView {
+    pub hit: bool,
+    pub anchor: Guid,
+    pub distance: Option<f32>,
+    pub point: Option<holtburger_common::math::Vector3>,
+    pub normal: Option<holtburger_common::math::Vector3>,
+    pub cell_id: Option<Guid>,
+    pub uncovered: bool,
+}
+
+/// Result of `ApiPreviewRequest::Raycast`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RaycastPreview {
+    pub results: Vec<RaycastHitView>,
+}
+
+/// Result of `ApiPreviewRequest::SphereSweep`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SphereSweepPreview {
+    pub blocked: bool,
+    pub anchor: Guid,
+    pub fraction: f32,
+    pub point: holtburger_common::math::Vector3,
+    pub normal: Option<holtburger_common::math::Vector3>,
+    pub uncovered: bool,
+}
+
+/// Result of `ApiPreviewRequest::OutdoorCoords`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct OutdoorCoordsPreview {
+    /// Canonical outdoor `WorldPosition` (on `coords -> position` conversion, `coords.z` is sampled
+    /// from resident terrain when `terrainResident` is `true`, otherwise `0.0`; on `position -> coords`,
+    /// preserves the caller's `coords.z`).
+    pub position: WorldPosition,
+    /// Equivalent AC outdoor map coordinates (`lat`, `lon`, `alt`, and printed `label`).
+    pub outdoor_coords: OutdoorCoordsView,
+    /// `true` when `coords` was resolved against resident terrain and `position.coords.z` was sampled.
+    pub terrain_resident: bool,
+}
+
+/// Formula availability inside `SpellInspectionPreview::Ready`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum SpellFormulaPreview {
+    Pending,
+    Ready { components: [u32; 8] },
+    Failed { detail: String },
+}
+
+/// Live character prerequisites for casting an inspected spell right now.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SpellCastReadinessView {
+    /// Whether the character knows this spell (`null` before spellbook login state arrives).
+    pub known: Option<bool>,
+    /// Whether a casting implement (`EquipMask::CASTER`) is currently equipped.
+    pub has_caster_equipped: bool,
+    /// Whether the character is currently in `"magic"` combat mode.
+    pub in_magic_mode: bool,
+    /// Whether current mana is at least the spell's `baseMana` (`null` if spell metadata is absent).
+    pub sufficient_mana: Option<bool>,
+}
+
+/// Result of `ApiPreviewRequest::SpellInspection`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "kebab-case", rename_all_fields = "camelCase")]
+pub enum SpellInspectionPreview {
+    Pending,
+    Missing,
+    Ready {
+        range_metres: f32,
+        formula: SpellFormulaPreview,
+        readiness: SpellCastReadinessView,
+    },
+}
+
+/// Typed union of responses returned by `POST /v1/preview` and WS `preview` requests.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum ApiPreviewResponse {
+    ItemUseTarget(ItemUseTargetPreview),
+    Salvage(SalvagePreview),
+    SpellInspection(SpellInspectionPreview),
+    Raycast(RaycastPreview),
+    SphereSweep(SphereSweepPreview),
+    OutdoorCoords(OutdoorCoordsPreview),
+    /// Vendor buy/sell preview object.
+    Dynamic(Value),
 }
 
 /// Optional waiting behavior for `POST /v1/command` and WS `command` frames.
+///
+/// Commands with async runtime/server settlement under `until = "settled"` are `select-character`,
+/// `logout`, `set-combat-mode`, `inventory`, `use-entity`, `use-item`, `request-appraisal`, `steer`
+/// (`move-to`/`approach`/`face-heading`/`face-entity`), `cast-spell`, and `vendor-trade`; other
+/// commands return `settled: false` immediately upon admission (`outcome: null`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct WaitPolicy {
@@ -672,6 +1038,8 @@ pub enum ApiCommand {
 
     // --- Chat & Social ---
     /// Sends a say, tell, channel message, emote, or soul emote (`action.kind`).
+    /// In h3d clients (including recipients), outdoor coordinates (`42.3N, 15.8E`) become clickable
+    /// waypoints and `[Label](0xHEX)` becomes a clickable entity tag (plain text elsewhere).
     Chat { action: ChatCommandSpec },
     /// Manages fellowship creation, invites, leadership, openness, or leaving (`action.kind`).
     Fellowship { action: FellowshipCommandSpec },
@@ -708,7 +1076,11 @@ pub enum ApiCommand {
     UpdateCombatProfile { profile: AttackProfileSpec },
     /// Stops the current combat engagement.
     StopCombat,
-    /// Casts `spellId` with `aim` (requires `magic` combat mode and a casting implement; use `POST /v1/preview` `spell-inspection` to verify components, mana, and range).
+    /// Casts `spellId` with `aim` (requires `magic` combat mode and a casting implement; use
+    /// `POST /v1/preview` `spell-inspection` to verify readiness, components, mana, and range).
+    /// With `wait.until = "settled"`, settles when spell invocation completes
+    /// (`busy-operation-finished`); projectile flight, damage, and kill notifications arrive
+    /// asynchronously via `entities_health` and `combat` events.
     #[serde(rename_all = "camelCase")]
     CastSpell { spell_id: u32, aim: SpellCastAim },
     /// Changes resting posture (`standing`, `crouching`, `sitting`, `lying`).
@@ -725,6 +1097,8 @@ pub enum ApiCommand {
     #[serde(rename_all = "camelCase")]
     UseEntity {
         guid: Guid,
+        /// When `true`, bypasses local client-side `useCapability` pre-checks and sends the use
+        /// packet anyway (the game server still enforces actual rules).
         #[serde(default)]
         unrestricted: bool,
     },
@@ -812,6 +1186,8 @@ pub enum ApiCommand {
     #[serde(rename_all = "camelCase")]
     SetSelection { guid: Option<Guid> },
     /// Prints a local-only styled message to the client's chat/log window.
+    /// In h3d, outdoor coordinates (`42.3N, 15.8E`) become clickable waypoints and `[Label](0xHEX)`
+    /// becomes a clickable entity tag (plain text in TUI).
     #[serde(rename_all = "camelCase")]
     UiPrint {
         #[serde(flatten)]
@@ -846,6 +1222,75 @@ pub struct CommandRequest {
     pub wait: WaitPolicy,
 }
 
+/// Settlement outcome of a busy operation (`use-entity`, `cast-spell`, `recall`, `salvage`, etc.).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct BusyOperationOutcome {
+    pub operation: BusyOperationKind,
+    pub succeeded: bool,
+    pub error: Option<String>,
+    pub timed_out: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub teleported: Option<bool>,
+}
+
+/// Settlement outcome of `request-appraisal`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AppraisalOutcome {
+    pub guid: Guid,
+    pub facts_only: bool,
+    pub status: AppraisalStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inspection: Option<Value>,
+}
+
+/// Settlement outcome of `select-character` or `logout`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct LifecycleOutcome {
+    pub lifecycle: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rejection: Option<String>,
+}
+
+/// Settlement outcome of `set-combat-mode`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CombatModeOutcome {
+    /// Confirmed server combat mode (`"peace"`, `"melee"`, `"missile"`, or `"magic"`).
+    pub mode: String,
+    /// `true` when the confirmed mode matches the requested mode (`false` if the server fell back to `"peace"`).
+    pub matched: bool,
+}
+
+/// Settlement outcome of `inventory` moves/equips/drops/pickups.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct InventoryOutcome {
+    pub item: Guid,
+    /// `"updated"`, `"despawned"`, `"already-in-target"`, or `"rejected"`.
+    pub settled_by: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// Typed settlement outcome carried by `CommandResponse.outcome` when `wait.until = "settled"`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum CommandOutcome {
+    Busy(BusyOperationOutcome),
+    Appraisal(AppraisalOutcome),
+    Navigation(LocalNavigationFinished),
+    Lifecycle(LifecycleOutcome),
+    CombatMode(CombatModeOutcome),
+    Inventory(InventoryOutcome),
+    /// Item-use or vendor-trade outcome payload.
+    Dynamic(Value),
+}
+
 /// Response returned by `POST /v1/command` and WS `command` requests.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -855,7 +1300,7 @@ pub struct CommandResponse {
     pub settled: bool,
     pub timed_out: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub outcome: Option<Value>,
+    pub outcome: Option<CommandOutcome>,
     pub latest_event_seq: u64,
 }
 
@@ -976,6 +1421,49 @@ pub struct EventSpeaker {
     pub reply_target: Option<ChatTellTarget>,
 }
 
+/// Typed combat feedback payload emitted by `ApiEvent::CombatFeedback`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "kebab-case", rename_all_fields = "camelCase")]
+pub enum CombatFeedbackDetail {
+    AttackDone {
+        error: String,
+        ok: bool,
+    },
+    AttackCommenced,
+    AttackerNotification {
+        defender_name: String,
+        damage_type: String,
+        health_percent: f64,
+        damage: u32,
+        critical_hit: bool,
+    },
+    DefenderNotification {
+        attacker_name: String,
+        damage_type: String,
+        health_percent: f64,
+        damage: u32,
+        damage_location: String,
+        critical_hit: bool,
+    },
+    EvasionAttacker {
+        defender_name: String,
+    },
+    EvasionDefender {
+        attacker_name: String,
+    },
+    VictimNotification {
+        death_message: String,
+    },
+    KillerNotification {
+        death_message: String,
+    },
+    PlayerKilled {
+        death_message: String,
+        victim_id: Guid,
+        killer_id: Guid,
+    },
+}
+
 /// Flattened outcome status of an appraisal (`request-appraisal` / `AppraisalCompleted`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
@@ -1057,8 +1545,12 @@ pub enum ApiEvent {
         inspection: Option<Value>,
     },
     #[serde(rename_all = "camelCase")]
+    CombatModeUpdated {
+        mode: String,
+    },
+    #[serde(rename_all = "camelCase")]
     CombatFeedback {
-        detail: Value,
+        detail: CombatFeedbackDetail,
     },
     #[serde(rename_all = "camelCase")]
     CombatStatusUpdated {
@@ -1199,6 +1691,10 @@ pub enum WsClientFrame {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum WsServerFrame {
+    /// Reply correlated to a client `query`, `preview`, `command`, or `subscribe` frame.
+    /// `result` matches the corresponding REST response shape, or `{ "subscribed": [...],
+    /// "latestEventSeq": u64, "nextSeq": u64, "replayed": usize, "droppedBefore": u64 | null }`
+    /// for `subscribe`.
     #[serde(rename_all = "camelCase")]
     Response { id: u64, result: Value },
     #[serde(rename_all = "camelCase")]

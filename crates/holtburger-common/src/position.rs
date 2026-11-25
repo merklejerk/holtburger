@@ -103,28 +103,37 @@ pub enum WorldCoordinates {
     },
 }
 
+fn format_outdoor_lat_lon(lat: f32, lon: f32, precision: usize) -> String {
+    let ns = if lat >= 0.0 { "N" } else { "S" };
+    let ew = if lon >= 0.0 { "E" } else { "W" };
+
+    // The bias is authored against one-decimal output, so wider precision prints
+    // the raw magnitude rather than shifting a digit the bias was never sized for.
+    let bias = if precision == 1 {
+        MAP_DEGREE_DISPLAY_BIAS
+    } else {
+        0.0
+    };
+    let display_lat = (lat.abs() - bias).max(0.0);
+    let display_lon = (lon.abs() - bias).max(0.0);
+
+    format!("{display_lat:.precision$}{ns}, {display_lon:.precision$}{ew}")
+}
+
 impl WorldCoordinates {
+    /// Formats outdoor coordinates in standard AC map notation (`42.3N, 15.8E`), or `None` indoors.
+    pub fn outdoor_label(&self) -> Option<String> {
+        match self {
+            WorldCoordinates::Indoor { .. } => None,
+            WorldCoordinates::Outdoor { lat, lon, .. } => Some(format_outdoor_lat_lon(*lat, *lon, 1)),
+        }
+    }
+
     pub fn to_string_with_precision(&self, precision: usize) -> String {
         match self {
             WorldCoordinates::Indoor { landblock } => format!("Indoors [{:04X}]", landblock),
             WorldCoordinates::Outdoor { lat, lon, alt } => {
-                let ns = if *lat >= 0.0 { "N" } else { "S" };
-                let ew = if *lon >= 0.0 { "E" } else { "W" };
-
-                // The bias is authored against one-decimal output, so wider precision prints
-                // the raw magnitude rather than shifting a digit the bias was never sized for.
-                let bias = if precision == 1 {
-                    MAP_DEGREE_DISPLAY_BIAS
-                } else {
-                    0.0
-                };
-                let display_lat = (lat.abs() - bias).max(0.0);
-                let display_lon = (lon.abs() - bias).max(0.0);
-
-                format!(
-                    "{:.*}{}, {:.*}{}, {:.1}Z",
-                    precision, display_lat, ns, precision, display_lon, ew, alt
-                )
+                format!("{}, {:.1}Z", format_outdoor_lat_lon(*lat, *lon, precision), alt)
             }
         }
     }
@@ -268,6 +277,44 @@ impl WorldPosition {
         (cx, cy)
     }
 
+    /// Constructs an outdoor `WorldPosition` from signed unbiased AC map degrees (`lat` N+/S-,
+    /// `lon` E+/W-) and elevation `z`, returning `None` for non-finite or out-of-bounds points.
+    ///
+    /// Exact inverse of `WorldPosition::to_world_coords()` over the authored outdoor grid.
+    pub fn from_outdoor_degrees(lat: f32, lon: f32, z: f32) -> Option<Self> {
+        if !lat.is_finite() || !lon.is_finite() || !z.is_finite() {
+            return None;
+        }
+        let total_x = (f64::from(lon) + f64::from(MAP_DEGREE_ORIGIN))
+            * f64::from(METERS_PER_MAP_DEGREE);
+        let total_y = (f64::from(lat) + f64::from(MAP_DEGREE_ORIGIN))
+            * f64::from(METERS_PER_MAP_DEGREE);
+        let block_size = f64::from(METERS_PER_LANDBLOCK);
+        let mut lb_x = (total_x / block_size).floor() as i64;
+        let mut lb_y = (total_y / block_size).floor() as i64;
+        let mut local_x = (total_x - lb_x as f64 * block_size) as f32;
+        let mut local_y = (total_y - lb_y as f64 * block_size) as f32;
+        // Guard against f64 -> f32 rounding onto the upper seam (192.0) at 0.8-degree boundaries.
+        if local_x >= METERS_PER_LANDBLOCK {
+            lb_x += 1;
+            local_x = 0.0;
+        }
+        if local_y >= METERS_PER_LANDBLOCK {
+            lb_y += 1;
+            local_y = 0.0;
+        }
+        let range = 0..=i64::from(MAX_OUTDOOR_LANDBLOCK_AXIS);
+        if !range.contains(&lb_x) || !range.contains(&lb_y) {
+            return None;
+        }
+        let frame = Guid(((lb_x as u32) << 24) | ((lb_y as u32) << 16));
+        Some(Self::from_outdoor_frame(
+            frame,
+            Vector3::new(local_x, local_y, z),
+            Quaternion::identity(),
+        ))
+    }
+
     pub fn to_world_coords(&self) -> WorldCoordinates {
         if self.is_indoors() {
             return WorldCoordinates::Indoor {
@@ -316,6 +363,55 @@ impl WorldPosition {
 
         self.global_coords().heading_to(&other.global_coords())
     }
+}
+
+/// Parses printed AC outdoor map coordinates (e.g. `"42.3N, 15.8E"` or `"12.5s 8.2w"`) into
+/// signed unbiased `(lat, lon)` degrees (`lat` N+/S-, `lon` E+/W-), applying
+/// `MAP_DEGREE_DISPLAY_BIAS` before applying hemisphere sign so results match AC and h3d map math.
+pub fn parse_printed_outdoor_coords(input: &str) -> Option<(f32, f32)> {
+    let trimmed = input.trim();
+    let (lat_part, lon_part) = if let Some((a, b)) = trimmed.split_once(',') {
+        (a.trim(), b.trim())
+    } else {
+        let mut parts = trimmed.split_whitespace();
+        let a = parts.next()?;
+        let b = parts.next()?;
+        if parts.next().is_some() {
+            return None;
+        }
+        (a, b)
+    };
+    let (lat_mag, lat_sign) = parse_hemisphere_degree(lat_part, ('N', 1.0), ('S', -1.0))?;
+    let (lon_mag, lon_sign) = parse_hemisphere_degree(lon_part, ('E', 1.0), ('W', -1.0))?;
+    let lat = (lat_mag + MAP_DEGREE_DISPLAY_BIAS) * lat_sign;
+    let lon = (lon_mag + MAP_DEGREE_DISPLAY_BIAS) * lon_sign;
+    Some((lat, lon))
+}
+
+fn parse_hemisphere_degree(
+    token: &str,
+    pos: (char, f32),
+    neg: (char, f32),
+) -> Option<(f32, f32)> {
+    let trimmed = token.trim();
+    let last = trimmed.chars().next_back()?;
+    let upper = last.to_ascii_uppercase();
+    let sign = if upper == pos.0 {
+        pos.1
+    } else if upper == neg.0 {
+        neg.1
+    } else {
+        return None;
+    };
+    let num_str = trimmed[..trimmed.len() - last.len_utf8()].trim();
+    if num_str.is_empty() || num_str.starts_with(['+', '-']) {
+        return None;
+    }
+    let mag: f32 = num_str.parse().ok()?;
+    if !mag.is_finite() || mag < 0.0 {
+        return None;
+    }
+    Some((mag, sign))
 }
 
 #[cfg(test)]
@@ -741,5 +837,32 @@ mod tests {
         assert_eq!(pos.landblock_id, Guid(32834085));
         assert_eq!(pos.coords, Vector3::new(50.0, -140.0, 0.0));
         assert_eq!(pos.rotation, Quaternion::identity());
+    }
+
+    #[test]
+    fn printed_outdoor_coords_round_trip_across_hemispheres() {
+        for (input, expected) in [
+            ("42.3N, 15.8E", "42.3N, 15.8E"),
+            ("12.5s 8.2w", "12.5S, 8.2W"),
+            ("33.5N, 56.2E", "33.5N, 56.2E"),
+            ("0.0N, 0.0W", "0.0N, 0.0W"),
+        ] {
+            let (lat, lon) = parse_printed_outdoor_coords(input).expect(input);
+            let pos = WorldPosition::from_outdoor_degrees(lat, lon, 12.5).expect(input);
+            assert!(!pos.is_indoors());
+            assert_eq!(pos.to_world_coords().outdoor_label().as_deref(), Some(expected));
+        }
+        assert!(parse_printed_outdoor_coords("-10.0N, 5.0E").is_none());
+        assert!(parse_printed_outdoor_coords("42.3E, 15.8N").is_none());
+        assert!(WorldPosition::from_outdoor_degrees(200.0, 0.0, 0.0).is_none());
+
+        // Seam rounding guard: -0.4 deg sits just under a 0.8-degree landblock seam in f32.
+        let seam = WorldPosition::from_outdoor_degrees(-0.4, -0.4, 0.0).expect("seam point");
+        assert!(seam.coords.x >= 0.0 && seam.coords.x < METERS_PER_LANDBLOCK);
+        assert!(seam.coords.y >= 0.0 && seam.coords.y < METERS_PER_LANDBLOCK);
+        let (slat, slon) = parse_printed_outdoor_coords("0.35S, 0.35W").expect("0.35S, 0.35W");
+        let parsed_seam = WorldPosition::from_outdoor_degrees(slat, slon, 0.0).expect("parsed seam");
+        assert!(parsed_seam.coords.x >= 0.0 && parsed_seam.coords.x < METERS_PER_LANDBLOCK);
+        assert!(parsed_seam.coords.y >= 0.0 && parsed_seam.coords.y < METERS_PER_LANDBLOCK);
     }
 }

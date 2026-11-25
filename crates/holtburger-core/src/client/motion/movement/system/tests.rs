@@ -2225,6 +2225,48 @@ fn gesture_admission_resumes_held_input_but_never_revives_an_expired_pulse() {
     }
 }
 
+#[test]
+fn gesture_admission_preserves_local_steering_and_marks_republication() {
+    let mut world = WorldState::synthetic();
+    let guid = Guid(0x0102_0304);
+    let pose = WorldPosition {
+        landblock_id: Guid(0x1000_0001),
+        coords: Vector3::new(0.0, 0.0, 0.0),
+        rotation: Quaternion::identity(),
+    };
+    seed_local_player(&mut world, guid, pose);
+
+    let mut movement = MovementSystem::new();
+    let now = Instant::now();
+    let request = crate::client::steering::LocalSteeringRequest {
+        goal: crate::client::steering::LocalSteeringGoal::MoveTo {
+            destination: WorldPosition {
+                landblock_id: Guid(0x1000_0001),
+                coords: Vector3::new(0.0, 20.0, 0.0),
+                rotation: Quaternion::identity(),
+            },
+            arrival_distance: 1.0,
+            gait: crate::client::movement_types::Gait::Run,
+            final_heading: None,
+        },
+        stuck_timeout_ms: 2_000,
+        max_duration_ms: Some(10_000),
+    };
+    movement.enqueue_start_local_steering(42, ControlSource::Automation, request);
+
+    // A locomotion-preserving server gesture (e.g. combat stance switch) must keep local steering
+    // alive instead of silently retiring it without a completion event.
+    movement.admit_server_gesture(now + Duration::from_millis(20), &mut world);
+
+    assert!(movement.has_local_steering());
+    assert_eq!(
+        movement.local_steering_status().map(|s| s.correlation_id),
+        Some(42)
+    );
+    assert!(movement.movement_publication_required);
+    assert!(movement.take_navigation_completions().is_empty());
+}
+
 #[tokio::test]
 async fn relative_facing_admission_preserves_jump_and_drive() {
     let mut world = WorldState::synthetic();

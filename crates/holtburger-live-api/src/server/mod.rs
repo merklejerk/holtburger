@@ -32,10 +32,11 @@ use crate::hooks::{
 };
 use crate::server::discovery::{DiscoveryFile, DiscoveryRecord, default_instances_dir};
 use crate::types::{
-    ApiEventTopic, ApiInfo, ApiPreviewRequest, CharacterOptionsView, CombatView, CommandRequest,
-    CommandResponse, DeathLocationsView, EntityDetail, EntityFilter, EntitySummary, EquipmentView,
-    EventsPage, InventoryView, LIVE_API_VERSION, SelectionView, SelfView, SkillDefinitionView,
-    SocialView, SpellDefinitionView, SpellbookView, TradeView, VendorView, WorldCellsView,
+    ApiEventTopic, ApiInfo, ApiPreviewRequest, ApiPreviewResponse, CharacterOptionsView,
+    CombatView, CommandRequest, CommandResponse, DeathLocationsView, EntityDetail, EntityFilter,
+    EntitySummary, EquipmentView, EventsPage, InventoryView, LIVE_API_VERSION, SelectionView,
+    SelfView, SkillDefinitionView, SocialView, SpellDefinitionView, SpellbookView, TradeView,
+    VendorView, WorldCellsView, WsClientFrame, WsServerFrame,
 };
 
 /// Configuration for launching a localhost Live API server alongside a client runtime.
@@ -115,10 +116,6 @@ pub async fn start_server(
             Some(dir) => dir,
             None => default_instances_dir()?,
         };
-        let initial_meta = handle
-            .read(crate::engine::snapshot_discovery_metadata)
-            .await
-            .ok();
         let base_url = format!("http://{addr}");
         let record = DiscoveryRecord {
             schema_version: 1,
@@ -127,15 +124,10 @@ pub async fn start_server(
             ws_url: format!("ws://{addr}/v1/ws"),
             open_api_url: format!("{base_url}/v1/openapi.json"),
             base_url,
-            world: initial_meta.as_ref().and_then(|m| m.world.clone()),
-            account: initial_meta
-                .as_ref()
-                .map(|m| m.account.clone())
-                .unwrap_or_default(),
-            character: initial_meta.as_ref().and_then(|m| m.character.clone()),
-            lifecycle: initial_meta
-                .map(|m| m.lifecycle)
-                .unwrap_or_else(|| "connecting".into()),
+            world: None,
+            account: String::new(),
+            character: None,
+            lifecycle: "connecting".into(),
             started_at_ms: 0,
         };
         Some(DiscoveryFile::create(&dir, record)?)
@@ -147,7 +139,8 @@ pub async fn start_server(
         let file = file.clone();
         Arc::new(move |meta| {
             let file = file.clone();
-            tokio::task::spawn_blocking(move || file.update_metadata(meta));
+            let revision = file.next_revision();
+            tokio::task::spawn_blocking(move || file.update_metadata(revision, meta));
         }) as Arc<dyn Fn(_) + Send + Sync>
     });
 
@@ -201,6 +194,7 @@ pub async fn start_server(
 
 fn build_api_router() -> ApiRouter<ServerState> {
     ApiRouter::new()
+        .route("/", axum::routing::get(get_agent_guide))
         .api_route(
             "/v1/info",
             get_with(get_info, |op| {
@@ -227,7 +221,7 @@ fn build_api_router() -> ApiRouter<ServerState> {
             "/v1/self",
             get_with(get_self, |op| {
                 op.summary("Get local player vitals, pose, and status")
-                    .description("Returns current local player GUID, name, world position, heading, health/stamina/mana, pyreals, burden, combat mode, busy operation, confirmation, and navigation status.")
+                    .description("Returns current local player GUID, name, world position, outdoor map coordinates (when outdoors), heading, health/stamina/mana, pyreals, burden, combat mode, busy operation, confirmation, and navigation status.")
             }),
         )
         .api_route(
@@ -275,7 +269,7 @@ fn build_api_router() -> ApiRouter<ServerState> {
             "/v1/entities",
             get_with(get_entities, |op| {
                 op.summary("List nearby world entities")
-                    .description("Returns world entities sorted by ascending `distanceToSelf`, with optional `maxDistance`, `category`, `name`, `wcid`, and `limit` filters.")
+                    .description("Returns world entities sorted by ascending `distanceToSelf`, with optional `maxDistance`, `category`, `name`, `wcid`, `container`, and `limit` filters.")
             }),
         )
         .api_route(
@@ -296,7 +290,7 @@ fn build_api_router() -> ApiRouter<ServerState> {
             "/v1/equipment",
             get_with(get_equipment, |op| {
                 op.summary("Get equipped items")
-                    .description("Returns items currently equipped on the local player with their equip masks.")
+                    .description("Returns items currently equipped on the local player with their raw equip masks and decoded slot names.")
             }),
         )
         .api_route(
@@ -366,7 +360,7 @@ fn build_api_router() -> ApiRouter<ServerState> {
             "/v1/preview",
             post_with(post_preview, |op| {
                 op.summary("Evaluate a read-only world preview")
-                    .description("Synchronously evaluates item-use eligibility, salvage outcome, vendor trade totals, spell inspection, static raycasts, or sphere sweeps without mutating world state.")
+                    .description("Synchronously evaluates item-use eligibility, salvage outcome, vendor trade totals, spell inspection + readiness, outdoor coordinate conversion, static raycasts, or sphere sweeps without mutating world state.")
             }),
         )
         .api_route(
@@ -376,7 +370,20 @@ fn build_api_router() -> ApiRouter<ServerState> {
                     .description("Submits an `ApiCommand` wrapped in `{\"command\": {\"kind\": \"...\", ...}}` with an optional `wait` policy (`accepted` or `settled`). All errors return structured JSON `{\"code\", \"message\"}`.")
             }),
         )
-        .route("/v1/ws", axum::routing::get(get_ws))
+        .api_route(
+            "/v1/ws",
+            get_with(get_ws, |op| {
+                op.summary("Multiplexed WebSocket session for commands, queries, previews, and live event streams")
+                    .description("Upgrades to a JSON-frame WebSocket speaking `WsClientFrame` (client -> server) and `WsServerFrame` (server -> client) from `components.schemas`.")
+                    .with(|op| {
+                        aide::generate::in_context(|ctx| {
+                            ctx.schema.subschema_for::<WsClientFrame>();
+                            ctx.schema.subschema_for::<WsServerFrame>();
+                        });
+                        op
+                    })
+            }),
+        )
 }
 
 async fn origin_and_host_guard(req: Request, next: Next) -> Response {
@@ -489,12 +496,61 @@ fn api_error_response(error: ApiError) -> Response {
 
 type HttpResult<T> = Result<Json<T>, ApiJsonError>;
 
+const AGENT_GUIDE_BODY: &str = include_str!("agent_guide.md");
+
+async fn get_agent_guide(State(state): State<ServerState>) -> impl IntoResponse {
+    let header = match state.engine.info().await {
+        Ok(info) => {
+            let capabilities = if info.capabilities.is_empty() {
+                "none".to_string()
+            } else {
+                info.capabilities
+                    .iter()
+                    .map(|cap| format!("`{cap}`"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            };
+            let mut identity = String::new();
+            if let Some(world) = info.world_name.as_deref() {
+                identity.push_str(&format!(" | **World**: `{world}`"));
+            }
+            if let Some(character) = info.character_name.as_deref() {
+                identity.push_str(&format!(" | **Character**: `{character}`"));
+            }
+            format!(
+                "# Holtburger Live API — Agent Guide\n\n\
+                 - **Client**: `{}` | **Lifecycle**: `{}` | **Paused**: `{}` | **Latest seq**: `{}`{}\n\
+                 - **Capabilities**: {}\n\
+                 - **Entrypoints**: `GET /v1/info` (live status), `GET /v1/openapi.json` (OpenAPI 3.1 contract), `WS /v1/ws` (multiplexed commands + events)\n\n",
+                info.client,
+                info.lifecycle.phase_label(),
+                info.automation_paused,
+                info.latest_event_seq,
+                identity,
+                capabilities,
+            )
+        }
+        Err(_) => format!(
+            "# Holtburger Live API — Agent Guide\n\n\
+             - **Client**: `{}` (runtime currently unavailable)\n\
+             - **Entrypoints**: `GET /v1/info`, `GET /v1/openapi.json`, `WS /v1/ws`\n\n",
+            state.engine.client_kind(),
+        ),
+    };
+
+    (
+        [(header::CONTENT_TYPE, "text/markdown; charset=utf-8")],
+        format!("{header}{AGENT_GUIDE_BODY}"),
+    )
+}
+
 async fn get_openapi(State(state): State<ServerState>) -> Json<OpenApi> {
     Json((*state.openapi).clone())
 }
 
-async fn get_ws(ws: WebSocketUpgrade, State(state): State<ServerState>) -> impl IntoResponse {
+async fn get_ws(ws: WebSocketUpgrade, State(state): State<ServerState>) -> Response {
     ws.on_upgrade(move |socket| ws::handle_socket(socket, state.engine))
+        .into_response()
 }
 
 async fn get_info(State(state): State<ServerState>) -> HttpResult<ApiInfo> {
@@ -772,7 +828,7 @@ async fn get_content_skills(
 async fn post_preview(
     State(state): State<ServerState>,
     ApiJson(request): ApiJson<ApiPreviewRequest>,
-) -> HttpResult<Value> {
+) -> HttpResult<ApiPreviewResponse> {
     Ok(Json(state.engine.preview(request).await?))
 }
 

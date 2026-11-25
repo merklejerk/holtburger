@@ -2,7 +2,7 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
@@ -46,7 +46,9 @@ pub struct DiscoveryFile {
 
 struct DiscoveryFileInner {
     path: PathBuf,
-    record: Mutex<DiscoveryRecord>,
+    /// Protected record paired with the highest revision already applied (prevents out-of-order writes).
+    state: Mutex<(DiscoveryRecord, u64)>,
+    next_revision: AtomicU64,
     removed: AtomicBool,
 }
 
@@ -79,7 +81,8 @@ impl DiscoveryFile {
         Ok(Self {
             inner: Arc::new(DiscoveryFileInner {
                 path,
-                record: Mutex::new(record),
+                state: Mutex::new((record, 0)),
+                next_revision: AtomicU64::new(1),
                 removed: AtomicBool::new(false),
             }),
         })
@@ -89,38 +92,45 @@ impl DiscoveryFile {
         &self.inner.path
     }
 
+    /// Allocates a monotonically increasing revision before dispatching an asynchronous write.
+    pub fn next_revision(&self) -> u64 {
+        self.inner.next_revision.fetch_add(1, Ordering::Relaxed)
+    }
+
     /// Synchronously removes the discovery file and suppresses any subsequent background updates.
     pub fn remove(&self) {
-        // Hold the record mutex across removal so an in-flight atomic write/rename cannot
+        // Hold the state mutex across removal so an in-flight atomic write/rename cannot
         // resurrect the discovery file after shutdown.
-        let _guard = self.inner.record.lock().expect("discovery mutex poisoned");
+        let _guard = self.inner.state.lock().expect("discovery mutex poisoned");
         if !self.inner.removed.swap(true, Ordering::AcqRel) {
             let _ = fs::remove_file(&self.inner.path);
             let _ = fs::remove_file(self.inner.path.with_extension("json.tmp"));
         }
     }
 
-    /// Updates live world/character/lifecycle fields atomically as the session transitions.
-    pub fn update_metadata(&self, meta: DiscoveryMetadataSnapshot) {
+    /// Updates live world/character/lifecycle fields atomically, ignoring stale revisions.
+    pub fn update_metadata(&self, revision: u64, meta: DiscoveryMetadataSnapshot) {
         if self.inner.removed.load(Ordering::Acquire) {
             return;
         }
-        let mut guard = self.inner.record.lock().expect("discovery mutex poisoned");
-        if self.inner.removed.load(Ordering::Acquire) {
+        let mut guard = self.inner.state.lock().expect("discovery mutex poisoned");
+        if self.inner.removed.load(Ordering::Acquire) || revision < guard.1 {
             return;
         }
-        if guard.lifecycle == meta.lifecycle
-            && guard.world == meta.world
-            && guard.account == meta.account
-            && guard.character == meta.character
+        guard.1 = revision;
+        let record = &mut guard.0;
+        if record.lifecycle == meta.lifecycle
+            && record.world == meta.world
+            && record.account == meta.account
+            && record.character == meta.character
         {
             return;
         }
-        guard.lifecycle = meta.lifecycle;
-        guard.world = meta.world;
-        guard.account = meta.account;
-        guard.character = meta.character;
-        if let Err(error) = write_atomic_private(&self.inner.path, &guard) {
+        record.lifecycle = meta.lifecycle;
+        record.world = meta.world;
+        record.account = meta.account;
+        record.character = meta.character;
+        if let Err(error) = write_atomic_private(&self.inner.path, record) {
             log::warn!(
                 "failed to update live API discovery file {}: {error:#}",
                 self.inner.path.display()

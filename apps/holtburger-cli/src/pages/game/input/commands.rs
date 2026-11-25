@@ -573,7 +573,7 @@ impl GameState {
                     self.chat.log(
                         ChatMessageTags::system(),
                         format!(
-                            "My Asheron's Call client (Holtburger) has a local Live API at {endpoint} (OpenAPI spec at /v1/openapi.json, no auth)."
+                            "My Asheron's Call client (Holtburger) has a local Live API at {endpoint} (read GET / for the agent guide, no auth)."
                         ),
                     );
                 } else {
@@ -1108,7 +1108,7 @@ mod tests {
         let prompt = state.handle_prefixed_command("/api prompt");
         assert!(prompt.commands.is_empty());
         assert!(state.chat.messages.iter().any(|m| {
-            m.text == "My Asheron's Call client (Holtburger) has a local Live API at http://127.0.0.1:42000 (OpenAPI spec at /v1/openapi.json, no auth)."
+            m.text == "My Asheron's Call client (Holtburger) has a local Live API at http://127.0.0.1:42000 (read GET / for the agent guide, no auth)."
         }));
 
         let bad = state.handle_prefixed_command("/api bogus");

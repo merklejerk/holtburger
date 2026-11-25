@@ -106,6 +106,9 @@ pub enum UiPrintStyle {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct UiPrintRequest {
+    /// Message text to display. In h3d, outdoor coordinates (e.g. `42.3N, 15.8E`) become clickable
+    /// waypoint links and `[Label](0xHEX)` spans (1..=8 case-insensitive hex digits for a non-zero
+    /// `u32`) become clickable entity selection tags.
     pub message: String,
     #[serde(default)]
     pub style: UiPrintStyle,

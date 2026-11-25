@@ -10,13 +10,13 @@ use holtburger_core::ClientViewEvent;
 use holtburger_core::client::types::{
     BusyOperationResult, ChatSpeaker, ClientLifecycleState, CombatFeedback,
 };
-use serde_json::json;
 use tokio::sync::{Notify, broadcast};
 
 use crate::types::{
-    ApiEvent, ApiEventEnvelope, ApiEventTopic, AppraisalStatus, ConfirmationView, EventSpeaker,
-    EventsPage, LifecyclePhaseView, MAX_WAIT_TIMEOUT_MS, MotionEventFrame, TradeSessionView,
-    TradeSideView, TradeView, VendorItemView, VendorValueLimitsView, VendorView, to_camel_json,
+    ApiEvent, ApiEventEnvelope, ApiEventTopic, AppraisalStatus, CombatFeedbackDetail,
+    ConfirmationView, EventSpeaker, EventsPage, LifecyclePhaseView, MAX_WAIT_TIMEOUT_MS,
+    MotionEventFrame, TradeSessionView, TradeSideView, TradeView, VendorItemView,
+    VendorValueLimitsView, VendorView, to_camel_json,
 };
 
 pub const EVENT_LOG_CAPACITY: usize = 2_048;
@@ -261,7 +261,7 @@ pub fn project_confirmation(
 ) -> ConfirmationView {
     ConfirmationView {
         request_id: confirmation.request_id,
-        confirmation_type: format!("{:?}", confirmation.confirmation_type),
+        confirmation_type: confirmation.confirmation_type,
         context: confirmation.context,
         text: confirmation.text.clone(),
     }
@@ -275,14 +275,13 @@ fn project_speaker(speaker: &ChatSpeaker) -> EventSpeaker {
     }
 }
 
-fn project_combat_feedback(feedback: &CombatFeedback) -> serde_json::Value {
+fn project_combat_feedback(feedback: &CombatFeedback) -> CombatFeedbackDetail {
     match feedback {
-        CombatFeedback::AttackDone { error } => json!({
-            "kind": "attack-done",
-            "error": format!("{error:?}"),
-            "ok": *error == holtburger_protocol::errors::WeenieError::None,
-        }),
-        CombatFeedback::AttackCommenced => json!({ "kind": "attack-commenced" }),
+        CombatFeedback::AttackDone { error } => CombatFeedbackDetail::AttackDone {
+            error: format!("{error:?}"),
+            ok: *error == holtburger_protocol::errors::WeenieError::None,
+        },
+        CombatFeedback::AttackCommenced => CombatFeedbackDetail::AttackCommenced,
         CombatFeedback::AttackerNotification {
             defender_name,
             damage_type,
@@ -290,14 +289,13 @@ fn project_combat_feedback(feedback: &CombatFeedback) -> serde_json::Value {
             damage,
             critical_hit,
             ..
-        } => json!({
-            "kind": "attacker-notification",
-            "defenderName": defender_name,
-            "damageType": format!("{damage_type:?}"),
-            "healthPercent": health_percent,
-            "damage": damage,
-            "criticalHit": critical_hit,
-        }),
+        } => CombatFeedbackDetail::AttackerNotification {
+            defender_name: defender_name.clone(),
+            damage_type: format!("{damage_type:?}"),
+            health_percent: *health_percent,
+            damage: *damage,
+            critical_hit: *critical_hit,
+        },
         CombatFeedback::DefenderNotification {
             attacker_name,
             damage_type,
@@ -306,41 +304,43 @@ fn project_combat_feedback(feedback: &CombatFeedback) -> serde_json::Value {
             damage_location,
             critical_hit,
             ..
-        } => json!({
-            "kind": "defender-notification",
-            "attackerName": attacker_name,
-            "damageType": format!("{damage_type:?}"),
-            "healthPercent": health_percent,
-            "damage": damage,
-            "damageLocation": format!("{damage_location:?}"),
-            "criticalHit": critical_hit,
-        }),
-        CombatFeedback::EvasionAttackerNotification { defender_name, .. } => json!({
-            "kind": "evasion-attacker",
-            "defenderName": defender_name,
-        }),
-        CombatFeedback::EvasionDefenderNotification { attacker_name } => json!({
-            "kind": "evasion-defender",
-            "attackerName": attacker_name,
-        }),
-        CombatFeedback::VictimNotification { death_message } => json!({
-            "kind": "victim-notification",
-            "deathMessage": death_message,
-        }),
-        CombatFeedback::KillerNotification { death_message } => json!({
-            "kind": "killer-notification",
-            "deathMessage": death_message,
-        }),
+        } => CombatFeedbackDetail::DefenderNotification {
+            attacker_name: attacker_name.clone(),
+            damage_type: format!("{damage_type:?}"),
+            health_percent: *health_percent,
+            damage: *damage,
+            damage_location: format!("{damage_location:?}"),
+            critical_hit: *critical_hit,
+        },
+        CombatFeedback::EvasionAttackerNotification { defender_name, .. } => {
+            CombatFeedbackDetail::EvasionAttacker {
+                defender_name: defender_name.clone(),
+            }
+        }
+        CombatFeedback::EvasionDefenderNotification { attacker_name } => {
+            CombatFeedbackDetail::EvasionDefender {
+                attacker_name: attacker_name.clone(),
+            }
+        }
+        CombatFeedback::VictimNotification { death_message } => {
+            CombatFeedbackDetail::VictimNotification {
+                death_message: death_message.clone(),
+            }
+        }
+        CombatFeedback::KillerNotification { death_message } => {
+            CombatFeedbackDetail::KillerNotification {
+                death_message: death_message.clone(),
+            }
+        }
         CombatFeedback::PlayerKilled {
             death_message,
             victim_id,
             killer_id,
-        } => json!({
-            "kind": "player-killed",
-            "deathMessage": death_message,
-            "victimId": victim_id,
-            "killerId": killer_id,
-        }),
+        } => CombatFeedbackDetail::PlayerKilled {
+            death_message: death_message.clone(),
+            victim_id: *victim_id,
+            killer_id: *killer_id,
+        },
     }
 }
 
@@ -589,6 +589,14 @@ pub fn ingest_client_view_event(log: &EventLog, event: &ClientViewEvent) {
                 ApiEventTopic::Combat,
                 ApiEvent::CombatFeedback {
                     detail: project_combat_feedback(feedback),
+                },
+            );
+        }
+        ClientViewEvent::CombatModeUpdated { mode } => {
+            log.push(
+                ApiEventTopic::Combat,
+                ApiEvent::CombatModeUpdated {
+                    mode: crate::engine::format_combat_mode(*mode).into(),
                 },
             );
         }

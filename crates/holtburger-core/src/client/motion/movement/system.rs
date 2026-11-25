@@ -384,14 +384,15 @@ impl MovementSystem {
         }
     }
 
-    /// Gesture packets retire automatic approach without discarding the latest held input or
-    /// jump charge. Playback arbitration decides whether that input can move the body now.
+    /// Gesture packets retire server-directed automatic approach without discarding held manual
+    /// input, active local steering, or jump charge. Playback arbitration decides whether local
+    /// movement can advance the body now.
     pub(crate) fn admit_server_gesture(&mut self, now: Instant, world: &mut WorldState) {
         self.process_control_commands(now, world, false);
         self.expire_active_movement(now);
-        if !self.has_active_manual_drive() {
-            // The gesture retires the automatic source. Its replacement authored motion must
-            // start at the committed pose, not inherit a cancelled approach's gap candidate.
+        if !self.has_active_manual_drive() && !self.has_local_steering() {
+            // The gesture retires the server-directed automatic source. Its replacement authored
+            // motion must start at the committed pose, not inherit a cancelled approach's gap candidate.
             self.retire_active_movement();
             if self.manual_input != ManualInputLifetime::None
                 && !self.character_motion.effective_drive().is_stationary()
@@ -400,8 +401,9 @@ impl MovementSystem {
             }
         }
         // ACE can stop physics at a gesture boundary even when the held axes are unchanged.
-        // Publish this manual takeover once with the newly admitted server-control sequence.
-        self.movement_publication_required |= self.has_active_manual_drive();
+        // Publish local movement takeover once with the newly admitted server-control sequence.
+        self.movement_publication_required |=
+            self.has_active_manual_drive() || self.has_local_steering();
         self.pending_facing = PendingFacing::default();
         self.cancel_pending_authored_commands();
     }

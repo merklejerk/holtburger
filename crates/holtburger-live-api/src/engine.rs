@@ -36,7 +36,7 @@ use holtburger_world::state::squelch::SquelchScope;
 use holtburger_world::state::storage::{PackEntryKind, StorageSlot};
 use holtburger_world::stats::VitalType;
 use holtburger_world::vendor::{VendorDraft, VendorPurchase};
-use serde_json::{Value, json};
+use serde_json::Value;
 use tokio::sync::broadcast;
 
 use crate::event_log::{
@@ -48,16 +48,23 @@ use crate::hooks::{
     HudScreenshotResponse, StaticReferenceCatalogs,
 };
 use crate::types::{
-    AllegianceCommandSpec, ApiCommand, ApiEvent, ApiEventEnvelope, ApiEventTopic, ApiInfo,
-    ApiPreviewRequest, ApiQuery, AttackHeightSpec, AttackProfileSpec, CellPortalView,
-    CellTopologyView, ChatCommandSpec, CombatModeSpec, CombatView, CommandResponse, ContainerView,
+    AllegianceCommandSpec, AllegianceMemberView, AllegianceProfileView, AllegianceView, ApiCommand,
+    ApiEvent, ApiEventEnvelope, ApiEventTopic, ApiInfo, ApiPreviewRequest, ApiPreviewResponse,
+    ApiQuery, AppraisalOutcome, AttackHeightSpec, AttackProfileSpec, BusyOperationOutcome,
+    CellPortalView, CellTopologyView, CharacterOptionsView, ChatCommandSpec, CombatModeOutcome,
+    CombatModeSpec, CombatView, CommandOutcome, CommandResponse, ContainerView,
     CorpseConsentCommandSpec, DEFAULT_SPHERE_SWEEP_RADIUS, DeathLocationsView, EntityDetail,
-    EntityFilter, EntityPropertiesView, EntitySummary, EquipmentView, EquippedItemView, EventsPage,
-    FellowshipCommandSpec, FriendsCommandSpec, InventoryView, LIVE_API_VERSION, LifecyclePhaseView,
-    MAX_DRIVE_PULSE_MS, MAX_RAYCAST_BATCH, MAX_WAIT_TIMEOUT_MS, RaycastSpec, RestPostureSpec,
-    SelectionView, SelfView, SkillDefinitionView, SocialView, SpellDefinitionView, SpellbookView,
-    SquelchCommandSpec, TradeView, VendorTradeSpec, VendorView, WaitPolicy, WaitUntil,
-    WorldCellsView, CharacterOptionsView, camelize_json, to_camel_json,
+    EntityFactsView, EntityFilter, EntityPropertiesView, EntitySummary, EquipmentView,
+    EquippedItemView, EventsPage, FellowshipCommandSpec, FellowshipMemberView, FellowshipView,
+    FriendView, FriendsCommandSpec, InventoryOutcome, InventoryView,
+    ItemUseCapabilityView, ItemUseTargetPreview, LIVE_API_VERSION, LifecycleOutcome,
+    LifecyclePhaseView, LockToolView, MAX_DRIVE_PULSE_MS, MAX_RAYCAST_BATCH, MAX_WAIT_TIMEOUT_MS,
+    OutdoorCoordsPreview, OutdoorCoordsView, RaycastHitView, RaycastPreview, RaycastSpec,
+    RestPostureSpec, SalvagePreview, SelectionView, SelfView, SkillDefinitionView, SocialView,
+    SpellCastReadinessView, SpellCastingRouteView, SpellDefinitionView, SpellFormulaPreview,
+    SpellInspectionPreview, SpellbookView, SphereSweepPreview, SquelchCharacterView, SquelchCommandSpec,
+    SquelchGlobalView, SquelchView, TradeView, VendorTradeSpec, VendorView, WaitPolicy, WaitUntil,
+    WeaponProfileView, WorldCellsView, camelize_json, to_camel_json,
 };
 
 /// Live metadata snapshot pushed whenever lifecycle, world, or character changes (e.g., for discovery).
@@ -106,7 +113,7 @@ pub(crate) fn snapshot_discovery_metadata(
     ctx: &holtburger_core::client::control::ClientReadContext<'_>,
 ) -> DiscoveryMetadataSnapshot {
     DiscoveryMetadataSnapshot {
-        lifecycle: lifecycle_label(&ctx.lifecycle()).into(),
+        lifecycle: project_lifecycle(&ctx.lifecycle()).phase_label().into(),
         world: ctx.world_name().map(str::to_string),
         account: ctx.account_name().to_string(),
         character: ctx.world().player_entity().map(|e| e.name().to_string()),
@@ -131,6 +138,13 @@ impl LiveApiEngine {
         let pump_handle = handle.clone();
 
         let task = tokio::spawn(async move {
+            // Hydrate initial discovery metadata asynchronously so callers like h3d can bind the
+            // Live API server before spawning the ClientRuntime task without deadlocking.
+            if let Some(callback) = &on_metadata_changed
+                && let Ok(meta) = pump_handle.read(snapshot_discovery_metadata).await
+            {
+                callback(meta);
+            }
             loop {
                 match rx.recv().await {
                     Ok(event) => {
@@ -326,7 +340,7 @@ impl LiveApiEngine {
                 let world = ctx.world();
                 let guid = world.player.guid;
                 let entity = world.player_entity();
-                let position = world.local_player_runtime_pose().or_else(|| entity.map(|e| e.position));
+                let position = local_player_pose(world);
                 let heading = position.map(|p| p.rotation.to_heading());
                 let summary = world.player_entity_summary();
                 let vital = |ty: VitalType| -> (u32, u32) {
@@ -343,6 +357,7 @@ impl LiveApiEngine {
                     guid,
                     name: entity.map(|e| e.name().to_string()),
                     position,
+                    outdoor_coords: position.and_then(project_outdoor_coords),
                     heading,
                     health,
                     health_max,
@@ -473,6 +488,11 @@ impl LiveApiEngine {
                     {
                         continue;
                     }
+                    if let Some(container) = filter.container
+                        && summary.container != Some(container)
+                    {
+                        continue;
+                    }
                     out.push(summary);
                 }
                 out.sort_by(|a, b| {
@@ -510,10 +530,10 @@ impl LiveApiEngine {
                     build_entity_summary(entity, facts.as_ref(), world.local_player_runtime_pose());
                 Some(EntityDetail {
                     summary,
-                    facts: facts.and_then(to_camel_json),
+                    facts: facts.as_ref().map(|f| project_entity_facts(entity, f)),
                     armor_profile: entity.armor_profile.as_ref().and_then(to_camel_json),
                     creature_profile: entity.creature_profile.as_ref().and_then(to_camel_json),
-                    weapon_profile: entity.weapon_profile.as_ref().and_then(to_camel_json),
+                    weapon_profile: entity.weapon_profile.as_ref().map(project_weapon_profile),
                     spell_book: entity.spell_book.clone(),
                     properties: include_properties.then(|| extract_entity_properties(entity)),
                 })
@@ -616,10 +636,16 @@ impl LiveApiEngine {
                             facts.location
                         && wearer_guid == player_guid
                     {
+                        let raw_mask = mask.unwrap_or(0);
+                        let slots = EquipMask::from_bits_truncate(raw_mask)
+                            .iter_names()
+                            .map(|(name, _)| name.to_ascii_lowercase().replace('_', "-"))
+                            .collect();
                         items.push(EquippedItemView {
                             guid: entity.guid,
                             name: Some(entity.name().to_string()),
-                            equip_mask: mask.unwrap_or(0),
+                            equip_mask: raw_mask,
+                            slots,
                         });
                     }
                 }
@@ -666,9 +692,9 @@ impl LiveApiEngine {
         self.inner
             .handle
             .read(|ctx| SocialView {
-                fellowship: ctx.world().fellowship.as_ref().and_then(to_camel_json),
+                fellowship: ctx.world().fellowship.as_ref().map(project_fellowship),
                 allegiance: project_allegiance(&ctx.allegiance()),
-                friends: ctx.world().friends.as_ref().and_then(to_camel_json),
+                friends: ctx.world().friends.as_ref().map(project_friends),
                 squelch: ctx.world().squelch.as_ref().map(project_squelch),
                 contracts: ctx.contracts().and_then(to_camel_json),
             })
@@ -841,7 +867,7 @@ impl LiveApiEngine {
     }
 
     /// Evaluates pure read-only world previews synchronously via `handle.read(...)`.
-    pub async fn preview(&self, request: ApiPreviewRequest) -> ApiResult<Value> {
+    pub async fn preview(&self, request: ApiPreviewRequest) -> ApiResult<ApiPreviewResponse> {
         match request {
             ApiPreviewRequest::ItemUseTarget { source, target } => {
                 let (eligible, lockpick_success_percent) = self
@@ -850,9 +876,9 @@ impl LiveApiEngine {
                     .read(move |ctx| ctx.evaluate_item_use_target(source, target))
                     .await
                     .map_err(|e| ApiError::runtime(e.to_string()))?;
-                Ok(json!({
-                    "eligible": eligible,
-                    "lockpickSuccessPercent": lockpick_success_percent,
+                Ok(ApiPreviewResponse::ItemUseTarget(ItemUseTargetPreview {
+                    eligible,
+                    lockpick_success_percent,
                 }))
             }
             ApiPreviewRequest::Salvage { tool, items } => {
@@ -866,7 +892,9 @@ impl LiveApiEngine {
                     .read(move |ctx| ctx.preview_salvage(selection, &items))
                     .await
                     .map_err(|e| ApiError::runtime(e.to_string()))?;
-                Ok(project_salvage_evaluation(&eval))
+                Ok(ApiPreviewResponse::Salvage(project_salvage_evaluation(
+                    &eval,
+                )))
             }
             ApiPreviewRequest::Vendor { trade } => {
                 let req = VendorTradeRequest {
@@ -879,16 +907,59 @@ impl LiveApiEngine {
                     .read(move |ctx| ctx.preview_vendor_trade(req))
                     .await
                     .map_err(|e| ApiError::runtime(e.to_string()))?;
-                to_json(result).map(camelize_json)
+                to_json(result)
+                    .map(camelize_json)
+                    .map(ApiPreviewResponse::Dynamic)
             }
             ApiPreviewRequest::SpellInspection { spell_id } => {
-                let outcome = self
+                let catalog_base_mana = self
+                    .inner
+                    .catalogs
+                    .as_ref()
+                    .and_then(|c| c.spells.get(spell_id))
+                    .map(|s| s.base_mana);
+                let (outcome, readiness) = self
                     .inner
                     .handle
-                    .read(move |ctx| ctx.inspect_spell(spell_id))
+                    .read(move |ctx| {
+                        use holtburger_world::context::WorldContext as _;
+                        let outcome = ctx.inspect_spell(spell_id);
+                        let world = ctx.world();
+                        let player_guid = world.player.guid;
+                        let known = ctx.known_spells().map(|ids| ids.contains(&spell_id));
+                        let has_caster_equipped = !player_guid.is_null()
+                            && world.entities.iter().any(|entity| {
+                                world.equipment_mask(entity.guid).is_some_and(|mask| {
+                                    mask.intersects(EquipMask::CASTER)
+                                        && entity.wielder_id() == Some(player_guid)
+                                })
+                            });
+                        let in_magic_mode = world.player_combat_mode() == CombatMode::Magic;
+                        let base_mana = catalog_base_mana
+                            .or_else(|| world.spell_catalog.get(spell_id).map(|s| s.base_mana));
+                        let current_mana = world
+                            .player
+                            .vitals
+                            .get(&VitalType::Mana)
+                            .map(|v| v.current);
+                        let sufficient_mana = base_mana
+                            .zip(current_mana)
+                            .map(|(cost, mana)| mana >= cost);
+                        (
+                            outcome,
+                            SpellCastReadinessView {
+                                known,
+                                has_caster_equipped,
+                                in_magic_mode,
+                                sufficient_mana,
+                            },
+                        )
+                    })
                     .await
                     .map_err(|e| ApiError::runtime(e.to_string()))?;
-                to_json(outcome).map(camelize_json)
+                Ok(ApiPreviewResponse::SpellInspection(
+                    project_spell_inspection(outcome, readiness),
+                ))
             }
             ApiPreviewRequest::Raycast { rays } => {
                 if rays.is_empty() || rays.len() > MAX_RAYCAST_BATCH {
@@ -898,7 +969,7 @@ impl LiveApiEngine {
                 }
                 self.inner
                     .handle
-                    .read(move |ctx| -> ApiResult<Value> {
+                    .read(move |ctx| -> ApiResult<ApiPreviewResponse> {
                         let Some(scene) = ctx.collision_scene() else {
                             return Err(ApiError::unsupported("world.spatial"));
                         };
@@ -925,15 +996,15 @@ impl LiveApiEngine {
                             }
                             let (anchor, previous_cell) = spatial_anchor_and_cell(origin.landblock_id);
                             if distance <= 1e-5 {
-                                results.push(json!({
-                                    "hit": false,
-                                    "anchor": anchor,
-                                    "distance": null,
-                                    "point": null,
-                                    "normal": null,
-                                    "cellId": null,
-                                    "uncovered": false,
-                                }));
+                                results.push(RaycastHitView {
+                                    hit: false,
+                                    anchor,
+                                    distance: None,
+                                    point: None,
+                                    normal: None,
+                                    cell_id: None,
+                                    uncovered: false,
+                                });
                                 continue;
                             }
                             let req = holtburger_world::StaticSurfaceRayRequest {
@@ -951,28 +1022,28 @@ impl LiveApiEngine {
                                 )
                                 .map_err(|e| ApiError::invalid(e.to_string()))?;
                             let entry = match query.value {
-                                Some(hit) => json!({
-                                    "hit": true,
-                                    "anchor": anchor,
-                                    "distance": hit.distance,
-                                    "point": hit.point,
-                                    "normal": hit.normal,
-                                    "cellId": hit.placement.committed_cell(),
-                                    "uncovered": query.unavailable_owner.is_some(),
-                                }),
-                                None => json!({
-                                    "hit": false,
-                                    "anchor": anchor,
-                                    "distance": null,
-                                    "point": null,
-                                    "normal": null,
-                                    "cellId": null,
-                                    "uncovered": query.unavailable_owner.is_some(),
-                                }),
+                                Some(hit) => RaycastHitView {
+                                    hit: true,
+                                    anchor,
+                                    distance: Some(hit.distance),
+                                    point: Some(hit.point),
+                                    normal: Some(hit.normal),
+                                    cell_id: hit.placement.committed_cell(),
+                                    uncovered: query.unavailable_owner.is_some(),
+                                },
+                                None => RaycastHitView {
+                                    hit: false,
+                                    anchor,
+                                    distance: None,
+                                    point: None,
+                                    normal: None,
+                                    cell_id: None,
+                                    uncovered: query.unavailable_owner.is_some(),
+                                },
                             };
                             results.push(entry);
                         }
-                        Ok(json!({ "results": results }))
+                        Ok(ApiPreviewResponse::Raycast(RaycastPreview { results }))
                     })
                     .await
                     .map_err(|e| ApiError::runtime(e.to_string()))?
@@ -986,7 +1057,7 @@ impl LiveApiEngine {
                 }
                 self.inner
                     .handle
-                    .read(move |ctx| -> ApiResult<Value> {
+                    .read(move |ctx| -> ApiResult<ApiPreviewResponse> {
                         let Some(scene) = ctx.collision_scene() else {
                             return Err(ApiError::unsupported("world.spatial"));
                         };
@@ -1033,13 +1104,99 @@ impl LiveApiEngine {
                             None => (false, 1.0, None),
                         };
                         let point = origin.coords + displacement * fraction;
-                        Ok(json!({
-                            "blocked": blocked,
-                            "anchor": anchor,
-                            "fraction": fraction,
-                            "point": point,
-                            "normal": normal,
-                            "uncovered": query.unavailable_owner.is_some(),
+                        Ok(ApiPreviewResponse::SphereSweep(SphereSweepPreview {
+                            blocked,
+                            anchor,
+                            fraction,
+                            point,
+                            normal,
+                            uncovered: query.unavailable_owner.is_some(),
+                        }))
+                    })
+                    .await
+                    .map_err(|e| ApiError::runtime(e.to_string()))?
+            }
+            ApiPreviewRequest::OutdoorCoords { coords, position } => {
+                let mut target_pos = match (coords, position) {
+                    (Some(text), None) => {
+                        let (lat, lon) = holtburger_common::position::parse_printed_outdoor_coords(
+                            &text,
+                        )
+                        .ok_or_else(|| {
+                            ApiError::invalid(format!(
+                                "invalid outdoor coordinates '{text}'; expected format like '42.3N, 15.8E'"
+                            ))
+                        })?;
+                        holtburger_common::position::WorldPosition::from_outdoor_degrees(
+                            lat, lon, 0.0,
+                        )
+                        .ok_or_else(|| {
+                            ApiError::invalid(format!(
+                                "outdoor coordinates '{text}' are outside Dereth bounds"
+                            ))
+                        })?
+                    }
+                    (None, Some(pos)) => {
+                        if !pos.coords.x.is_finite()
+                            || !pos.coords.y.is_finite()
+                            || !pos.coords.z.is_finite()
+                        {
+                            return Err(ApiError::invalid(
+                                "outdoor-coords `position` coordinates must be finite",
+                            ));
+                        }
+                        let normalized = pos
+                            .normalize_outdoor_landblock_frame()
+                            .map_err(|_| {
+                                ApiError::invalid(
+                                    "outdoor-coords `position` must be a valid outdoor WorldPosition",
+                                )
+                            })?;
+                        normalized.normalize_outdoor_cell()
+                    }
+                    _ => {
+                        return Err(ApiError::invalid(
+                            "outdoor-coords requires exactly one of `coords` or `position`",
+                        ));
+                    }
+                };
+                let sample_terrain = position.is_none();
+                self.inner
+                    .handle
+                    .read(move |ctx| -> ApiResult<ApiPreviewResponse> {
+                        let mut terrain_resident = false;
+                        if sample_terrain && let Some(scene) = ctx.collision_scene() {
+                            let (anchor, previous_cell) =
+                                spatial_anchor_and_cell(target_pos.landblock_id);
+                            let req = holtburger_world::StaticSurfaceRayRequest {
+                                anchor,
+                                start: holtburger_common::math::Vector3::new(
+                                    target_pos.coords.x,
+                                    target_pos.coords.y,
+                                    1000.0,
+                                ),
+                                direction: holtburger_common::math::Vector3::new(0.0, 0.0, -1.0),
+                                maximum_distance: 2000.0,
+                                previous_cell,
+                                filter: holtburger_world::PhysicalCollisionFilter::ALL,
+                            };
+                            if let Ok(query) = scene.cast_static_surface_ray_with_policy(
+                                req,
+                                holtburger_world::CollisionQueryPolicy::AllowUncoveredQuery,
+                            ) && query.unavailable_owner.is_none()
+                                && let Some(hit) = query.value
+                            {
+                                terrain_resident = true;
+                                target_pos.coords.z = hit.point.z;
+                            }
+                        }
+                        let outdoor_coords = project_outdoor_coords(target_pos).ok_or_else(|| {
+                            ApiError::invalid("position could not be converted to outdoor coords")
+                        })?;
+                        Ok(ApiPreviewResponse::OutdoorCoords(OutdoorCoordsPreview {
+                            position: target_pos,
+                            outdoor_coords,
+                            terrain_resident,
                         }))
                     })
                     .await
@@ -1128,6 +1285,12 @@ impl LiveApiEngine {
         command: ApiCommand,
         wait: WaitPolicy,
     ) -> ApiResult<CommandResponse> {
+        // Fast-path no-ops and fail-fast checks for async-settling combat-mode / inventory commands
+        // so `wait.until = "settled"` never hangs when the character is already in the desired state.
+        if let Some(short_circuit) = self.precheck_settling_command(&command, wait).await? {
+            return Ok(short_circuit);
+        }
+
         let waiter_kind = settlement_matcher(&command);
         let core_cmd = self.translate_command(command).await?;
 
@@ -1202,6 +1365,123 @@ impl LiveApiEngine {
                 }
             }
         }
+    }
+
+    async fn precheck_settling_command(
+        &self,
+        command: &ApiCommand,
+        wait: WaitPolicy,
+    ) -> ApiResult<Option<CommandResponse>> {
+        if wait.until != WaitUntil::Settled {
+            return Ok(None);
+        }
+        if !matches!(
+            command,
+            ApiCommand::SetCombatMode { .. } | ApiCommand::Inventory { .. }
+        ) {
+            return Ok(None);
+        }
+        if self.inner.handle.is_automation_paused() {
+            return Err(map_rejection(CommandRejection::AutomationPaused));
+        }
+        match command {
+            ApiCommand::SetCombatMode { mode } => {
+                let requested = combat_mode_spec_to_core(*mode);
+                let (in_world, current) = self
+                    .inner
+                    .handle
+                    .read(|ctx| {
+                        (
+                            matches!(ctx.lifecycle(), ClientLifecycleState::InWorld),
+                            ctx.world().player_combat_mode(),
+                        )
+                    })
+                    .await
+                    .map_err(|e| ApiError::runtime(e.to_string()))?;
+                if !in_world {
+                    return Err(map_rejection(CommandRejection::NotInWorld));
+                }
+                if current == requested {
+                    return Ok(Some(CommandResponse {
+                        accepted: true,
+                        correlation_id: None,
+                        settled: true,
+                        timed_out: false,
+                        outcome: Some(CommandOutcome::CombatMode(CombatModeOutcome {
+                            mode: format_combat_mode(current).into(),
+                            matched: true,
+                        })),
+                        latest_event_seq: self.inner.event_log.latest_seq(),
+                    }));
+                }
+            }
+            ApiCommand::Inventory { intent } => {
+                use holtburger_core::client::inventory_plan::InventoryTarget;
+                use holtburger_world::context::WorldContext as _;
+                let item_guid = intent.item;
+                let target = intent.target;
+                let (in_world, exists, already_in_target) = self
+                    .inner
+                    .handle
+                    .read(move |ctx| {
+                        if !matches!(ctx.lifecycle(), ClientLifecycleState::InWorld) {
+                            return (false, false, false);
+                        }
+                        let world = ctx.world();
+                        if world.entities.get(item_guid).is_none() {
+                            return (true, false, false);
+                        }
+                        let already = match target {
+                            InventoryTarget::Container { guid } => matches!(
+                                world.storage_location(item_guid),
+                                Some(holtburger_world::state::storage::StorageLocation::Contained {
+                                    parent,
+                                    ..
+                                }) if parent == guid
+                            ),
+                            InventoryTarget::Equipment { mask } => {
+                                world.equipment_mask(item_guid)
+                                    == Some(EquipMask::from_bits_retain(mask))
+                            }
+                            InventoryTarget::EquipPreferred { alternate: false } => {
+                                world.equipment_mask(item_guid).is_some()
+                            }
+                            InventoryTarget::Item { guid } | InventoryTarget::Pack { guid } => {
+                                guid == item_guid
+                            }
+                            _ => false,
+                        };
+                        (true, true, already)
+                    })
+                    .await
+                    .map_err(|e| ApiError::runtime(e.to_string()))?;
+                if !in_world {
+                    return Err(map_rejection(CommandRejection::NotInWorld));
+                }
+                if !exists {
+                    return Err(ApiError::not_found(format!(
+                        "inventory item {} not found",
+                        item_guid.0
+                    )));
+                }
+                if already_in_target {
+                    return Ok(Some(CommandResponse {
+                        accepted: true,
+                        correlation_id: None,
+                        settled: true,
+                        timed_out: false,
+                        outcome: Some(CommandOutcome::Inventory(InventoryOutcome {
+                            item: item_guid,
+                            settled_by: "already-in-target".into(),
+                            error: None,
+                        })),
+                        latest_event_seq: self.inner.event_log.latest_seq(),
+                    }));
+                }
+            }
+            _ => {}
+        }
+        Ok(None)
     }
 
     async fn translate_command(&self, command: ApiCommand) -> ApiResult<ClientCommand> {
@@ -1286,12 +1566,9 @@ impl LiveApiEngine {
                 }
                 ClientCommand::SetCharacterOption { option, value }
             }
-            ApiCommand::SetCombatMode { mode } => ClientCommand::SetCombatMode(match mode {
-                CombatModeSpec::Peace => CombatMode::NonCombat,
-                CombatModeSpec::Melee => CombatMode::Melee,
-                CombatModeSpec::Missile => CombatMode::Missile,
-                CombatModeSpec::Magic => CombatMode::Magic,
-            }),
+            ApiCommand::SetCombatMode { mode } => {
+                ClientCommand::SetCombatMode(combat_mode_spec_to_core(mode))
+            }
             ApiCommand::BeginCombat { target, profile } => ClientCommand::BeginCombatEngagement {
                 intent_sequence: 0,
                 target,
@@ -1489,6 +1766,8 @@ enum SettlementMatcher {
     Appraisal { guid: Guid, facts_only: bool },
     Navigation,
     VendorTrade,
+    CombatMode { expected: &'static str },
+    Inventory { item: Guid },
     SelectCharacter,
     Logout,
 }
@@ -1512,6 +1791,10 @@ fn settlement_matcher(command: &ApiCommand) -> Option<SettlementMatcher> {
             Some(SettlementMatcher::Navigation)
         }
         ApiCommand::VendorTrade { .. } => Some(SettlementMatcher::VendorTrade),
+        ApiCommand::SetCombatMode { mode } => Some(SettlementMatcher::CombatMode {
+            expected: format_combat_mode(combat_mode_spec_to_core(*mode)),
+        }),
+        ApiCommand::Inventory { intent } => Some(SettlementMatcher::Inventory { item: intent.item }),
         ApiCommand::SelectCharacter { .. } => Some(SettlementMatcher::SelectCharacter),
         ApiCommand::Logout => Some(SettlementMatcher::Logout),
         _ => None,
@@ -1522,7 +1805,7 @@ fn match_settlement(
     matcher: &SettlementMatcher,
     correlation_id: Option<u64>,
     envelope: &ApiEventEnvelope,
-) -> Option<Value> {
+) -> Option<CommandOutcome> {
     match (matcher, &envelope.event) {
         (
             SettlementMatcher::Busy(expected),
@@ -1532,23 +1815,25 @@ fn match_settlement(
                 error,
                 timed_out,
             },
-        ) if operation == expected => Some(json!({
-            "operation": operation,
-            "succeeded": succeeded,
-            "error": error,
-            "timedOut": timed_out,
+        ) if operation == expected => Some(CommandOutcome::Busy(BusyOperationOutcome {
+            operation: *operation,
+            succeeded: *succeeded,
+            error: error.clone(),
+            timed_out: *timed_out,
+            teleported: None,
         })),
         (
             SettlementMatcher::Busy(expected),
             ApiEvent::LifecycleChanged {
                 lifecycle: LifecyclePhaseView::PortalSpace { .. },
             },
-        ) => Some(json!({
-            "operation": expected,
-            "succeeded": *expected == BusyOperationKind::Use,
-            "error": (*expected != BusyOperationKind::Use).then_some("operation interrupted by portal transition"),
-            "timedOut": false,
-            "teleported": true,
+        ) => Some(CommandOutcome::Busy(BusyOperationOutcome {
+            operation: *expected,
+            succeeded: *expected == BusyOperationKind::Use,
+            error: (*expected != BusyOperationKind::Use)
+                .then(|| "operation interrupted by portal transition".into()),
+            timed_out: false,
+            teleported: Some(true),
         })),
         (
             SettlementMatcher::Busy(expected),
@@ -1558,16 +1843,17 @@ fn match_settlement(
                     | LifecyclePhaseView::CharacterSelection { .. }
                     | LifecyclePhaseView::Exiting { .. },
             },
-        ) => Some(json!({
-            "operation": expected,
-            "succeeded": false,
-            "error": "operation aborted by lifecycle transition",
-            "timedOut": false,
+        ) => Some(CommandOutcome::Busy(BusyOperationOutcome {
+            operation: *expected,
+            succeeded: false,
+            error: Some("operation aborted by lifecycle transition".into()),
+            timed_out: false,
+            teleported: None,
         })),
         (SettlementMatcher::ItemUse, ApiEvent::ItemUseFinished { sequence, outcome })
             if correlation_id == Some(u64::from(*sequence)) =>
         {
-            Some(outcome.clone())
+            Some(CommandOutcome::Dynamic(outcome.clone()))
         }
         (
             SettlementMatcher::Appraisal { guid, facts_only },
@@ -1579,49 +1865,94 @@ fn match_settlement(
                 inspection,
             },
         ) if event_guid == guid && (*facts_only || !*event_facts_only) => {
-            let mut obj = serde_json::Map::new();
-            obj.insert("guid".into(), json!(event_guid));
-            obj.insert("factsOnly".into(), json!(event_facts_only));
-            obj.insert("status".into(), json!(status));
-            if let Some(reason) = reason {
-                obj.insert("reason".into(), json!(reason));
-            }
-            if let Some(inspection) = inspection {
-                obj.insert("inspection".into(), inspection.clone());
-            }
-            Some(Value::Object(obj))
+            Some(CommandOutcome::Appraisal(AppraisalOutcome {
+                guid: *event_guid,
+                facts_only: *event_facts_only,
+                status: *status,
+                reason: reason.clone(),
+                inspection: inspection.clone(),
+            }))
         }
         (SettlementMatcher::Navigation, ApiEvent::NavigationFinished { finished })
             if correlation_id == Some(finished.correlation_id) =>
         {
-            serde_json::to_value(finished).ok()
+            Some(CommandOutcome::Navigation(*finished))
         }
         (
             SettlementMatcher::VendorTrade,
             ApiEvent::VendorTradeFinished { sequence, result },
-        ) if correlation_id == Some(u64::from(*sequence)) => Some(result.clone()),
+        ) if correlation_id == Some(u64::from(*sequence)) => {
+            Some(CommandOutcome::Dynamic(result.clone()))
+        }
+        (
+            SettlementMatcher::CombatMode { expected },
+            ApiEvent::CombatModeUpdated { mode },
+        ) if mode == expected || mode == "peace" => {
+            Some(CommandOutcome::CombatMode(CombatModeOutcome {
+                matched: mode == expected,
+                mode: mode.clone(),
+            }))
+        }
+        (
+            SettlementMatcher::Inventory { item },
+            ApiEvent::EntityFactsChanged { upserted, removed },
+        ) if upserted.contains(item) || removed.contains(item) => {
+            Some(CommandOutcome::Inventory(InventoryOutcome {
+                item: *item,
+                settled_by: "updated".into(),
+                error: None,
+            }))
+        }
+        (SettlementMatcher::Inventory { item }, ApiEvent::EntityDespawned { guid })
+            if guid == item =>
+        {
+            Some(CommandOutcome::Inventory(InventoryOutcome {
+                item: *item,
+                settled_by: "despawned".into(),
+                error: None,
+            }))
+        }
+        (
+            SettlementMatcher::Inventory { item },
+            ApiEvent::ErrorNotice { source, message },
+        ) if source != "chat" => {
+            Some(CommandOutcome::Inventory(InventoryOutcome {
+                item: *item,
+                settled_by: "rejected".into(),
+                error: Some(message.clone()),
+            }))
+        }
         (
             SettlementMatcher::SelectCharacter,
             ApiEvent::LifecycleChanged {
-                lifecycle: LifecyclePhaseView::InWorld,
+                lifecycle: lifecycle @ LifecyclePhaseView::InWorld,
             },
-        ) => Some(json!({ "lifecycle": "in-world" })),
+        ) => Some(CommandOutcome::Lifecycle(LifecycleOutcome {
+            lifecycle: lifecycle.phase_label().into(),
+            rejection: None,
+        })),
         (
             SettlementMatcher::SelectCharacter,
             ApiEvent::LifecycleChanged {
                 lifecycle:
-                    LifecyclePhaseView::CharacterSelection {
+                    lifecycle @ LifecyclePhaseView::CharacterSelection {
                         rejection: Some(reason),
                         ..
                     },
             },
-        ) => Some(json!({ "lifecycle": "character-selection", "rejection": reason })),
+        ) => Some(CommandOutcome::Lifecycle(LifecycleOutcome {
+            lifecycle: lifecycle.phase_label().into(),
+            rejection: Some(reason.clone()),
+        })),
         (
             SettlementMatcher::Logout,
             ApiEvent::LifecycleChanged {
-                lifecycle: LifecyclePhaseView::CharacterSelection { .. },
+                lifecycle: lifecycle @ LifecyclePhaseView::CharacterSelection { .. },
             },
-        ) => Some(json!({ "lifecycle": "character-selection" })),
+        ) => Some(CommandOutcome::Lifecycle(LifecycleOutcome {
+            lifecycle: lifecycle.phase_label().into(),
+            rejection: None,
+        })),
         _ => None,
     }
 }
@@ -1675,26 +2006,42 @@ fn to_json<T: serde::Serialize>(value: T) -> ApiResult<Value> {
     serde_json::to_value(value).map_err(|e| ApiError::new(ApiErrorCode::Internal, e.to_string()))
 }
 
-fn lifecycle_label(state: &ClientLifecycleState) -> &'static str {
-    match state {
-        ClientLifecycleState::Connecting => "connecting",
-        ClientLifecycleState::Authenticating => "authenticating",
-        ClientLifecycleState::CharacterSelection { .. } => "character-selection",
-        ClientLifecycleState::EnteringWorld { .. } => "entering-world",
-        ClientLifecycleState::PortalSpace { .. } => "portal-space",
-        ClientLifecycleState::InWorld => "in-world",
-        ClientLifecycleState::LoggingOut => "logging-out",
-        ClientLifecycleState::Exiting { .. } => "exiting",
-    }
-}
-
-fn format_combat_mode(mode: CombatMode) -> &'static str {
+pub(crate) fn format_combat_mode(mode: CombatMode) -> &'static str {
     match mode {
         CombatMode::NonCombat => "peace",
         CombatMode::Melee => "melee",
         CombatMode::Missile => "missile",
         CombatMode::Magic => "magic",
         CombatMode::Undef => "undef",
+    }
+}
+
+fn combat_mode_spec_to_core(mode: CombatModeSpec) -> CombatMode {
+    match mode {
+        CombatModeSpec::Peace => CombatMode::NonCombat,
+        CombatModeSpec::Melee => CombatMode::Melee,
+        CombatModeSpec::Missile => CombatMode::Missile,
+        CombatModeSpec::Magic => CombatMode::Magic,
+    }
+}
+
+fn project_weapon_profile(
+    profile: &holtburger_protocol::messages::object::types::WeaponProfile,
+) -> WeaponProfileView {
+    let weapon_skill_name =
+        holtburger_common::stats::SkillType::from_repr(profile.weapon_skill).map(|s| format!("{s:?}"));
+    WeaponProfileView {
+        damage_type: profile.damage_type,
+        weapon_time: profile.weapon_time,
+        weapon_skill: profile.weapon_skill,
+        weapon_skill_name,
+        damage: profile.damage,
+        damage_variance: profile.damage_variance,
+        damage_mod: profile.damage_mod,
+        weapon_length: profile.weapon_length,
+        max_velocity: profile.max_velocity,
+        weapon_offense: profile.weapon_offense,
+        max_velocity_estimated: profile.max_velocity_estimated,
     }
 }
 
@@ -1850,6 +2197,13 @@ fn spell_view(id: u32, info: &holtburger_world::spell::SpellInfo) -> SpellDefini
         SpellExtrasInfo::Enchantment { duration, .. } => Some(*duration),
         _ => None,
     };
+    let casting_route = match info.casting_route() {
+        holtburger_world::spell::SpellCastingRoute::SelfTarget => SpellCastingRouteView::SelfTarget,
+        holtburger_world::spell::SpellCastingRoute::Untargeted => SpellCastingRouteView::Untargeted,
+        holtburger_world::spell::SpellCastingRoute::SelectedTarget => {
+            SpellCastingRouteView::SelectedTarget
+        }
+    };
     SpellDefinitionView {
         id,
         name: info.name.clone(),
@@ -1858,12 +2212,157 @@ fn spell_view(id: u32, info: &holtburger_world::spell::SpellInfo) -> SpellDefini
         icon_id: info.icon_id,
         category: info.category,
         bitfield: info.bitfield,
+        is_beneficial: info.is_beneficial(),
+        casting_route,
         base_mana: info.base_mana,
         base_range_constant: info.base_range_constant,
         base_range_mod: info.base_range_mod,
         power: info.power,
         components: info.components.iter().copied().filter(|&c| c != 0).collect(),
         duration,
+    }
+}
+
+fn project_entity_facts(entity: &Entity, facts: &ClientEntityFacts) -> EntityFactsView {
+    use holtburger_common::properties::{PropertyBool, WorldObjectPropertyAccessors as _};
+    let use_capability = match &facts.description {
+        EntityDescription::Pending => ItemUseCapabilityView::Unavailable,
+        EntityDescription::Known { use_capability, .. } => match use_capability {
+            holtburger_world::item_use::ItemUseCapability::Unavailable => {
+                ItemUseCapabilityView::Unavailable
+            }
+            holtburger_world::item_use::ItemUseCapability::Unsupported => {
+                ItemUseCapabilityView::Unsupported
+            }
+            holtburger_world::item_use::ItemUseCapability::Direct => ItemUseCapabilityView::Direct,
+            holtburger_world::item_use::ItemUseCapability::SalvageTool => {
+                ItemUseCapabilityView::SalvageTool
+            }
+            holtburger_world::item_use::ItemUseCapability::Targeted => {
+                ItemUseCapabilityView::Targeted
+            }
+        },
+    };
+    let lock_tool = facts.lock_tool.as_ref().map(|tool| match tool {
+        holtburger_world::entity_facts::LockToolFacts::Key => LockToolView::Key,
+        holtburger_world::entity_facts::LockToolFacts::Lockpick { bonus } => {
+            LockToolView::Lockpick { bonus: *bonus }
+        }
+    });
+    let (item_capacity, pack_capacity) = match facts.storage {
+        StorageCoverage::Container {
+            item_capacity,
+            pack_capacity,
+            ..
+        } => (item_capacity, pack_capacity),
+        StorageCoverage::NotEstablished => (None, None),
+    };
+    let (is_corpse, corpse_open) = match &facts.corpse {
+        Some(holtburger_world::entity_facts::CorpseState::Opened) => (true, true),
+        Some(holtburger_world::entity_facts::CorpseState::Unopened) => (true, false),
+        None => (false, false),
+    };
+    let dynamic_collision = entity.physics.effective().dynamic_collision;
+    let blocks_movement = matches!(facts.location, EntityStorageLocation::None)
+        && !entity.position.landblock_id.is_null()
+        && !dynamic_collision.missile
+        && dynamic_collision.target == holtburger_world::EntityCollisionParticipation::Solid;
+    EntityFactsView {
+        use_capability,
+        is_locked: facts.is_locked,
+        is_open: entity.get_bool_prop_opt(PropertyBool::Open),
+        blocks_movement,
+        lock_tool,
+        owned_by_player: facts.owned_by_player,
+        can_pick_up: facts.can_pick_up,
+        world_container_content: facts.world_container_content,
+        can_receive_give: facts.can_receive_give,
+        can_trade: facts.can_trade,
+        can_offer_trade: facts.can_offer_trade,
+        is_hostile: facts.is_hostile,
+        is_corpse,
+        corpse_open,
+        item_capacity,
+        pack_capacity,
+        summon_owner: facts.summon.as_ref().map(|s| s.owner),
+    }
+}
+
+fn project_spell_inspection(
+    outcome: holtburger_core::client::spell_inspection::SpellInspectionOutcome,
+    readiness: SpellCastReadinessView,
+) -> SpellInspectionPreview {
+    use holtburger_core::client::spell_inspection::{SpellFormulaResult, SpellInspectionOutcome};
+    match outcome {
+        SpellInspectionOutcome::Pending => SpellInspectionPreview::Pending,
+        SpellInspectionOutcome::Missing => SpellInspectionPreview::Missing,
+        SpellInspectionOutcome::Ready {
+            range_metres,
+            formula,
+        } => SpellInspectionPreview::Ready {
+            range_metres,
+            formula: match formula {
+                SpellFormulaResult::Pending => SpellFormulaPreview::Pending,
+                SpellFormulaResult::Ready { components } => {
+                    SpellFormulaPreview::Ready { components }
+                }
+                SpellFormulaResult::Failed { detail } => SpellFormulaPreview::Failed { detail },
+            },
+            readiness,
+        },
+    }
+}
+
+fn project_fellowship(
+    fellowship: &holtburger_world::state::fellowship::FellowshipState,
+) -> FellowshipView {
+    FellowshipView {
+        name: fellowship.name.clone(),
+        leader_guid: fellowship.leader_guid,
+        share_xp: fellowship.share_xp,
+        even_share: fellowship.even_share,
+        open: fellowship.open,
+        is_locked: fellowship.is_locked,
+        members: fellowship
+            .members
+            .iter()
+            .map(|m| FellowshipMemberView {
+                guid: m.guid,
+                name: m.name.clone(),
+                level: m.level,
+                max_health: m.max_health,
+                max_stamina: m.max_stamina,
+                max_mana: m.max_mana,
+                current_health: m.current_health,
+                current_stamina: m.current_stamina,
+                current_mana: m.current_mana,
+                share_loot: m.share_loot,
+            })
+            .collect(),
+    }
+}
+
+fn project_friends(friends: &holtburger_world::state::friends::FriendsState) -> Vec<FriendView> {
+    friends
+        .members
+        .values()
+        .map(|f| FriendView {
+            guid: f.guid,
+            name: f.name.clone(),
+            online: f.online,
+        })
+        .collect()
+}
+
+fn project_allegiance_member(member: AllegianceMember) -> AllegianceMemberView {
+    AllegianceMemberView {
+        guid: member.guid,
+        name: member.name,
+        title: member.title.map(str::to_string),
+        rank: member.rank,
+        level: member.level,
+        online: member.online,
+        contributed_xp: member.contributed_xp,
     }
 }
 
@@ -1887,73 +2386,112 @@ fn default_equipment_storage_policy(world: &holtburger_world::WorldState) -> Equ
     }
 }
 
-fn project_allegiance(snapshot: &holtburger_core::client::allegiance::AllegianceSnapshot) -> Value {
+fn project_allegiance(
+    snapshot: &holtburger_core::client::allegiance::AllegianceSnapshot,
+) -> AllegianceView {
     let profile = snapshot.profile.as_ref().map(|p| {
         let roles = snapshot
             .player_guid
             .map(|player| p.relationships(player));
-        json!({
-            "name": p.name,
-            "rank": p.rank,
-            "totalMembers": p.total_members,
-            "totalDescendants": p.total_descendants,
-            "monarch": roles.as_ref().and_then(|r| r.monarch).map(AllegianceMember::from),
-            "patron": roles.as_ref().and_then(|r| r.patron).map(AllegianceMember::from),
-            "self": roles.as_ref().and_then(|r| r.self_member).map(AllegianceMember::from),
-            "directVassals": roles
+        AllegianceProfileView {
+            name: p.name.clone(),
+            rank: p.rank,
+            total_members: p.total_members,
+            total_descendants: p.total_descendants,
+            monarch: roles
                 .as_ref()
-                .map(|r| r.direct_vassals.iter().copied().map(AllegianceMember::from).collect::<Vec<_>>())
+                .and_then(|r| r.monarch)
+                .map(AllegianceMember::from)
+                .map(project_allegiance_member),
+            patron: roles
+                .as_ref()
+                .and_then(|r| r.patron)
+                .map(AllegianceMember::from)
+                .map(project_allegiance_member),
+            self_member: roles
+                .as_ref()
+                .and_then(|r| r.self_member)
+                .map(AllegianceMember::from)
+                .map(project_allegiance_member),
+            direct_vassals: roles
+                .as_ref()
+                .map(|r| {
+                    r.direct_vassals
+                        .iter()
+                        .copied()
+                        .map(AllegianceMember::from)
+                        .map(project_allegiance_member)
+                        .collect()
+                })
                 .unwrap_or_default(),
-        })
+        }
     });
-    json!({
-        "playerGuid": snapshot.player_guid,
-        "refreshing": snapshot.refreshing,
-        "canSwear": snapshot.can_swear,
-        "profile": profile,
-    })
+    AllegianceView {
+        player_guid: snapshot.player_guid,
+        refreshing: snapshot.refreshing,
+        can_swear: snapshot.can_swear,
+        profile,
+    }
 }
 
-fn project_squelch(squelch: &holtburger_world::state::squelch::SquelchState) -> Value {
-    let characters: Vec<_> = squelch
+fn project_squelch(squelch: &holtburger_world::state::squelch::SquelchState) -> SquelchView {
+    let characters = squelch
         .characters
         .iter()
         .map(|(&guid, rec)| {
             let mgmt = rec.management();
-            json!({
-                "guid": guid,
-                "name": rec.name,
-                "account": rec.account,
-                "coverage": mgmt.coverage,
-                "removalScope": mgmt.removal_scope,
-            })
+            SquelchCharacterView {
+                guid,
+                name: rec.name.clone(),
+                account: rec.account,
+                coverage: format!("{:?}", mgmt.coverage),
+                removal_scope: mgmt.removal_scope.map(|s| format!("{s:?}")),
+            }
         })
         .collect();
-    json!({
-        "accounts": squelch.accounts,
-        "characters": characters,
-        "globals": {
-            "name": squelch.globals.name,
-            "coverage": squelch.globals.filter.coverage(),
+    SquelchView {
+        accounts: squelch.accounts.clone(),
+        characters,
+        globals: SquelchGlobalView {
+            name: squelch.globals.name.clone(),
+            coverage: format!("{:?}", squelch.globals.filter.coverage()),
         },
-    })
+    }
 }
 
-fn project_salvage_evaluation(eval: &SalvageEvaluation) -> Value {
+fn project_outdoor_coords(
+    pos: holtburger_common::position::WorldPosition,
+) -> Option<OutdoorCoordsView> {
+    if pos.landblock_id.is_null() || pos.is_indoors() {
+        return None;
+    }
+    let coords = pos.to_world_coords();
+    match coords {
+        holtburger_common::position::WorldCoordinates::Outdoor { lat, lon, alt } => {
+            let label = coords.outdoor_label()?;
+            Some(OutdoorCoordsView {
+                lat,
+                lon,
+                alt,
+                label,
+            })
+        }
+        holtburger_common::position::WorldCoordinates::Indoor { .. } => None,
+    }
+}
+
+fn project_salvage_evaluation(eval: &SalvageEvaluation) -> SalvagePreview {
     match eval {
-        SalvageEvaluation::Ready { review, bags } => json!({
-            "kind": "ready",
-            "tool": review.tool.guid,
-            "bags": bags,
-        }),
-        SalvageEvaluation::PendingDetails { tool, items } => json!({
-            "kind": "pending-details",
-            "tool": tool.guid,
-            "items": items,
-        }),
-        SalvageEvaluation::Rejected { reason } => json!({
-            "kind": "rejected",
-            "reason": reason,
-        }),
+        SalvageEvaluation::Ready { review, bags } => SalvagePreview::Ready {
+            tool: review.tool.guid,
+            bags: to_camel_json(bags).unwrap_or(Value::Null),
+        },
+        SalvageEvaluation::PendingDetails { tool, items } => SalvagePreview::PendingDetails {
+            tool: tool.guid,
+            items: items.clone(),
+        },
+        SalvageEvaluation::Rejected { reason } => SalvagePreview::Rejected {
+            reason: reason.clone(),
+        },
     }
 }

@@ -3,8 +3,12 @@
 	import { chatWordDeletionStart } from "./chat-edit";
 	import { copyTextSelection } from "../hud/text-selection";
 	import { ChatSubmissionError } from "./chat-composer.svelte";
-	import ClientWaypointText from "../world/ClientWaypointText.svelte";
+	import {
+		formatChatEntityMention,
+		insertChatMention,
+	} from "./chat-entity-links";
 	import ClientChatFormattedText from "./ClientChatFormattedText.svelte";
+	import ClientChatMessageText from "./ClientChatMessageText.svelte";
 	import ClientChatRecipientDialog from "./ClientChatRecipientDialog.svelte";
 	import type { MapWaypointTarget } from "../../lib/game/map/map-waypoint";
 	import { useAppInputPolicy } from "../../lib/input/app-input-policy-context";
@@ -472,6 +476,45 @@
 		}
 	}
 
+	/** Monotonic counter prevents an older `mentionEntity` tick from clobbering a newer caret. */
+	let mentionSeq = 0;
+
+	/** Insert an inline `[Label](0xHEX)` entity mention into the current draft and focus chat. */
+	export async function mentionEntity(
+		name: string,
+		guid: number,
+	): Promise<void> {
+		if (sending || composing || recipientOpen || (guid >>> 0) === 0) return;
+		openMenu = null;
+		const syncedInput =
+			inputElement !== null && inputElement.value === message
+				? inputElement
+				: null;
+		const selectionStart = syncedInput?.selectionStart ?? message.length;
+		const selectionEnd = syncedInput?.selectionEnd ?? selectionStart;
+		const inserted = insertChatMention(
+			message,
+			selectionStart,
+			selectionEnd,
+			formatChatEntityMention(name, guid),
+		);
+		message = inserted.message;
+		recall = null;
+		const seq = ++mentionSeq;
+		const generation = composer.generation;
+		await tick();
+		if (
+			seq === mentionSeq &&
+			composer.generation === generation &&
+			!recipientOpen &&
+			inputElement !== null
+		) {
+			keyboard.activate(inputElement);
+			inputElement.setSelectionRange(inserted.caret, inserted.caret);
+			updateCompletion(inputElement);
+		}
+	}
+
 	async function chooseDestination(action: DestinationAction): Promise<void> {
 		openMenu = null;
 		const generation = composer.generation;
@@ -646,8 +689,9 @@
 										onSelectEntity={(guid) => selectEntity(line, guid)}
 										interactive={historyInteractive}
 										{onSetWaypoint}
-									/>{:else}<ClientWaypointText
+									/>{:else}<ClientChatMessageText
 										text={line.message}
+										onSelectEntity={(guid) => selectEntity(line, guid)}
 										interactive={historyInteractive}
 										{onSetWaypoint}
 									/>{/if}</span

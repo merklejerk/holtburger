@@ -1,0 +1,24 @@
+## Discovering the Exact Schema (Save Tokens)
+
+`GET /v1/openapi.json` is the authoritative OpenAPI 3.1 contract for every route, query parameter, command variant, preview payload, event, and WebSocket frame. Because it is large, query it selectively rather than reading the entire JSON into context:
+
+- List endpoints: inspect top-level `paths` keys and their `summary` / `description`.
+- Inspect payloads: look up `components.schemas.ApiCommand`, `components.schemas.ApiQuery` (WS `query.kind` names), `components.schemas.ApiPreviewRequest`, `components.schemas.ApiPreviewResponse`, `components.schemas.ApiEvent`, `components.schemas.WsClientFrame`, `components.schemas.WsServerFrame`, or the specific schema referenced by a route.
+
+## Interaction Rhythm
+
+- **Reads (`GET /v1/...`)** are non-mutating snapshots executed on the client runtime loop.
+- **Previews (`POST /v1/preview`)** run pure spatial, coordinate, spell, item-use, salvage, or vendor checks without moving or sending packets.
+- **Commands (`POST /v1/command`)** accept a `wait` policy (`timeoutMs` capped at `30000`):
+  - `until: "accepted"` returns as soon as the command is admitted.
+  - `until: "settled"` waits for async completion on commands that settle (navigation arrival, spell/use outcome, combat stance, inventory updates, appraisal, portal transition, or failure). For long walks exceeding 30s, use `until: "accepted"` and watch `navigation-finished` events.
+- **Events**: long-poll `GET /v1/events?since=<seq>&waitMs=<ms>` (optionally filtered by `topics`) or connect to `WS /v1/ws` (JSON frames matching `WsClientFrame` / `WsServerFrame`) for live subscriptions, multiplexed requests, and opt-in throttled motion frames.
+- **Co-op control**: Human user input always takes precedence and interrupts active automation steering. If the user pauses automation, commands return `automation_paused` until resumed.
+
+## Asheron's Call & Client Mental Model
+
+- **Coordinates & spaces**: Dereth is partitioned into landblocks (`landblockId`) and cells. Outdoor areas use N/S/E/W map coordinates (`outdoorCoords` on `GET /v1/self`; convert N/S/E/W ↔ `WorldPosition` via `POST /v1/preview` `outdoor-coords`, noting `position.coords.z` is `0.0` on `coords -> position` when `terrainResident: false`), while dungeons and interiors use cell-local `(x, y, z)` positions (`landblockId` = room `cellId` from `GET /v1/world/cells`) where outdoor map coordinates do not apply. Do not assume straight-line travel works indoors—rely on `GET /v1/world/cells` portal topology, spatial previews (`raycast`, `sphere-sweep`), and `steer` commands.
+- **World entities vs. carried/equipped items**: Entity snapshots include placed world objects, carried/contained items (`container` is non-null), and equipped gear (`wielder` is non-null); contained and equipped items both have `distanceToSelf: null`. Filter by container GUID with `GET /v1/entities?container=<guid>` (or inspect `GET /v1/inventory` / `GET /v1/equipment`). JSON `guid` fields are decimal `u32` (shared across nearby clients for world objects; private to your client for carried items).
+- **Doors, levers, chests & portals**: Doors that reject direct use (`facts.useCapability == "unsupported"`) must be opened via a nearby lever, switch, or key (note: puzzle levers/switches often appear under `door`, `item`, `static_object`, or `unknown` categories, and lockpicks appear under `category: "key"`). Check `facts.blocksMovement` / `facts.isOpen` to see whether a door is open and passable. Entering a portal transitions lifecycle through `portal-space` until back `in-world` and clears transient local navigation/overlays.
+- **Appraisal, combat & prompts**: Full item/creature stats are populated after requesting an appraisal. Combat actions require the appropriate combat mode/stance and weapon/spell prerequisites—use `GET /v1/content/spells?known=true` directly for decoded known spell metadata (`isBeneficial`, `castingRoute`). Server prompts (fellowship invites, allegiance, trade, etc.) surface as pending confirmations (`confirmationType` enum) or active session state.
+- **Chat & h3d visual hooks**: Local `ui-print` messages stay in the client and never go to the game server; `chat` commands transmit in-game. In `h3d` clients (including recipients of in-game chat), outdoor coordinates (e.g. `42.3N, 15.8E`) render as clickable waypoint links and `[Label](0xHEX)` spans (convert decimal `guid` to 1..=8 case-insensitive hex digits for a non-zero `u32`) render as clickable entity selection tags (plain text in TUI/retail). When `h3d.hud` is advertised in `GET /v1/info` capabilities, transient toasts, TTL 3D world markers/paths, and HUD-free screenshots are also available.

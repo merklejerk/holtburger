@@ -105,7 +105,7 @@ describe("runClientApiCommand", () => {
 			},
 		);
 		expect(copied).toEqual([
-			"My Asheron's Call client (Holtburger) has a local Live API at http://127.0.0.1:42000 (OpenAPI spec at /v1/openapi.json, no auth).",
+			"My Asheron's Call client (Holtburger) has a local Live API at http://127.0.0.1:42000 (read GET / for the agent guide, no auth).",
 		]);
 		expect(messages.at(-1)?.message).toBe(
 			"Copied Live API agent prompt to clipboard.",

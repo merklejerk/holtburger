@@ -56,6 +56,8 @@
 			readonly available: () => boolean;
 			readonly activate: () => void;
 		};
+		/** Insert a markdown entity mention for the selected entity into the chat composer. */
+		readonly onMention?: () => void;
 		/** Server confirmation owns the selected-player swear request. */
 		readonly onSwear: () => void;
 		/** Invite the current eligible selection through its party owner. */
@@ -89,6 +91,7 @@
 		onCorpsePermission,
 		readCanSwear,
 		tell,
+		onMention,
 		onSwear,
 		onInvite,
 		onInteract,
@@ -126,6 +129,7 @@
 			| {
 					readonly action:
 						| "tell"
+						| "mention"
 						| "salvage"
 						| "auto-merge"
 						| "swear"
@@ -229,6 +233,14 @@
 				icon: "split",
 				disabled: false,
 				activate: onSplit,
+			});
+		if (selectedGuid !== null && onMention !== undefined)
+			available.push({
+				action: "mention",
+				label: "Mention in chat",
+				icon: "speech",
+				disabled: false,
+				activate: onMention,
 			});
 		return available;
 	});

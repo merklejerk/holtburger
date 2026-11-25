@@ -1120,6 +1120,14 @@
 							void chatEditor?.tellSelected();
 						},
 					}}
+					onMention={chatEditor === undefined
+						? undefined
+						: () => {
+								const guid = world.selectedEntityGuid;
+								if (guid === null) return;
+								const name = world.readSelectedEntityDisplay().name ?? "";
+								void chatEditor?.mentionEntity(name, guid);
+							}}
 					input={settings.input}
 					displayPlatform={shell.platform}
 					selectedGuid={world.selectedEntityGuid}

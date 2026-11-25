@@ -45,8 +45,13 @@ pub async fn handle_socket(socket: WebSocket, engine: LiveApiEngine) {
                         let frame: WsClientFrame = match serde_json::from_str(&text) {
                             Ok(frame) => frame,
                             Err(error) => {
+                                // Preserve caller correlation `id` even when a nested variant fails deserialization.
+                                let id = serde_json::from_str::<serde_json::Value>(&text)
+                                    .ok()
+                                    .and_then(|v| v.get("id")?.as_u64())
+                                    .unwrap_or(0);
                                 let err = WsServerFrame::Error {
-                                    id: 0,
+                                    id,
                                     error: ApiError::invalid(format!("invalid WebSocket frame: {error}")),
                                 };
                                 if send_frame(&mut sender, &err).await.is_err() {
@@ -92,7 +97,16 @@ pub async fn handle_socket(socket: WebSocket, engine: LiveApiEngine) {
                                 let reply_tx = reply_tx.clone();
                                 inflight.spawn(async move {
                                     let reply = match engine.preview(preview).await {
-                                        Ok(result) => WsServerFrame::Response { id, result },
+                                        Ok(result) => match serde_json::to_value(result) {
+                                            Ok(result) => WsServerFrame::Response { id, result },
+                                            Err(err) => WsServerFrame::Error {
+                                                id,
+                                                error: ApiError::new(
+                                                    crate::hooks::ApiErrorCode::Internal,
+                                                    err.to_string(),
+                                                ),
+                                            },
+                                        },
                                         Err(error) => WsServerFrame::Error { id, error },
                                     };
                                     let _ = reply_tx.send(reply).await;
@@ -117,7 +131,10 @@ pub async fn handle_socket(socket: WebSocket, engine: LiveApiEngine) {
                                             Ok(result) => WsServerFrame::Response { id, result },
                                             Err(error) => WsServerFrame::Error {
                                                 id,
-                                                error: ApiError::runtime(error.to_string()),
+                                                error: ApiError::new(
+                                                    crate::hooks::ApiErrorCode::Internal,
+                                                    error.to_string(),
+                                                ),
                                             },
                                         },
                                         Err(error) => WsServerFrame::Error { id, error },

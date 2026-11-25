@@ -65,6 +65,9 @@ pub enum LocalSteeringGoal {
     /// Steer toward a fixed world position and stop within `arrival_distance`.
     #[serde(rename_all = "camelCase")]
     MoveTo {
+        /// Target world position. Indoors, set `landblockId` to the target room's `cellId` from
+        /// `GET /v1/world/cells`. Outdoors, steering follows streaming terrain even if `coords.z`
+        /// is `0.0` (e.g. from `outdoor-coords` when `terrainResident` is `false`).
         destination: WorldPosition,
         #[serde(default = "default_arrival_distance")]
         arrival_distance: f32,

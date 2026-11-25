@@ -3,7 +3,7 @@ import type { ClientApiState, ClientChatMessage } from "./host-contract";
 
 /** Format the one-sentence starter prompt for external AI agents. */
 function formatLiveApiAgentPrompt(endpoint: string): string {
-	return `My Asheron's Call client (Holtburger) has a local Live API at ${endpoint} (OpenAPI spec at /v1/openapi.json, no auth).`;
+	return `My Asheron's Call client (Holtburger) has a local Live API at ${endpoint} (read GET / for the agent guide, no auth).`;
 }
 
 /** Handle `/api [status|pause|resume|prompt]` locally without forwarding to the game server. */

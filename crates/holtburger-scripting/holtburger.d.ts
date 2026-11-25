@@ -27,9 +27,16 @@ interface Quaternion {
 }
 
 interface WorldPosition {
-	landblock_id: number;
+	landblockId: number;
 	coords: Vector3;
-	rotation: Quaternion;
+	rotation?: Quaternion;
+}
+
+interface OutdoorCoordsView {
+	lat: number;
+	lon: number;
+	alt: number;
+	label: string;
 }
 
 type Gait = "walk" | "run";
@@ -46,6 +53,8 @@ interface EntityFilter {
 	category?: string;
 	name?: string;
 	wcid?: number;
+	container?: Guid;
+	limit?: number;
 }
 
 interface EntitySummary {
@@ -74,19 +83,55 @@ interface EntityPropertiesView {
 	iids: Record<string, number>;
 }
 
+interface EntityFactsView {
+	useCapability: "unavailable" | "unsupported" | "direct" | "salvage-tool" | "targeted";
+	isLocked: boolean | null;
+	isOpen: boolean | null;
+	blocksMovement: boolean;
+	lockTool: { kind: "key" } | { kind: "lockpick"; bonus: number | null } | null;
+	ownedByPlayer: boolean;
+	canPickUp: boolean;
+	worldContainerContent: boolean;
+	canReceiveGive: boolean;
+	canTrade: boolean;
+	canOfferTrade: boolean;
+	isHostile: boolean;
+	isCorpse: boolean;
+	corpseOpen: boolean;
+	itemCapacity: number | null;
+	packCapacity: number | null;
+	summonOwner: Guid | null;
+}
+
+interface WeaponProfileView {
+	damageType: number;
+	weaponTime: number;
+	weaponSkill: number;
+	weaponSkillName: string | null;
+	damage: number;
+	damageVariance: number;
+	damageMod: number;
+	weaponLength: number;
+	maxVelocity: number;
+	weaponOffense: number;
+	maxVelocityEstimated: number;
+}
+
 interface EntityDetail {
 	summary: EntitySummary;
-	facts: JsonValue | null;
-	properties: EntityPropertiesView | null;
-	creatureProfile: JsonValue | null;
-	weaponProfile: JsonValue | null;
+	facts: EntityFactsView | null;
 	armorProfile: JsonValue | null;
+	creatureProfile: JsonValue | null;
+	weaponProfile: WeaponProfileView | null;
+	spellBook: number[];
+	properties?: EntityPropertiesView;
 }
 
 interface SelfView {
 	guid: Guid;
 	name: string | null;
 	position: WorldPosition | null;
+	outdoorCoords: OutdoorCoordsView | null;
 	heading: number | null;
 	health: number;
 	healthMax: number;
@@ -128,6 +173,7 @@ interface EquipmentView {
 		guid: Guid;
 		name: string | null;
 		equipMask: number;
+		slots: string[];
 	}>;
 }
 
@@ -147,7 +193,7 @@ interface SocialView {
 }
 
 interface SpellbookView {
-	knownSpells: number[];
+	knownSpells: number[] | null;
 	castTarget: Guid | null;
 }
 
@@ -159,6 +205,8 @@ interface SpellDefinitionView {
 	iconId: number;
 	category: number;
 	bitfield: number;
+	isBeneficial: boolean;
+	castingRoute: "self-target" | "untargeted" | "selected-target";
 	baseMana: number;
 	baseRangeConstant: number;
 	baseRangeMod: number;

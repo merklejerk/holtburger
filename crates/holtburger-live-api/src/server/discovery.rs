@@ -32,9 +32,7 @@ pub struct DiscoveryRecord {
 pub fn default_instances_dir() -> Result<PathBuf> {
     let dirs = directories::ProjectDirs::from("", "", "holtburger")
         .context("could not resolve platform state directory for holtburger")?;
-    let base = dirs
-        .state_dir()
-        .unwrap_or_else(|| dirs.data_local_dir());
+    let base = dirs.state_dir().unwrap_or_else(|| dirs.data_local_dir());
     Ok(base.join("instances"))
 }
 
@@ -152,14 +150,17 @@ fn write_atomic_private(path: &Path, record: &DiscoveryRecord) -> Result<()> {
             .truncate(true)
             .mode(0o600)
             .open(&tmp_path)
-            .with_context(|| format!("failed to open temp discovery file {}", tmp_path.display()))?;
+            .with_context(|| {
+                format!("failed to open temp discovery file {}", tmp_path.display())
+            })?;
         file.write_all(&bytes)?;
         file.sync_all()?;
     }
     #[cfg(not(unix))]
     {
-        fs::write(&tmp_path, &bytes)
-            .with_context(|| format!("failed to write temp discovery file {}", tmp_path.display()))?;
+        fs::write(&tmp_path, &bytes).with_context(|| {
+            format!("failed to write temp discovery file {}", tmp_path.display())
+        })?;
     }
     fs::rename(&tmp_path, path)
         .with_context(|| format!("failed to install discovery file {}", path.display()))?;

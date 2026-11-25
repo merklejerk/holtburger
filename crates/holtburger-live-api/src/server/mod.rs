@@ -460,9 +460,9 @@ where
     async fn from_request(req: Request, state: &S) -> Result<Self, Self::Rejection> {
         match Json::<T>::from_request(req, state).await {
             Ok(Json(value)) => Ok(Self(value)),
-            Err(rejection) => Err(ApiJsonError(ApiError::invalid(
-                format_json_rejection(&rejection),
-            ))),
+            Err(rejection) => Err(ApiJsonError(ApiError::invalid(format_json_rejection(
+                &rejection,
+            )))),
         }
     }
 }
@@ -472,7 +472,10 @@ fn format_json_rejection(rejection: &JsonRejection) -> String {
 }
 
 impl<T: JsonSchema> aide::OperationInput for ApiJson<T> {
-    fn operation_input(ctx: &mut aide::generate::GenContext, operation: &mut aide::openapi::Operation) {
+    fn operation_input(
+        ctx: &mut aide::generate::GenContext,
+        operation: &mut aide::openapi::Operation,
+    ) {
         Json::<T>::operation_input(ctx, operation);
     }
 }
@@ -601,7 +604,12 @@ async fn get_events(
     };
     let page = state
         .engine
-        .poll_events(query.since, parsed_topics.as_ref(), query.limit, query.wait_ms)
+        .poll_events(
+            query.since,
+            parsed_topics.as_ref(),
+            query.limit,
+            query.wait_ms,
+        )
         .await;
     Ok(Json(page))
 }
@@ -801,7 +809,11 @@ async fn get_content_spells(
     Ok(Json(
         state
             .engine
-            .content_spells(query.search.as_deref(), query.school.as_deref(), query.known)
+            .content_spells(
+                query.search.as_deref(),
+                query.school.as_deref(),
+                query.known,
+            )
             .await?,
     ))
 }

@@ -329,7 +329,10 @@ impl LocalSteeringRuntime {
         }
     }
 
-    pub(in crate::client) fn finish_event(&self, outcome: LocalNavigationOutcome) -> LocalNavigationFinished {
+    pub(in crate::client) fn finish_event(
+        &self,
+        outcome: LocalNavigationOutcome,
+    ) -> LocalNavigationFinished {
         LocalNavigationFinished {
             correlation_id: self.correlation_id,
             outcome,
@@ -524,7 +527,8 @@ impl LocalSteeringRuntime {
                             if improved {
                                 self.best_distance = Some(dist);
                                 self.last_progress_at = now;
-                            } else if now.duration_since(self.last_progress_at) >= self.stuck_timeout
+                            } else if now.duration_since(self.last_progress_at)
+                                >= self.stuck_timeout
                             {
                                 self.travel = None;
                                 return LocalSteeringTick::Finished(LocalNavigationOutcome::Stuck);
@@ -712,7 +716,10 @@ mod tests {
                 MotionOrder::default(),
                 support,
             );
-            assert_eq!(stuck, LocalSteeringTick::Finished(LocalNavigationOutcome::Stuck));
+            assert_eq!(
+                stuck,
+                LocalSteeringTick::Finished(LocalNavigationOutcome::Stuck)
+            );
 
             // Fresh runtime that moves within arrival_distance reports Arrived.
             let mut arriving =
@@ -729,7 +736,10 @@ mod tests {
                 MotionOrder::default(),
                 support,
             );
-            assert_eq!(done, LocalSteeringTick::Finished(LocalNavigationOutcome::Arrived));
+            assert_eq!(
+                done,
+                LocalSteeringTick::Finished(LocalNavigationOutcome::Arrived)
+            );
             // Reset player pose for next support loop iteration.
             let _ = world.set_local_player_runtime_pose(WorldPosition {
                 landblock_id: Guid(0x0101_0001),

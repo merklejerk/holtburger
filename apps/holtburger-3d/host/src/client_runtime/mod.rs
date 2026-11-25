@@ -325,7 +325,11 @@ impl ClientHostRuntime {
     pub async fn report_selected_entity(&self, guid: Option<holtburger_common::Guid>) {
         let state = self.state.lock().await;
         if state.selection.set(guid)
-            && let Some(server) = state.live_api.lock().expect("live_api mutex poisoned").as_ref()
+            && let Some(server) = state
+                .live_api
+                .lock()
+                .expect("live_api mutex poisoned")
+                .as_ref()
         {
             server.engine().notify_selection_changed(guid);
         }

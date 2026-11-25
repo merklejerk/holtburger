@@ -197,10 +197,10 @@ fn op_api_poll_events(
         }
         Some(parsed)
     };
-    let page = ctx
-        .engine
-        .event_log()
-        .read_since(since, topics.as_ref(), limit.clamp(1, 500) as usize);
+    let page =
+        ctx.engine
+            .event_log()
+            .read_since(since, topics.as_ref(), limit.clamp(1, 500) as usize);
     json!({ "ok": page }).to_string()
 }
 
@@ -705,7 +705,10 @@ impl ScriptHost {
     }
 
     pub fn take_last_error(&self) -> Option<String> {
-        self.error.lock().expect("script error mutex poisoned").take()
+        self.error
+            .lock()
+            .expect("script error mutex poisoned")
+            .take()
     }
 
     pub fn stop(mut self) {
@@ -760,7 +763,10 @@ fn drain_fetch_completions(
 ) {
     while let Ok(done) = rx.try_recv() {
         let serialized = serde_json::to_string(&done.outcome).unwrap_or_else(|_| "{}".into());
-        let script = format!("globalThis.__hbCompleteFetch({}, {serialized});", done.request_id);
+        let script = format!(
+            "globalThis.__hbCompleteFetch({}, {serialized});",
+            done.request_id
+        );
         if let Err(error) = runtime.execute_script(FETCH_COMPLETION_SCRIPT_NAME, script) {
             record_worker_error(error_slot, error.into());
         } else {

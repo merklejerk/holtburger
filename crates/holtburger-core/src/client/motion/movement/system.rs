@@ -677,11 +677,12 @@ impl MovementSystem {
             PlayerDriveIntent::Stop => {
                 self.manual_input = ManualInputLifetime::None;
                 let had_server_directive = self.has_server_controlled_motion();
-                let had_local_steering = self.finish_local_steering(if origin == ControlSource::User {
-                    LocalNavigationOutcome::InterruptedByUser
-                } else {
-                    LocalNavigationOutcome::Cancelled
-                });
+                let had_local_steering =
+                    self.finish_local_steering(if origin == ControlSource::User {
+                        LocalNavigationOutcome::InterruptedByUser
+                    } else {
+                        LocalNavigationOutcome::Cancelled
+                    });
                 self.movement_publication_required |= had_server_directive || had_local_steering;
                 self.pending_manual_playback_stop |= had_server_directive || had_local_steering;
                 self.cancel_pending_authored_commands();
@@ -838,10 +839,9 @@ impl MovementSystem {
                         }
                     }
                 }
-                None
-                    if had_active_manual_motion
-                        || explicit_stop_requested
-                        || self.movement_publication_required =>
+                None if had_active_manual_motion
+                    || explicit_stop_requested
+                    || self.movement_publication_required =>
                 {
                     events.extend(
                         self.execute_stop_at(

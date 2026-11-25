@@ -115,7 +115,10 @@ fn spawn_synthetic_client() -> SyntheticFixture {
         world.player.guid = player_guid;
         let mut player = Entity::new(player_guid, "TestBot".into(), WorldPosition::default());
         player.flags = ObjectDescriptionFlag::PLAYER | ObjectDescriptionFlag::ATTACKABLE;
-        player.properties.ints.insert(PropertyInt::ItemType, ItemType::CREATURE.bits() as i32);
+        player
+            .properties
+            .ints
+            .insert(PropertyInt::ItemType, ItemType::CREATURE.bits() as i32);
         world.entities.insert(player);
 
         let mut mob = Entity::new(
@@ -133,7 +136,9 @@ fn spawn_synthetic_client() -> SyntheticFixture {
         );
         mob.wcid = Some(192);
         mob.flags = ObjectDescriptionFlag::ATTACKABLE;
-        mob.properties.ints.insert(PropertyInt::ItemType, ItemType::CREATURE.bits() as i32);
+        mob.properties
+            .ints
+            .insert(PropertyInt::ItemType, ItemType::CREATURE.bits() as i32);
         mob.properties.ints.insert(PropertyInt::Level, 12);
         mob.properties
             .strings
@@ -177,18 +182,19 @@ async fn engine_reads_previews_wait_settled_pause_and_ring_wraparound() {
     assert!(!info.capabilities.contains(&"h3d.hud".to_string()));
 
     // Unicast read of entities & raw properties.
-    let detail = engine
-        .entity_detail(Guid(0x8000_0042), true)
-        .await
-        .unwrap();
+    let detail = engine.entity_detail(Guid(0x8000_0042), true).await.unwrap();
     assert_eq!(detail.summary.name, "Drudge Skulker");
     assert_eq!(detail.summary.wcid, Some(192));
-    let facts = detail.facts.expect("entity detail should include typed facts");
+    let facts = detail
+        .facts
+        .expect("entity detail should include typed facts");
     assert!(
         !facts.blocks_movement,
         "entities with null landblockId must not report blocksMovement"
     );
-    let props = detail.properties.expect("properties=true should include raw props");
+    let props = detail
+        .properties
+        .expect("properties=true should include raw props");
     assert_eq!(props.ints.get("Level"), Some(&12));
 
     // Synchronous preview via handle.read.
@@ -238,11 +244,16 @@ async fn engine_reads_previews_wait_settled_pause_and_ring_wraparound() {
         )
         .await
         .unwrap();
-    assert_eq!(engine.selection().await.unwrap().guid, Some(Guid(0x8000_0042)));
+    assert_eq!(
+        engine.selection().await.unwrap().guid,
+        Some(Guid(0x8000_0042))
+    );
     let sel_page = engine.event_log().read_since(seq_before_sel, None, 10);
     assert!(sel_page.events.iter().any(|env| matches!(
         env.event,
-        ApiEvent::SelectionChanged { guid: Some(Guid(0x8000_0042)) }
+        ApiEvent::SelectionChanged {
+            guid: Some(Guid(0x8000_0042))
+        }
     )));
     let hud_err = engine
         .execute(
@@ -341,7 +352,11 @@ async fn localhost_server_guards_openapi_long_poll_ws_and_discovery() {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let mode = std::fs::metadata(&discovery_path).unwrap().permissions().mode() & 0o777;
+        let mode = std::fs::metadata(&discovery_path)
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777;
         assert_eq!(mode, 0o600, "discovery file must be owner-only 0600");
     }
 
@@ -421,7 +436,10 @@ async fn localhost_server_guards_openapi_long_poll_ws_and_discovery() {
         "/v1/command",
         "/v1/ws",
     ] {
-        assert!(paths.contains_key(required), "missing OpenAPI path {required}");
+        assert!(
+            paths.contains_key(required),
+            "missing OpenAPI path {required}"
+        );
     }
     let schemas = spec["components"]["schemas"]
         .as_object()
@@ -454,9 +472,9 @@ async fn localhost_server_guards_openapi_long_poll_ws_and_discovery() {
 
     // Anti-drift check: every concrete `/v1/...` path and `components.schemas.<Name>` mentioned in
     // GET / exists in OpenAPI.
-    for raw in guide_body.split(|c: char| {
-        !matches!(c, 'a'..='z' | 'A'..='Z' | '0'..='9' | '/' | '-' | '_' | '.')
-    }) {
+    for raw in guide_body
+        .split(|c: char| !matches!(c, 'a'..='z' | 'A'..='Z' | '0'..='9' | '/' | '-' | '_' | '.'))
+    {
         let token = raw.trim_end_matches('.');
         if let Some(rest) = token.strip_prefix("/v1/")
             && !rest.is_empty()
@@ -484,7 +502,9 @@ async fn localhost_server_guards_openapi_long_poll_ws_and_discovery() {
         .as_array()
         .expect("entity detail path should declare parameters");
     assert!(
-        entity_params.iter().any(|p| p["name"] == "guid" && p["in"] == "path"),
+        entity_params
+            .iter()
+            .any(|p| p["name"] == "guid" && p["in"] == "path"),
         "OpenAPI /v1/entities/{{guid}} should declare guid path parameter"
     );
 
@@ -717,7 +737,11 @@ async fn dx_fixes_use_rejection_contained_distance_and_flat_appraisal() {
             .insert(PropertyInt::ItemUseable, Usable::NO.bits() as i32);
         world.entities.insert(door);
 
-        let pack_item = Entity::new(pack_item_guid, "Tumerok Key".into(), WorldPosition::default());
+        let pack_item = Entity::new(
+            pack_item_guid,
+            "Tumerok Key".into(),
+            WorldPosition::default(),
+        );
         world.entities.insert(pack_item);
         let _ = world.handle_message(
             &holtburger_protocol::messages::GameMessage::PublicUpdatePropertyInstanceId(Box::new(
@@ -830,7 +854,13 @@ async fn dx_fixes_use_rejection_contained_distance_and_flat_appraisal() {
                 status,
                 reason,
                 inspection,
-            } => Some((*guid, *facts_only, *status, reason.clone(), inspection.clone())),
+            } => Some((
+                *guid,
+                *facts_only,
+                *status,
+                reason.clone(),
+                inspection.clone(),
+            )),
             _ => None,
         })
         .expect("AppraisalCompleted event recorded");

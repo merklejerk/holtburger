@@ -1,6 +1,9 @@
 HB.onEvent((event) => {
-	if (event.kind !== 'lifecycle' || event.data.kind !== 'started') return;
-	const self = HB.selfEntity();
-	HB.print('info', self ? `Hello, ${self.name}.` : 'Hello from Holtburger.');
-	HB.debugLog(`Startup arguments: ${event.data.data.args}`);
+	if (event.kind !== 'started') return;
+	const self = HB.self();
+	HB.print(
+		self.name ? `Hello, ${self.name}.` : 'Hello from Holtburger.',
+		'info'
+	);
+	HB.debugLog(`Startup arguments: ${event.args}`);
 });

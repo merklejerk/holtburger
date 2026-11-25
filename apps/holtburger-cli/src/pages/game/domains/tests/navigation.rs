@@ -49,17 +49,23 @@ fn follow_action_delegates_to_core_local_steering_and_cancel_stops_it() {
         .iter()
         .filter(|command| matches!(command, ClientCommand::StopLocalSteering))
         .count();
-    assert_eq!(stop_count, 1, "CancelInteraction should emit exactly one StopLocalSteering");
+    assert_eq!(
+        stop_count, 1,
+        "CancelInteraction should emit exactly one StopLocalSteering"
+    );
     assert_eq!(state.view.active_interaction, None);
 
     // Terminal LocalNavigationFinished should clear interaction without emitting a spurious StopLocalSteering.
-    let _ = state.handle_action(AppAction::Follow { guid: target_guid }).unwrap();
-    let finished = state.handle_view_event(holtburger_core::ClientViewEvent::LocalNavigationFinished(
-        holtburger_core::client::steering::LocalNavigationFinished {
-            correlation_id: 1,
-            outcome: holtburger_core::client::steering::LocalNavigationOutcome::Arrived,
-        },
-    ));
+    let _ = state
+        .handle_action(AppAction::Follow { guid: target_guid })
+        .unwrap();
+    let finished =
+        state.handle_view_event(holtburger_core::ClientViewEvent::LocalNavigationFinished(
+            holtburger_core::client::steering::LocalNavigationFinished {
+                correlation_id: 1,
+                outcome: holtburger_core::client::steering::LocalNavigationOutcome::Arrived,
+            },
+        ));
     assert!(
         !finished
             .commands

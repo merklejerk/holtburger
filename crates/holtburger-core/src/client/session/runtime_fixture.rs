@@ -5,6 +5,7 @@
 //! Population mismatches and content-readiness waits are reported explicitly.
 //! Incoming messages can contain character/chat data. Keep raw fixtures private.
 
+use crate::ClientCommandEnvelope;
 use crate::client::runtime_profile::RuntimeScopeProfile;
 use crate::client::{ClientCommand, ClientRuntime, ClientRuntimeBuilder, ClientState};
 use anyhow::{Result, bail, ensure};
@@ -266,7 +267,9 @@ impl RuntimeFixture {
                 }
                 RuntimeFixtureInput::SelectCharacter(guid) => {
                     client
-                        .handle_command(ClientCommand::SelectCharacter(*guid))
+                        .handle_command_envelope(ClientCommandEnvelope::user(
+                            ClientCommand::SelectCharacter(*guid),
+                        ))
                         .await?;
                 }
                 RuntimeFixtureInput::Physics { elapsed, entities } => {

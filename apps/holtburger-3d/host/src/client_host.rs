@@ -178,7 +178,8 @@ pub async fn run_client_task(
     performance: crate::client_performance::ClientPerformance,
 ) -> anyhow::Result<()> {
     let authority_performance = performance.clone();
-    let resync = move || handle.send_user(holtburger_core::ClientCommand::RequestCurrentApplicationState);
+    let resync =
+        move || handle.send_user(holtburger_core::ClientCommand::RequestCurrentApplicationState);
     supervise_client_runtime(
         Some(performance),
         async move {
@@ -313,7 +314,6 @@ async fn forward_client_events(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tokio::sync::mpsc;
     use crate::client_projection::{
         ClientCurrentState, ClientHostEvent, ClientLifecycleWire, project_client_event,
     };
@@ -322,6 +322,7 @@ mod tests {
         ClientApplicationSnapshot, ClientCameraIdentity, ClientCameraStartReceipt,
         ClientLifecycleState, ClientViewEvent, DynamicEntityHostTime, DynamicEntitySnapshot,
     };
+    use tokio::sync::mpsc;
 
     /// Test-owned synchronous publication behavior, including output failure and coordination.
     struct TestSink<F>(F);

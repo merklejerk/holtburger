@@ -70,17 +70,16 @@ pub(crate) use dead_reckoning::project_pose_by_velocity;
 mod tests;
 pub use collision::{
     AvailableEntitySelectionCandidates, CellPortalTopology, CellTopology, CellTransitRequest,
-    CollisionOwnerProof,
-    CollisionQueryError, CollisionQueryPolicy, CollisionScene, CollisionSceneUpdateError,
-    CollisionSurfaceRayHit, EntitySelectionCandidateResult, EntitySelectionQueryError,
-    EntitySelectionRayRequest, EntitySelectionUnavailable, EntitySurfaceRayHit,
-    GroundedObstruction, GroundedObstructionRequest, HardEntityShape, HardSphereSweep,
-    HardSphereSweepHit, MotionWaypoint, MotionWaypointPlacement, MovementObstructionRequest,
-    MovementRestrictionRequest, PlacedMotionLeg, PlacedMotionPath, PlacedMotionPathRequest,
-    PlacedMotionPoint, PlacementRecovery, PlacementRequest, PlacementRestrictionRequest,
-    PointPlacement, SpatialMembership, SphereSweep, StaticContact, StaticSphereSweepHit,
-    StaticSphereSweepRequest, StaticSurfaceRayHit, StaticSurfaceRayRequest, SupportContact,
-    SupportFeature, SupportRequest, SupportSource, UncoveredCollisionQuery,
+    CollisionOwnerProof, CollisionQueryError, CollisionQueryPolicy, CollisionScene,
+    CollisionSceneUpdateError, CollisionSurfaceRayHit, EntitySelectionCandidateResult,
+    EntitySelectionQueryError, EntitySelectionRayRequest, EntitySelectionUnavailable,
+    EntitySurfaceRayHit, GroundedObstruction, GroundedObstructionRequest, HardEntityShape,
+    HardSphereSweep, HardSphereSweepHit, MotionWaypoint, MotionWaypointPlacement,
+    MovementObstructionRequest, MovementRestrictionRequest, PlacedMotionLeg, PlacedMotionPath,
+    PlacedMotionPathRequest, PlacedMotionPoint, PlacementRecovery, PlacementRequest,
+    PlacementRestrictionRequest, PointPlacement, SpatialMembership, SphereSweep, StaticContact,
+    StaticSphereSweepHit, StaticSphereSweepRequest, StaticSurfaceRayHit, StaticSurfaceRayRequest,
+    SupportContact, SupportFeature, SupportRequest, SupportSource, UncoveredCollisionQuery,
 };
 pub use collision_report::{
     CollisionReportClassification, CollisionReportContact, CollisionReportOutcome,

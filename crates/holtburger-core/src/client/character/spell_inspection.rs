@@ -198,7 +198,7 @@ impl ClientRuntime {
     ) -> SpellInspectionOutcome {
         let player = (self.conn.state == crate::client::ClientState::InWorld
             && !self.world.player.guid.is_null())
-            .then_some(self.world.player.guid);
+        .then_some(self.world.player.guid);
         match (player, self.world.spell_catalog.get(spell_id)) {
             (None, _) => SpellInspectionOutcome::Pending,
             (Some(_), None) => SpellInspectionOutcome::Missing,

@@ -439,7 +439,10 @@ mod tests {
             ))
             .await
             .unwrap();
-        assert!(matches!(ack_rx.await.unwrap(), CommandAdmission::Accepted { .. }));
+        assert!(matches!(
+            ack_rx.await.unwrap(),
+            CommandAdmission::Accepted { .. }
+        ));
         assert!(client.combat_engagement.status().desired.is_some());
 
         let (nav_tx, nav_rx) = oneshot::channel();
@@ -523,8 +526,14 @@ mod tests {
             })
             .await
             .unwrap();
-        assert!(matches!(user_rx.await.unwrap(), CommandAdmission::Accepted { .. }));
-        assert_eq!(client.combat_engagement.status().processed_intent_sequence, 1);
+        assert!(matches!(
+            user_rx.await.unwrap(),
+            CommandAdmission::Accepted { .. }
+        ));
+        assert_eq!(
+            client.combat_engagement.status().processed_intent_sequence,
+            1
+        );
 
         let mut saw_paused_event = false;
         while let Ok(event) = events.try_recv() {
@@ -554,7 +563,10 @@ mod tests {
             ))
             .await
             .unwrap();
-        assert_eq!(client.combat_engagement.status().processed_intent_sequence, 5);
+        assert_eq!(
+            client.combat_engagement.status().processed_intent_sequence,
+            5
+        );
 
         // Automation stops with sequence 0 (would be dropped if sharing user's watermark!).
         client
@@ -566,7 +578,10 @@ mod tests {
             .unwrap();
         assert!(client.combat_engagement.status().desired.is_none());
         // User's processed_intent_sequence watermark stays intact at 5.
-        assert_eq!(client.combat_engagement.status().processed_intent_sequence, 5);
+        assert_eq!(
+            client.combat_engagement.status().processed_intent_sequence,
+            5
+        );
 
         // User's next sequence 6 is still cleanly admitted.
         client
@@ -582,7 +597,10 @@ mod tests {
             ))
             .await
             .unwrap();
-        assert_eq!(client.combat_engagement.status().processed_intent_sequence, 6);
+        assert_eq!(
+            client.combat_engagement.status().processed_intent_sequence,
+            6
+        );
         assert!(client.combat_engagement.status().desired.is_some());
     }
 

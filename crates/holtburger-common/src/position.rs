@@ -125,7 +125,9 @@ impl WorldCoordinates {
     pub fn outdoor_label(&self) -> Option<String> {
         match self {
             WorldCoordinates::Indoor { .. } => None,
-            WorldCoordinates::Outdoor { lat, lon, .. } => Some(format_outdoor_lat_lon(*lat, *lon, 1)),
+            WorldCoordinates::Outdoor { lat, lon, .. } => {
+                Some(format_outdoor_lat_lon(*lat, *lon, 1))
+            }
         }
     }
 
@@ -133,7 +135,11 @@ impl WorldCoordinates {
         match self {
             WorldCoordinates::Indoor { landblock } => format!("Indoors [{:04X}]", landblock),
             WorldCoordinates::Outdoor { lat, lon, alt } => {
-                format!("{}, {:.1}Z", format_outdoor_lat_lon(*lat, *lon, precision), alt)
+                format!(
+                    "{}, {:.1}Z",
+                    format_outdoor_lat_lon(*lat, *lon, precision),
+                    alt
+                )
             }
         }
     }
@@ -285,10 +291,10 @@ impl WorldPosition {
         if !lat.is_finite() || !lon.is_finite() || !z.is_finite() {
             return None;
         }
-        let total_x = (f64::from(lon) + f64::from(MAP_DEGREE_ORIGIN))
-            * f64::from(METERS_PER_MAP_DEGREE);
-        let total_y = (f64::from(lat) + f64::from(MAP_DEGREE_ORIGIN))
-            * f64::from(METERS_PER_MAP_DEGREE);
+        let total_x =
+            (f64::from(lon) + f64::from(MAP_DEGREE_ORIGIN)) * f64::from(METERS_PER_MAP_DEGREE);
+        let total_y =
+            (f64::from(lat) + f64::from(MAP_DEGREE_ORIGIN)) * f64::from(METERS_PER_MAP_DEGREE);
         let block_size = f64::from(METERS_PER_LANDBLOCK);
         let mut lb_x = (total_x / block_size).floor() as i64;
         let mut lb_y = (total_y / block_size).floor() as i64;
@@ -388,11 +394,7 @@ pub fn parse_printed_outdoor_coords(input: &str) -> Option<(f32, f32)> {
     Some((lat, lon))
 }
 
-fn parse_hemisphere_degree(
-    token: &str,
-    pos: (char, f32),
-    neg: (char, f32),
-) -> Option<(f32, f32)> {
+fn parse_hemisphere_degree(token: &str, pos: (char, f32), neg: (char, f32)) -> Option<(f32, f32)> {
     let trimmed = token.trim();
     let last = trimmed.chars().next_back()?;
     let upper = last.to_ascii_uppercase();
@@ -850,7 +852,10 @@ mod tests {
             let (lat, lon) = parse_printed_outdoor_coords(input).expect(input);
             let pos = WorldPosition::from_outdoor_degrees(lat, lon, 12.5).expect(input);
             assert!(!pos.is_indoors());
-            assert_eq!(pos.to_world_coords().outdoor_label().as_deref(), Some(expected));
+            assert_eq!(
+                pos.to_world_coords().outdoor_label().as_deref(),
+                Some(expected)
+            );
         }
         assert!(parse_printed_outdoor_coords("-10.0N, 5.0E").is_none());
         assert!(parse_printed_outdoor_coords("42.3E, 15.8N").is_none());
@@ -861,7 +866,8 @@ mod tests {
         assert!(seam.coords.x >= 0.0 && seam.coords.x < METERS_PER_LANDBLOCK);
         assert!(seam.coords.y >= 0.0 && seam.coords.y < METERS_PER_LANDBLOCK);
         let (slat, slon) = parse_printed_outdoor_coords("0.35S, 0.35W").expect("0.35S, 0.35W");
-        let parsed_seam = WorldPosition::from_outdoor_degrees(slat, slon, 0.0).expect("parsed seam");
+        let parsed_seam =
+            WorldPosition::from_outdoor_degrees(slat, slon, 0.0).expect("parsed seam");
         assert!(parsed_seam.coords.x >= 0.0 && parsed_seam.coords.x < METERS_PER_LANDBLOCK);
         assert!(parsed_seam.coords.y >= 0.0 && parsed_seam.coords.y < METERS_PER_LANDBLOCK);
     }

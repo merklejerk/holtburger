@@ -20,9 +20,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::hooks::{
-    ApiError, HudMarkersUpsertRequest, HudToastRequest, UiPrintRequest,
-};
+use crate::hooks::{ApiError, HudMarkersUpsertRequest, HudToastRequest, UiPrintRequest};
 
 pub const LIVE_API_VERSION: &str = "1.0";
 /// Hard upper bound for automation `drive-pulse` commands (5 seconds).
@@ -956,7 +954,11 @@ pub struct SpellCastReadinessView {
 
 /// Result of `ApiPreviewRequest::SpellInspection`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(tag = "kind", rename_all = "kebab-case", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "kind",
+    rename_all = "kebab-case",
+    rename_all_fields = "camelCase"
+)]
 pub enum SpellInspectionPreview {
     Pending,
     Missing,
@@ -1350,7 +1352,9 @@ pub enum ApiQuery {
         known: bool,
     },
     #[serde(rename_all = "camelCase")]
-    ContentSpell { id: u32 },
+    ContentSpell {
+        id: u32,
+    },
     ContentSkills,
 }
 
@@ -1423,7 +1427,11 @@ pub struct EventSpeaker {
 
 /// Typed combat feedback payload emitted by `ApiEvent::CombatFeedback`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(tag = "kind", rename_all = "kebab-case", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "kind",
+    rename_all = "kebab-case",
+    rename_all_fields = "camelCase"
+)]
 pub enum CombatFeedbackDetail {
     AttackDone {
         error: String,

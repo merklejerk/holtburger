@@ -132,7 +132,10 @@ impl ClientRuntime {
     }
 
     /// Executes a bounded batch of unicast read-only closures directly against `&self`.
-    pub(in crate::client) fn process_read_batch(&mut self, mut first: Option<control::ClientReadTask>) {
+    pub(in crate::client) fn process_read_batch(
+        &mut self,
+        mut first: Option<control::ClientReadTask>,
+    ) {
         let started = Instant::now();
         for _ in 0..READ_BATCH_LIMIT {
             let task = if let Some(task) = first.take() {

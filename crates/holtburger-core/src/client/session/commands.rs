@@ -138,7 +138,10 @@ impl ClientRuntime {
         };
 
         if origin == ControlSource::Automation && self.is_automation_paused() {
-            reply(ack, CommandAdmission::Rejected(CommandRejection::AutomationPaused));
+            reply(
+                ack,
+                CommandAdmission::Rejected(CommandRejection::AutomationPaused),
+            );
             return Ok(());
         }
 
@@ -172,7 +175,10 @@ impl ClientRuntime {
         if let ClientCommand::StartLocalSteering(request) = cmd {
             if self.portal.activation.is_some() || !matches!(self.conn.state, ClientState::InWorld)
             {
-                reply(ack, CommandAdmission::Rejected(CommandRejection::NotInWorld));
+                reply(
+                    ack,
+                    CommandAdmission::Rejected(CommandRejection::NotInWorld),
+                );
                 return Ok(());
             }
             if let Err(message) =
@@ -243,7 +249,10 @@ impl ClientRuntime {
                 }
                 ClientCommand::Use { .. } | ClientCommand::CastSpell { .. } => {
                     if !matches!(self.conn.state, ClientState::InWorld) {
-                        reply(ack, CommandAdmission::Rejected(CommandRejection::NotInWorld));
+                        reply(
+                            ack,
+                            CommandAdmission::Rejected(CommandRejection::NotInWorld),
+                        );
                         return Ok(());
                     }
                     if let Some(active) = self.character.active_busy_operation.as_ref() {
@@ -262,14 +271,19 @@ impl ClientRuntime {
                     if !matches!(self.conn.state, ClientState::InWorld)
                         || *player != self.world.player.guid
                     {
-                        reply(ack, CommandAdmission::Rejected(CommandRejection::NotInWorld));
+                        reply(
+                            ack,
+                            CommandAdmission::Rejected(CommandRejection::NotInWorld),
+                        );
                         return Ok(());
                     }
                     if i32::try_from(*page_index).is_err() {
                         reply(
                             ack,
                             CommandAdmission::Rejected(CommandRejection::Validation {
-                                message: format!("book page index {page_index} exceeds i32 wire range"),
+                                message: format!(
+                                    "book page index {page_index} exceeds i32 wire range"
+                                ),
                             }),
                         );
                         return Ok(());

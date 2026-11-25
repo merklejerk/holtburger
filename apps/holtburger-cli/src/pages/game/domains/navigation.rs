@@ -15,8 +15,9 @@ pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateR
 
     match action {
         AppAction::Approach { guid } => {
-            result.commands.push(ClientCommand::StartLocalSteering(
-                LocalSteeringRequest {
+            result
+                .commands
+                .push(ClientCommand::StartLocalSteering(LocalSteeringRequest {
                     goal: LocalSteeringGoal::Approach {
                         target: guid,
                         arrival_distance: None,
@@ -24,8 +25,7 @@ pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateR
                     },
                     stuck_timeout_ms: DEFAULT_STUCK_TIMEOUT_MS,
                     max_duration_ms: None,
-                },
-            ));
+                }));
             result.actions.push(AppAction::Notification {
                 notification: AppNotification::ActiveInteractionChanged {
                     interaction: Some(Interaction::Approaching { target_guid: guid }),
@@ -34,8 +34,9 @@ pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateR
             result.request_redraw(RedrawPriority::Immediate);
         }
         AppAction::Follow { guid } => {
-            result.commands.push(ClientCommand::StartLocalSteering(
-                LocalSteeringRequest {
+            result
+                .commands
+                .push(ClientCommand::StartLocalSteering(LocalSteeringRequest {
                     goal: LocalSteeringGoal::Follow {
                         target: guid,
                         follow_distance: DEFAULT_FOLLOW_DISTANCE_M,
@@ -43,8 +44,7 @@ pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateR
                     },
                     stuck_timeout_ms: DEFAULT_STUCK_TIMEOUT_MS,
                     max_duration_ms: None,
-                },
-            ));
+                }));
             result.actions.push(AppAction::Notification {
                 notification: AppNotification::ActiveInteractionChanged {
                     interaction: Some(Interaction::Following { target_guid: guid }),
@@ -58,8 +58,9 @@ pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateR
             {
                 let clamped = distance_m.clamp(-MAX_SCOOT_DISTANCE_M, MAX_SCOOT_DISTANCE_M);
                 let destination = project_pose_forward_distance(player_pos, clamped);
-                result.commands.push(ClientCommand::StartLocalSteering(
-                    LocalSteeringRequest {
+                result
+                    .commands
+                    .push(ClientCommand::StartLocalSteering(LocalSteeringRequest {
                         goal: LocalSteeringGoal::MoveTo {
                             destination,
                             arrival_distance: SCOOT_ARRIVAL_DISTANCE_M,
@@ -68,8 +69,7 @@ pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateR
                         },
                         stuck_timeout_ms: DEFAULT_STUCK_TIMEOUT_MS,
                         max_duration_ms: None,
-                    },
-                ));
+                    }));
                 result.request_redraw(RedrawPriority::Immediate);
             }
         }

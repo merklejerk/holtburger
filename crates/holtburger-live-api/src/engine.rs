@@ -56,15 +56,15 @@ use crate::types::{
     CorpseConsentCommandSpec, DEFAULT_SPHERE_SWEEP_RADIUS, DeathLocationsView, EntityDetail,
     EntityFactsView, EntityFilter, EntityPropertiesView, EntitySummary, EquipmentView,
     EquippedItemView, EventsPage, FellowshipCommandSpec, FellowshipMemberView, FellowshipView,
-    FriendView, FriendsCommandSpec, InventoryOutcome, InventoryView,
-    ItemUseCapabilityView, ItemUseTargetPreview, LIVE_API_VERSION, LifecycleOutcome,
-    LifecyclePhaseView, LockToolView, MAX_DRIVE_PULSE_MS, MAX_RAYCAST_BATCH, MAX_WAIT_TIMEOUT_MS,
-    OutdoorCoordsPreview, OutdoorCoordsView, RaycastHitView, RaycastPreview, RaycastSpec,
-    RestPostureSpec, SalvagePreview, SelectionView, SelfView, SkillDefinitionView, SocialView,
+    FriendView, FriendsCommandSpec, InventoryOutcome, InventoryView, ItemUseCapabilityView,
+    ItemUseTargetPreview, LIVE_API_VERSION, LifecycleOutcome, LifecyclePhaseView, LockToolView,
+    MAX_DRIVE_PULSE_MS, MAX_RAYCAST_BATCH, MAX_WAIT_TIMEOUT_MS, OutdoorCoordsPreview,
+    OutdoorCoordsView, RaycastHitView, RaycastPreview, RaycastSpec, RestPostureSpec,
+    SalvagePreview, SelectionView, SelfView, SkillDefinitionView, SocialView,
     SpellCastReadinessView, SpellCastingRouteView, SpellDefinitionView, SpellFormulaPreview,
-    SpellInspectionPreview, SpellbookView, SphereSweepPreview, SquelchCharacterView, SquelchCommandSpec,
-    SquelchGlobalView, SquelchView, TradeView, VendorTradeSpec, VendorView, WaitPolicy, WaitUntil,
-    WeaponProfileView, WorldCellsView, camelize_json, to_camel_json,
+    SpellInspectionPreview, SpellbookView, SphereSweepPreview, SquelchCharacterView,
+    SquelchCommandSpec, SquelchGlobalView, SquelchView, TradeView, VendorTradeSpec, VendorView,
+    WaitPolicy, WaitUntil, WeaponProfileView, WorldCellsView, camelize_json, to_camel_json,
 };
 
 /// Live metadata snapshot pushed whenever lifecycle, world, or character changes (e.g., for discovery).
@@ -198,9 +198,10 @@ impl LiveApiEngine {
 
     /// Emits a `selection` event into the semantic log when the frontend's selected entity changes.
     pub fn notify_selection_changed(&self, guid: Option<Guid>) {
-        self.inner
-            .event_log
-            .push(ApiEventTopic::Selection, ApiEvent::SelectionChanged { guid });
+        self.inner.event_log.push(
+            ApiEventTopic::Selection,
+            ApiEvent::SelectionChanged { guid },
+        );
     }
 
     /// Computes capabilities directly from mounted hooks and catalogs (impossible to drift).
@@ -456,12 +457,13 @@ impl LiveApiEngine {
             .read(move |ctx| {
                 let world = ctx.world();
                 let self_pos = world.local_player_runtime_pose();
-                let allowed_categories: Option<HashSet<String>> = filter.category.as_ref().map(|s| {
-                    s.split(',')
-                        .map(|part| part.trim().to_ascii_lowercase())
-                        .filter(|part| !part.is_empty())
-                        .collect()
-                });
+                let allowed_categories: Option<HashSet<String>> =
+                    filter.category.as_ref().map(|s| {
+                        s.split(',')
+                            .map(|part| part.trim().to_ascii_lowercase())
+                            .filter(|part| !part.is_empty())
+                            .collect()
+                    });
                 let name_needle = filter.name.as_ref().map(|n| n.to_ascii_lowercase());
 
                 let mut out = Vec::new();
@@ -937,14 +939,10 @@ impl LiveApiEngine {
                         let in_magic_mode = world.player_combat_mode() == CombatMode::Magic;
                         let base_mana = catalog_base_mana
                             .or_else(|| world.spell_catalog.get(spell_id).map(|s| s.base_mana));
-                        let current_mana = world
-                            .player
-                            .vitals
-                            .get(&VitalType::Mana)
-                            .map(|v| v.current);
-                        let sufficient_mana = base_mana
-                            .zip(current_mana)
-                            .map(|(cost, mana)| mana >= cost);
+                        let current_mana =
+                            world.player.vitals.get(&VitalType::Mana).map(|v| v.current);
+                        let sufficient_mana =
+                            base_mana.zip(current_mana).map(|(cost, mana)| mana >= cost);
                         (
                             outcome,
                             SpellCastReadinessView {
@@ -1145,13 +1143,11 @@ impl LiveApiEngine {
                                 "outdoor-coords `position` coordinates must be finite",
                             ));
                         }
-                        let normalized = pos
-                            .normalize_outdoor_landblock_frame()
-                            .map_err(|_| {
-                                ApiError::invalid(
-                                    "outdoor-coords `position` must be a valid outdoor WorldPosition",
-                                )
-                            })?;
+                        let normalized = pos.normalize_outdoor_landblock_frame().map_err(|_| {
+                            ApiError::invalid(
+                                "outdoor-coords `position` must be a valid outdoor WorldPosition",
+                            )
+                        })?;
                         normalized.normalize_outdoor_cell()
                     }
                     _ => {
@@ -1190,9 +1186,12 @@ impl LiveApiEngine {
                                 target_pos.coords.z = hit.point.z;
                             }
                         }
-                        let outdoor_coords = project_outdoor_coords(target_pos).ok_or_else(|| {
-                            ApiError::invalid("position could not be converted to outdoor coords")
-                        })?;
+                        let outdoor_coords =
+                            project_outdoor_coords(target_pos).ok_or_else(|| {
+                                ApiError::invalid(
+                                    "position could not be converted to outdoor coords",
+                                )
+                            })?;
                         Ok(ApiPreviewResponse::OutdoorCoords(OutdoorCoordsPreview {
                             position: target_pos,
                             outdoor_coords,
@@ -1511,9 +1510,7 @@ impl LiveApiEngine {
             },
             ApiCommand::Fellowship { action } => match action {
                 FellowshipCommandSpec::Create { name } => ClientCommand::CreateParty { name },
-                FellowshipCommandSpec::Invite { target } => {
-                    ClientCommand::InviteToParty { target }
-                }
+                FellowshipCommandSpec::Invite { target } => ClientCommand::InviteToParty { target },
                 FellowshipCommandSpec::Uninvite { target } => {
                     ClientCommand::UninviteFromParty { target }
                 }
@@ -1579,12 +1576,14 @@ impl LiveApiEngine {
             }
             ApiCommand::StopCombat => ClientCommand::StopCombatEngagement { intent_sequence: 0 },
             ApiCommand::CastSpell { spell_id, aim } => ClientCommand::CastSpell { spell_id, aim },
-            ApiCommand::SetRestPosture { posture } => ClientCommand::SetRestPosture(match posture {
-                RestPostureSpec::Standing => RestPosture::Standing,
-                RestPostureSpec::Crouching => RestPosture::Crouching,
-                RestPostureSpec::Sitting => RestPosture::Sitting,
-                RestPostureSpec::Lying => RestPosture::Lying,
-            }),
+            ApiCommand::SetRestPosture { posture } => {
+                ClientCommand::SetRestPosture(match posture {
+                    RestPostureSpec::Standing => RestPosture::Standing,
+                    RestPostureSpec::Crouching => RestPosture::Crouching,
+                    RestPostureSpec::Sitting => RestPosture::Sitting,
+                    RestPostureSpec::Lying => RestPosture::Lying,
+                })
+            }
             ApiCommand::CancelRestPosture => ClientCommand::CancelRestPosture,
             ApiCommand::Recall { destination } => ClientCommand::Recall(destination),
             ApiCommand::UseEntity { guid, unrestricted } => {
@@ -1794,7 +1793,9 @@ fn settlement_matcher(command: &ApiCommand) -> Option<SettlementMatcher> {
         ApiCommand::SetCombatMode { mode } => Some(SettlementMatcher::CombatMode {
             expected: format_combat_mode(combat_mode_spec_to_core(*mode)),
         }),
-        ApiCommand::Inventory { intent } => Some(SettlementMatcher::Inventory { item: intent.item }),
+        ApiCommand::Inventory { intent } => {
+            Some(SettlementMatcher::Inventory { item: intent.item })
+        }
         ApiCommand::SelectCharacter { .. } => Some(SettlementMatcher::SelectCharacter),
         ApiCommand::Logout => Some(SettlementMatcher::Logout),
         _ => None,
@@ -1878,16 +1879,14 @@ fn match_settlement(
         {
             Some(CommandOutcome::Navigation(*finished))
         }
-        (
-            SettlementMatcher::VendorTrade,
-            ApiEvent::VendorTradeFinished { sequence, result },
-        ) if correlation_id == Some(u64::from(*sequence)) => {
+        (SettlementMatcher::VendorTrade, ApiEvent::VendorTradeFinished { sequence, result })
+            if correlation_id == Some(u64::from(*sequence)) =>
+        {
             Some(CommandOutcome::Dynamic(result.clone()))
         }
-        (
-            SettlementMatcher::CombatMode { expected },
-            ApiEvent::CombatModeUpdated { mode },
-        ) if mode == expected || mode == "peace" => {
+        (SettlementMatcher::CombatMode { expected }, ApiEvent::CombatModeUpdated { mode })
+            if mode == expected || mode == "peace" =>
+        {
             Some(CommandOutcome::CombatMode(CombatModeOutcome {
                 matched: mode == expected,
                 mode: mode.clone(),
@@ -1912,10 +1911,9 @@ fn match_settlement(
                 error: None,
             }))
         }
-        (
-            SettlementMatcher::Inventory { item },
-            ApiEvent::ErrorNotice { source, message },
-        ) if source != "chat" => {
+        (SettlementMatcher::Inventory { item }, ApiEvent::ErrorNotice { source, message })
+            if source != "chat" =>
+        {
             Some(CommandOutcome::Inventory(InventoryOutcome {
                 item: *item,
                 settled_by: "rejected".into(),
@@ -1970,19 +1968,22 @@ fn immediate_accepted(latest_event_seq: u64) -> CommandResponse {
 
 fn map_rejection(rejection: CommandRejection) -> ApiError {
     match rejection {
-        CommandRejection::AutomationPaused => {
-            ApiError::new(ApiErrorCode::AutomationPaused, "automation is paused by the user")
-        }
-        CommandRejection::NotInWorld => {
-            ApiError::new(ApiErrorCode::NotInWorld, "character is not currently in the world")
-        }
+        CommandRejection::AutomationPaused => ApiError::new(
+            ApiErrorCode::AutomationPaused,
+            "automation is paused by the user",
+        ),
+        CommandRejection::NotInWorld => ApiError::new(
+            ApiErrorCode::NotInWorld,
+            "character is not currently in the world",
+        ),
         CommandRejection::InvalidLifecycleState { expected } => ApiError::new(
             ApiErrorCode::InvalidLifecycleState,
             format!("invalid lifecycle state; expected {expected}"),
         ),
-        CommandRejection::Busy { active } => {
-            ApiError::new(ApiErrorCode::Busy, format!("character is busy ({active:?})"))
-        }
+        CommandRejection::Busy { active } => ApiError::new(
+            ApiErrorCode::Busy,
+            format!("character is busy ({active:?})"),
+        ),
         CommandRejection::Validation { message } => ApiError::invalid(message),
         CommandRejection::Failed { message } => ApiError::new(ApiErrorCode::Internal, message),
     }
@@ -2028,8 +2029,8 @@ fn combat_mode_spec_to_core(mode: CombatModeSpec) -> CombatMode {
 fn project_weapon_profile(
     profile: &holtburger_protocol::messages::object::types::WeaponProfile,
 ) -> WeaponProfileView {
-    let weapon_skill_name =
-        holtburger_common::stats::SkillType::from_repr(profile.weapon_skill).map(|s| format!("{s:?}"));
+    let weapon_skill_name = holtburger_common::stats::SkillType::from_repr(profile.weapon_skill)
+        .map(|s| format!("{s:?}"));
     WeaponProfileView {
         damage_type: profile.damage_type,
         weapon_time: profile.weapon_time,
@@ -2119,7 +2120,10 @@ fn build_entity_summary(
             .is_some_and(|n| n.vendor);
     let is_hostile = facts.is_some_and(|f| f.is_hostile);
     let is_dead = entity.motion_command().is_some_and(|cmd| cmd.is_dead())
-        || entity.creature_profile.as_ref().is_some_and(|p| p.health == 0);
+        || entity
+            .creature_profile
+            .as_ref()
+            .is_some_and(|p| p.health == 0);
     let stack_count = facts.and_then(|f| match &f.description {
         EntityDescription::Known { stack_count, .. } => *stack_count,
         EntityDescription::Pending => None,
@@ -2129,11 +2133,10 @@ fn build_entity_summary(
         Some(EntityStorageLocation::Equipped { wearer_guid, .. }) => (None, Some(wearer_guid)),
         _ => (None, None),
     };
-    let distance_to_self = (container.is_none()
-        && wielder.is_none()
-        && !entity.position.landblock_id.is_null())
-    .then(|| self_pos.map(|p| p.distance_to(&entity.position)))
-    .flatten();
+    let distance_to_self =
+        (container.is_none() && wielder.is_none() && !entity.position.landblock_id.is_null())
+            .then(|| self_pos.map(|p| p.distance_to(&entity.position)))
+            .flatten();
     EntitySummary {
         guid: entity.guid,
         name: entity.name().to_string(),
@@ -2218,7 +2221,12 @@ fn spell_view(id: u32, info: &holtburger_world::spell::SpellInfo) -> SpellDefini
         base_range_constant: info.base_range_constant,
         base_range_mod: info.base_range_mod,
         power: info.power,
-        components: info.components.iter().copied().filter(|&c| c != 0).collect(),
+        components: info
+            .components
+            .iter()
+            .copied()
+            .filter(|&c| c != 0)
+            .collect(),
         duration,
     }
 }
@@ -2366,7 +2374,9 @@ fn project_allegiance_member(member: AllegianceMember) -> AllegianceMemberView {
     }
 }
 
-fn default_equipment_storage_policy(world: &holtburger_world::WorldState) -> EquipmentStoragePolicy {
+fn default_equipment_storage_policy(
+    world: &holtburger_world::WorldState,
+) -> EquipmentStoragePolicy {
     let mut packs: Vec<_> = world
         .container_contents(world.player.guid)
         .filter_map(|(guid, slot)| match slot {
@@ -2390,9 +2400,7 @@ fn project_allegiance(
     snapshot: &holtburger_core::client::allegiance::AllegianceSnapshot,
 ) -> AllegianceView {
     let profile = snapshot.profile.as_ref().map(|p| {
-        let roles = snapshot
-            .player_guid
-            .map(|player| p.relationships(player));
+        let roles = snapshot.player_guid.map(|player| p.relationships(player));
         AllegianceProfileView {
             name: p.name.clone(),
             rank: p.rank,

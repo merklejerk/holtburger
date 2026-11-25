@@ -94,10 +94,9 @@ impl GameState {
             return;
         }
 
-        let (Some(engine), Some(rt_handle)) = (
-            self.script.live_api.clone(),
-            self.script.rt_handle.clone(),
-        ) else {
+        let (Some(engine), Some(rt_handle)) =
+            (self.script.live_api.clone(), self.script.rt_handle.clone())
+        else {
             result.actions.push(AppAction::Log {
                 chat_tags: ChatMessageTags::error(),
                 message: "[script] Live API engine is not attached to this session".to_string(),
@@ -234,8 +233,7 @@ mod tests {
             player_guid,
             Entity::new(player_guid, "Player".to_string(), WorldPosition::default()),
         );
-        state.script.queued_script_startup =
-            Some(QueuedScriptStartup::new("missing-script", ""));
+        state.script.queued_script_startup = Some(QueuedScriptStartup::new("missing-script", ""));
 
         let result = state
             .handle_action(AppAction::Notification {

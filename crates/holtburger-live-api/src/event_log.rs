@@ -118,7 +118,11 @@ impl EventLog {
             .remove(&guid);
     }
 
-    pub fn push_motion(&self, guid: holtburger_common::Guid, position: holtburger_common::position::WorldPosition) {
+    pub fn push_motion(
+        &self,
+        guid: holtburger_common::Guid,
+        position: holtburger_common::position::WorldPosition,
+    ) {
         if self.motion_tx.receiver_count() == 0 {
             return;
         }
@@ -345,9 +349,7 @@ fn project_combat_feedback(feedback: &CombatFeedback) -> CombatFeedbackDetail {
 }
 
 /// Projects core's player-to-player trade snapshot into the typed `camelCase` Live API view.
-pub(crate) fn project_trade(
-    snapshot: &holtburger_core::client::trade::TradeSnapshot,
-) -> TradeView {
+pub(crate) fn project_trade(snapshot: &holtburger_core::client::trade::TradeSnapshot) -> TradeView {
     TradeView {
         trade: snapshot.trade.as_ref().map(|t| TradeSessionView {
             revision: t.revision,
@@ -430,7 +432,10 @@ pub fn ingest_client_view_event(log: &EventLog, event: &ClientViewEvent) {
             );
         }
         ClientViewEvent::BusyStateUpdated { busy } => {
-            log.push(ApiEventTopic::Busy, ApiEvent::BusyStateChanged { busy: *busy });
+            log.push(
+                ApiEventTopic::Busy,
+                ApiEvent::BusyStateChanged { busy: *busy },
+            );
         }
         ClientViewEvent::BusyOperationFinished { operation, result } => {
             let (succeeded, error, timed_out) = match result {
@@ -507,7 +512,10 @@ pub fn ingest_client_view_event(log: &EventLog, event: &ClientViewEvent) {
             );
         }
         ClientViewEvent::CharacterSheetUpdated(_) => {
-            log.push(ApiEventTopic::CharacterSheet, ApiEvent::CharacterSheetUpdated);
+            log.push(
+                ApiEventTopic::CharacterSheet,
+                ApiEvent::CharacterSheetUpdated,
+            );
         }
         ClientViewEvent::EntitySpawned { entity } | ClientViewEvent::EntityReplaced { entity } => {
             log.clear_entity_health_cache(entity.guid);
@@ -558,11 +566,9 @@ pub fn ingest_client_view_event(log: &EventLog, event: &ClientViewEvent) {
         }
         ClientViewEvent::ObjectInspectionResult(result) => {
             let (status, reason, inspection) = match &result.outcome {
-                holtburger_world::inspection::ObjectInspectionOutcome::Ready { inspection } => (
-                    AppraisalStatus::Ready,
-                    None,
-                    to_camel_json(inspection),
-                ),
+                holtburger_world::inspection::ObjectInspectionOutcome::Ready { inspection } => {
+                    (AppraisalStatus::Ready, None, to_camel_json(inspection))
+                }
                 holtburger_world::inspection::ObjectInspectionOutcome::Rejected => {
                     (AppraisalStatus::Rejected, None, None)
                 }

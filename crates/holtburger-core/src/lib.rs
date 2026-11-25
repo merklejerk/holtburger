@@ -54,11 +54,6 @@ pub use client::control::{
     ClientCommandEnvelope, ClientReadContext, ClientRuntimeHandle, CommandAdmission,
     CommandRejection, ControlSource,
 };
-pub use client::steering::{
-    DEFAULT_FOLLOW_DISTANCE_M, DEFAULT_STEERING_ARRIVAL_DISTANCE_M, DEFAULT_STUCK_TIMEOUT_MS,
-    LocalNavigationFinished, LocalNavigationOutcome, LocalSteeringGoal, LocalSteeringRequest,
-    LocalSteeringStatus, MAX_STEERING_TARGET_DISTANCE_M,
-};
 pub use client::dynamic_script::{
     ClientDynamicScriptFacts, ClientDynamicScriptSource, ContentClientDynamicScriptSource,
     PreparedClientDynamicScript,
@@ -78,6 +73,11 @@ pub use client::runtime_body_view_cache::RuntimeBodyViewCache;
 pub use client::selection_envelope::{
     ClientSelectionEnvelopeProfile, ClientSelectionEnvelopeSource,
     ContentClientSelectionEnvelopeSource,
+};
+pub use client::steering::{
+    DEFAULT_FOLLOW_DISTANCE_M, DEFAULT_STEERING_ARRIVAL_DISTANCE_M, DEFAULT_STUCK_TIMEOUT_MS,
+    LocalNavigationFinished, LocalNavigationOutcome, LocalSteeringGoal, LocalSteeringRequest,
+    LocalSteeringStatus, MAX_STEERING_TARGET_DISTANCE_M,
 };
 pub use client::types::{
     ActionResultReason, ActionResultSource, ActiveCharacterConfirmation, BusyOperationKind,

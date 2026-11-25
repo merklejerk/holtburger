@@ -218,7 +218,10 @@ pub trait ClientHudHook: Send + Sync {
     async fn toast(&self, req: HudToastRequest) -> ApiResult<()>;
     async fn upsert_markers(&self, req: HudMarkersUpsertRequest) -> ApiResult<()>;
     async fn clear_markers(&self, namespace: Option<String>) -> ApiResult<()>;
-    async fn capture_screenshot(&self, req: HudScreenshotRequest) -> ApiResult<HudScreenshotResponse>;
+    async fn capture_screenshot(
+        &self,
+        req: HudScreenshotRequest,
+    ) -> ApiResult<HudScreenshotResponse>;
 }
 
 /// Static reference catalogs already loaded by both h3d and TUI (`content.spells`, `content.skills`).

@@ -167,11 +167,17 @@ pub struct H3dSelectionState {
 
 impl H3dSelectionState {
     pub fn get(&self) -> Option<Guid> {
-        *self.selected.lock().expect("selection state mutex poisoned")
+        *self
+            .selected
+            .lock()
+            .expect("selection state mutex poisoned")
     }
 
     pub fn set(&self, guid: Option<Guid>) -> bool {
-        let mut guard = self.selected.lock().expect("selection state mutex poisoned");
+        let mut guard = self
+            .selected
+            .lock()
+            .expect("selection state mutex poisoned");
         if *guard == guid {
             return false;
         }

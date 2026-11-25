@@ -559,4 +559,3 @@ fn sticky_local_simulation_follows_received_height_with_clearance_and_one_transl
     simulation::tick(now + dt * 3, dt, &mut world, &mut movement, Some(&snapshot)).unwrap();
     assert_eq!(world.local_player_runtime_pose(), Some(followed));
 }
-

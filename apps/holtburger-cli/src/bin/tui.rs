@@ -1070,11 +1070,16 @@ async fn run() -> Result<()> {
                             cause: RuntimeBodyResetCause::Resync,
                         },
                     )));
-                    update_state(reset, &mut pending_redraw, &runtime_handle, &mut should_quit);
+                    update_state(
+                        reset,
+                        &mut pending_redraw,
+                        &runtime_handle,
+                        &mut should_quit,
+                    );
                     if !requested_initial_view_state {
                         requested_initial_view_state = true;
-                        let _ = runtime_handle
-                            .send_user(ClientCommand::RequestCurrentApplicationState);
+                        let _ =
+                            runtime_handle.send_user(ClientCommand::RequestCurrentApplicationState);
                     }
                     break;
                 }
@@ -1128,12 +1133,13 @@ async fn run() -> Result<()> {
             break;
         }
 
-        let current_selection = app_state
-            .game_option()
-            .and_then(|game| match game.view.active_interaction {
-                Some(Interaction::Targeting { target_guid }) => Some(target_guid),
-                _ => None,
-            });
+        let current_selection =
+            app_state
+                .game_option()
+                .and_then(|game| match game.view.active_interaction {
+                    Some(Interaction::Targeting { target_guid }) => Some(target_guid),
+                    _ => None,
+                });
         live_api.sync_selection(current_selection);
 
         // 4. Draw (If needed and frame budget allows)

@@ -1095,9 +1095,13 @@ mod tests {
 
         let status = state.handle_prefixed_command("/api");
         assert!(status.commands.is_empty());
-        assert!(state.chat.messages.iter().any(|m| {
-            m.text == "Live API: Active (http://127.0.0.1:42000)"
-        }));
+        assert!(
+            state
+                .chat
+                .messages
+                .iter()
+                .any(|m| { m.text == "Live API: Active (http://127.0.0.1:42000)" })
+        );
 
         let pause = state.handle_prefixed_command("/api pause");
         assert!(matches!(
@@ -1113,9 +1117,13 @@ mod tests {
 
         let bad = state.handle_prefixed_command("/api bogus");
         assert!(bad.commands.is_empty());
-        assert!(state.chat.messages.iter().any(|m| {
-            m.text == "Usage: /api [status|pause|resume|prompt]"
-        }));
+        assert!(
+            state
+                .chat
+                .messages
+                .iter()
+                .any(|m| { m.text == "Usage: /api [status|pause|resume|prompt]" })
+        );
     }
 
     #[test]

@@ -163,10 +163,12 @@ pub(crate) fn discoverable_scripts(
     }
 
     for basename in discoverable_script_basenames_in_dir(&directories.bundled)? {
-        entries.entry(basename.clone()).or_insert(DiscoverableScript {
-            basename,
-            source: DiscoverableScriptSource::System,
-        });
+        entries
+            .entry(basename.clone())
+            .or_insert(DiscoverableScript {
+                basename,
+                source: DiscoverableScriptSource::System,
+            });
     }
 
     Ok(entries.into_values().collect())

@@ -1357,13 +1357,14 @@ mod tests {
             .handle_combat_command(
                 crate::client::control::ControlSource::User,
                 ClientCommand::BeginCombatEngagement {
-                target: Guid(2),
-                intent_sequence: 1,
-                profile: ClientAttackProfile::Missile {
-                    height: AttackHeight::Medium,
-                    accuracy: 0.5,
+                    target: Guid(2),
+                    intent_sequence: 1,
+                    profile: ClientAttackProfile::Missile {
+                        height: AttackHeight::Medium,
+                        accuracy: 0.5,
+                    },
                 },
-            })
+            )
             .await
             .unwrap();
         assert!(client.combat_engagement.status().desired.is_none());

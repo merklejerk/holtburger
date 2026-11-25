@@ -2,11 +2,12 @@ Holtburger beta includes the 3D client and the terminal client (CLI).
 
 ## In this beta
 
-- **3D client and terminal client, Live API:** An opt-in, localhost-only Live API lets bots, external tools, and AI agents read game state and drive a running session.
-- **3D client and terminal client, Live API controls:** Use `/api` (status, pause, resume, prompt, say) and the `/bot` shortcut in chat to manage automation. The 3D client also shows a HUD badge while the API is active.
-- **3D client, settings:** App settings now has a Live API section, and you can also enable the API for a single session with `--api`.
-- **3D client, chat:** Chat messages can now show clickable entity mentions.
-- **Terminal client, scripting:** TUI scripts now run on the same engine as the Live API, with a new script API.
+- **3D client, Live API:** Bots and external tools can now place entity callouts that follow moving targets in the world.
+- **3D client, Live API:** Waypoints set by the Live API are synced with the in-game waypoint.
+- **3D client, Live API:** Tools can play short attention chimes. They follow your audio settings and mute state, and they are rate-limited.
+- **3D client, HUD:** Live API toasts, markers and the HUD badge now give clearer feedback.
+- **3D client, chat:** Entity mentions in chat display more consistently.
+- **Terminal client, Live API:** Logging out is more reliable while the Live API is active.
 
 ## Known issues
 
@@ -16,4 +17,4 @@ Holtburger beta includes the 3D client and the terminal client (CLI).
 
 ## Updating
 
-Quit Holtburger before installing an update. Beta and nightly builds share the same installation, so installing either replaces the other. Existing terminal client scripts use the previous script API and must be updated to the new `HB` API before they will run. The Live API is off by default.
+Quit Holtburger before installing an update. Beta and nightly builds share the same installation, so installing either replaces the other. No action is required for this release. The Live API stays off unless you enable it.

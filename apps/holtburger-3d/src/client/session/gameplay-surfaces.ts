@@ -204,11 +204,14 @@ export interface ClientGameplaySettingsSurface {
 	readonly onInspectionPreviewHeightChange: (height: number) => void;
 }
 
-/** Optional localhost Live API indicator & pause toggle surfaced in the character HUD header. */
+/** Optional localhost Live API indicator & quick controls surfaced in the character HUD header. */
 export interface ClientLiveApiHudControls {
 	readonly state: ClientApiState;
 	readonly pausePending: boolean;
+	readonly audioMuted: boolean;
 	readonly onTogglePaused: () => void;
+	readonly onToggleAudioMuted: () => void;
+	readonly onClearOverlays: () => void;
 }
 
 /** Active character identity, vitals, character sheet, enchantments, appearance, gameplay options, and jump charge/aim. */

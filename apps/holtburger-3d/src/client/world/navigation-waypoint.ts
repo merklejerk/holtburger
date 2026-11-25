@@ -29,9 +29,15 @@ export class ClientNavigationWaypointOwner {
 	#characterGuid: number | null = null;
 	/** Frontend proximity policy injected from client tuning. */
 	readonly #nearRadiusMeters: number;
+	/** Optional observer fired whenever the committed target changes or clears. */
+	readonly #onChange: ((target: MapWaypointTarget | null) => void) | null;
 
-	constructor(nearRadiusMeters: number) {
+	constructor(
+		nearRadiusMeters: number,
+		onChange?: (target: MapWaypointTarget | null) => void,
+	) {
 		this.#nearRadiusMeters = nearRadiusMeters;
+		this.#onChange = onChange ?? null;
 	}
 
 	/** Accepted identity changes clear intent; repeating the same identity preserves it. */
@@ -71,7 +77,9 @@ export class ClientNavigationWaypointOwner {
 
 	/** Also used during session cleanup, without producing unsolicited chat. */
 	clear(): void {
+		if (this.#target === null) return;
 		this.#target = null;
+		this.#onChange?.(null);
 	}
 
 	/** Read against the exact subject sampled for this UI frame; no movement publications. */
@@ -110,8 +118,14 @@ export class ClientNavigationWaypointOwner {
 	): void {
 		if (this.#characterGuid === null)
 			throw new Error("Select a character before setting a waypoint.");
+		const changed =
+			this.#target === null ||
+			this.#target.label !== target.label ||
+			this.#target.position.x !== target.position.x ||
+			this.#target.position.z !== target.position.z;
 		this.#target = target;
 		activate(target);
+		if (changed) this.#onChange?.(target);
 	}
 
 	/** Exact-token interception, including invalid arguments, keeps recognized commands local. */

@@ -238,6 +238,7 @@ const CLIENT_HOST_COMMAND_NAMES = [
 	"acknowledge_client_world_reveal",
 	"stop_client_camera",
 	"report_client_selected_entity",
+	"report_client_navigation_waypoint",
 	"set_client_automation_paused",
 	"send_client_api_message",
 	"submit_client_api_screenshot",

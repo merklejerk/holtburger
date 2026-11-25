@@ -1,3 +1,4 @@
+import { rgbaColorsEqual } from "../../lib/frontend-color";
 import { EMPTY_ENTITY_OVERLAY_FRAME } from "../../lib/game/renderer/overlays/entity-overlay-policy";
 import type { DynamicEntityView } from "../../lib/game/runtime/dynamic-entity-feed";
 import type { DynamicPresentationOverride } from "../../lib/game/runtime/dynamic-presentation-override";
@@ -47,6 +48,10 @@ import {
 	CLIENT_SUMMON_TUNING,
 	CLIENT_TUNING,
 } from "../settings/tuning";
+import {
+	EMPTY_API_ENTITY_CALLOUTS,
+	type ApiEntityCallout,
+} from "../hud/api-markers";
 import type { ClientGameplayRuntime } from "./gameplay-presentation";
 
 const EMPTY_ALERT_GUIDS: ReadonlySet<number> = new Set();
@@ -101,6 +106,9 @@ export class ClientCombatAndOverlayPresenter {
 	readonly #trackedAlertGuids: () => ReadonlySet<number>;
 	/** Applied alert memberships kept in sync so crest decorations reconcile only on changes. */
 	readonly #appliedAlertGuids = new Set<number>();
+	/** Referentially stable map from `ApiWorldMarkersStore` for zero-cost steady-frame checks. */
+	#apiEntityCallouts: ReadonlyMap<number, ApiEntityCallout> =
+		EMPTY_API_ENTITY_CALLOUTS;
 	readonly #sampleImmediateTargetCandidates:
 		| ((
 				frame: CycleSelectionPresentationFrame,
@@ -142,6 +150,31 @@ export class ClientCombatAndOverlayPresenter {
 
 	setSelectedTarget(guid: number | null): void {
 		this.#combatHealth.setSelectedTarget(guid);
+	}
+
+	/** Apply Live API entity callouts incrementally; short-circuits when the map reference is unchanged. */
+	setApiEntityCallouts(
+		callouts: ReadonlyMap<number, ApiEntityCallout>,
+		runtime: ClientGameplayRuntime | undefined,
+	): void {
+		if (callouts === this.#apiEntityCallouts) return;
+		const previous = this.#apiEntityCallouts;
+		this.#apiEntityCallouts = callouts;
+		for (const [guid, next] of callouts) {
+			const prev = previous.get(guid);
+			if (
+				prev === undefined ||
+				prev.label !== next.label ||
+				!rgbaColorsEqual(prev.color, next.color)
+			) {
+				this.reconcileEntityNameplate(guid, runtime);
+			}
+		}
+		for (const guid of previous.keys()) {
+			if (!callouts.has(guid)) {
+				this.reconcileEntityNameplate(guid, runtime);
+			}
+		}
 	}
 
 	/** Pull target-local overlays against the same presented camera as combat indicators. */
@@ -304,11 +337,13 @@ export class ClientCombatAndOverlayPresenter {
 
 	clearOverlays(): void {
 		this.#appliedAlertGuids.clear();
+		this.#apiEntityCallouts = EMPTY_API_ENTITY_CALLOUTS;
 		this.#overlays.clear();
 	}
 
 	clearOverlayPresentation(runtime: ClientGameplayRuntime | undefined): void {
 		this.#appliedAlertGuids.clear();
+		this.#apiEntityCallouts = EMPTY_API_ENTITY_CALLOUTS;
 		this.#overlays.clear();
 		runtime?.setEntityOverlayFrame(EMPTY_ENTITY_OVERLAY_FRAME);
 	}
@@ -445,6 +480,7 @@ export class ClientCombatAndOverlayPresenter {
 			hoveredGuid,
 			activeCombatTargetGuid: engagement?.target ?? null,
 			alertGuids,
+			apiCallouts: this.#apiEntityCallouts,
 			categoryVisibility:
 				CLIENT_TUNING.frameSettings.nameplates.categoryVisibility,
 			sampleImmediateTarget:
@@ -515,6 +551,7 @@ export class ClientCombatAndOverlayPresenter {
 			this.#trackedAlertGuids(),
 			guid,
 		);
+		const apiCallout = this.#apiEntityCallouts.get(guid);
 		runtime.setDynamicEntityNameplateDecoration(guid, {
 			indicators: [],
 			strikeThrough: opened,
@@ -522,6 +559,9 @@ export class ClientCombatAndOverlayPresenter {
 				? { nameColor: "player" as const }
 				: {}),
 			...(isAlert ? { crest: "alert" as const } : {}),
+			...(apiCallout?.label !== undefined && apiCallout.label !== null
+				? { badge: { text: apiCallout.label, color: apiCallout.color } }
+				: {}),
 		});
 	}
 
@@ -607,6 +647,7 @@ export class ClientCombatAndOverlayPresenter {
 
 	destroy(): void {
 		this.#appliedAlertGuids.clear();
+		this.#apiEntityCallouts = EMPTY_API_ENTITY_CALLOUTS;
 		this.#lockFeedback.clear();
 		this.#combatHealth.destroy();
 	}

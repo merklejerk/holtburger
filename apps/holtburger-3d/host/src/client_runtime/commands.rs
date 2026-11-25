@@ -661,6 +661,11 @@ pub enum ClientHostCommand {
         #[serde(default)]
         guid: Option<holtburger_common::Guid>,
     },
+    /// Mirrors frontend outdoor navigation waypoint into the Live API `h3d.hud` hook.
+    ReportClientNavigationWaypoint {
+        #[serde(default)]
+        waypoint: Option<ClientNavigationWaypointReport>,
+    },
     /// Pauses or resumes Live API automation from the h3d HUD safety pill.
     SetClientAutomationPaused {
         paused: bool,
@@ -760,12 +765,22 @@ pub const CLIENT_COMMAND_NAMES: &[&str] = &[
     "acknowledge_client_world_reveal",
     "stop_client_camera",
     "report_client_selected_entity",
+    "report_client_navigation_waypoint",
     "set_client_automation_paused",
     "send_client_api_message",
     "submit_client_api_screenshot",
     "logout_client",
     "disconnect_client",
 ];
+
+/// Renderer-reported outdoor navigation waypoint synced into `H3dFrontendMirror`.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientNavigationWaypointReport {
+    pub scene_x: f32,
+    pub scene_z: f32,
+    pub label: String,
+}
 
 /// Appearance options intentionally exposed by the 3D client host boundary.
 #[derive(Debug, Clone, Copy, Deserialize)]

@@ -14,8 +14,10 @@ use holtburger_core::client::types::ChatSpeaker;
 use holtburger_core::{ClientRuntime, ClientViewEvent};
 use holtburger_live_api::event_log::{EVENT_LOG_CAPACITY, EventLog};
 use holtburger_live_api::hooks::{
-    ApiErrorCode, ApiResult, ClientHudHook, ClientUiHook, HudMarkersUpsertRequest,
-    HudScreenshotRequest, HudScreenshotResponse, HudToastRequest, UiPrintRequest,
+    ApiErrorCode, ApiResult, ClientHudHook, ClientUiHook, HudAudioCue, HudMarkersUpsertRequest,
+    HudPlayCueRequest, HudScreenshotRequest, HudScreenshotResponse, HudToastRequest,
+    HudWaypointInput, HudWaypointView, MAX_MARKER_LABEL_CHARS, UiPrintRequest,
+    resolve_waypoint_input,
 };
 use holtburger_live_api::server::{LiveApiServerConfig, LiveApiServerHandle, start_server};
 use holtburger_live_api::types::{
@@ -59,6 +61,8 @@ impl ClientUiHook for TestUiHook {
 struct TestHudHook {
     toasts: Mutex<Vec<HudToastRequest>>,
     markers: Mutex<Vec<HudMarkersUpsertRequest>>,
+    waypoint: Mutex<Option<HudWaypointView>>,
+    cues: Mutex<Vec<HudAudioCue>>,
 }
 
 #[async_trait]
@@ -75,6 +79,27 @@ impl ClientHudHook for TestHudHook {
 
     async fn clear_markers(&self, _namespace: Option<String>) -> ApiResult<()> {
         self.markers.lock().unwrap().clear();
+        Ok(())
+    }
+
+    async fn get_waypoint(&self) -> ApiResult<Option<HudWaypointView>> {
+        Ok(self.waypoint.lock().unwrap().clone())
+    }
+
+    async fn set_waypoint(
+        &self,
+        waypoint: Option<HudWaypointInput>,
+    ) -> ApiResult<Option<HudWaypointView>> {
+        let next = match waypoint {
+            Some(input) => Some(resolve_waypoint_input(&input)?),
+            None => None,
+        };
+        *self.waypoint.lock().unwrap() = next.clone();
+        Ok(next)
+    }
+
+    async fn play_cue(&self, req: HudPlayCueRequest) -> ApiResult<()> {
+        self.cues.lock().unwrap().push(req.cue);
         Ok(())
     }
 
@@ -1140,4 +1165,301 @@ async fn emit_user_message_delivers_on_automation_topic_even_when_paused() {
     drop(server);
     let _ = shutdown_tx.send(());
     task.abort();
+}
+
+#[tokio::test]
+async fn hud_entity_markers_waypoints_and_cues_work_while_paused_and_validate_inputs() {
+    let fixture = spawn_synthetic_client();
+    let hud = Arc::new(TestHudHook::default());
+    let server = start_server(
+        fixture.handle.clone(),
+        LiveApiServerConfig {
+            client_kind: "h3d",
+            port: 0,
+            catalogs: None,
+            ui: Some(Arc::new(TestUiHook::default())),
+            hud: Some(hud.clone()),
+            discovery_dir: None,
+            write_discovery: false,
+        },
+    )
+    .await
+    .unwrap();
+
+    // Pause automation: passive h3d.hud feedback primitives must remain active.
+    fixture.handle.set_automation_paused(true).unwrap();
+
+    let http = reqwest::Client::new();
+    let base = server.base_url();
+
+    // 1. Entity-anchored callout marker succeeds with valid RGBA, GUID, and short label.
+    let res = http
+        .post(format!("{base}/v1/command"))
+        .json(&serde_json::json!({
+            "command": {
+                "kind": "hud-upsert-markers",
+                "markers": [{
+                    "id": "boss-callout",
+                    "namespace": "combat",
+                    "color": [1.0, 0.2, 0.2, 0.95],
+                    "ttlMs": 15000,
+                    "geometry": {
+                        "shape": "entity",
+                        "guid": 0x8000_0042u32,
+                        "label": "Kill 1st",
+                        "beacon": true,
+                        "throughWall": true
+                    }
+                }]
+            }
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(hud.markers.lock().unwrap().len(), 1);
+
+    // Invalid entity marker cases: null GUID, out-of-range RGBA, empty namespace, multiline/oversized label.
+    for bad_marker in [
+        serde_json::json!({
+            "id": "null-guid",
+            "geometry": { "shape": "entity", "guid": 0 }
+        }),
+        serde_json::json!({
+            "id": "empty-ns",
+            "namespace": "   ",
+            "geometry": { "shape": "entity", "guid": 0x8000_0042u32 }
+        }),
+        serde_json::json!({
+            "id": "bad-color",
+            "color": [1.5, 0.0, 0.0, 1.0],
+            "geometry": { "shape": "entity", "guid": 0x8000_0042u32 }
+        }),
+        serde_json::json!({
+            "id": "multiline",
+            "geometry": { "shape": "entity", "guid": 0x8000_0042u32, "label": "line1\nline2" }
+        }),
+        serde_json::json!({
+            "id": "too-long",
+            "geometry": {
+                "shape": "entity",
+                "guid": 0x8000_0042u32,
+                "label": "x".repeat(MAX_MARKER_LABEL_CHARS + 1)
+            }
+        }),
+    ] {
+        let bad = http
+            .post(format!("{base}/v1/command"))
+            .json(&serde_json::json!({
+                "command": {
+                    "kind": "hud-upsert-markers",
+                    "markers": [bad_marker]
+                }
+            }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(bad.status(), StatusCode::BAD_REQUEST);
+        let body: Value = bad.json().await.unwrap();
+        assert_eq!(body["code"], "invalid_request");
+    }
+
+    // 2. Waypoint readback, set via printed coords, indoor rejection, clear, and hud events.
+    let initial: Value = http
+        .get(format!("{base}/v1/hud/waypoint"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(initial["waypoint"].is_null());
+
+    let set_res = http
+        .post(format!("{base}/v1/command"))
+        .json(&serde_json::json!({
+            "command": {
+                "kind": "hud-set-waypoint",
+                "waypoint": {
+                    "coords": "42.3N, 15.8E",
+                    "label": "Dungeon Entrance"
+                }
+            }
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(set_res.status(), StatusCode::OK);
+
+    let after_set: Value = http
+        .get(format!("{base}/v1/hud/waypoint"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(after_set["waypoint"]["coords"], "42.3N, 15.8E");
+    assert_eq!(after_set["waypoint"]["label"], "Dungeon Entrance");
+    assert!(after_set["waypoint"]["position"]["landblockId"].is_u64());
+
+    // Empty toast/print messages, empty clear namespace, and nonexistent selection GUID fail cleanly.
+    for (bad_cmd, expected_status, expected_code) in [
+        (
+            serde_json::json!({ "kind": "hud-toast", "message": "   " }),
+            StatusCode::BAD_REQUEST,
+            "invalid_request",
+        ),
+        (
+            serde_json::json!({ "kind": "ui-print", "message": "" }),
+            StatusCode::BAD_REQUEST,
+            "invalid_request",
+        ),
+        (
+            serde_json::json!({ "kind": "hud-clear-markers", "namespace": "" }),
+            StatusCode::BAD_REQUEST,
+            "invalid_request",
+        ),
+        (
+            serde_json::json!({ "kind": "set-selection", "guid": 999_999_999u32 }),
+            StatusCode::NOT_FOUND,
+            "not_found",
+        ),
+    ] {
+        let resp = http
+            .post(format!("{base}/v1/command"))
+            .json(&serde_json::json!({ "command": bad_cmd }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), expected_status);
+        let body: Value = resp.json().await.unwrap();
+        assert_eq!(body["code"], expected_code);
+    }
+
+    // Indoor position is rejected cleanly.
+    let indoor_res = http
+        .post(format!("{base}/v1/command"))
+        .json(&serde_json::json!({
+            "command": {
+                "kind": "hud-set-waypoint",
+                "waypoint": {
+                    "position": {
+                        "landblockId": 0x0102_0105u32,
+                        "coords": { "x": 1.0, "y": 2.0, "z": 0.0 }
+                    }
+                }
+            }
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(indoor_res.status(), StatusCode::BAD_REQUEST);
+
+    // Clear waypoint with null.
+    let clear_res = http
+        .post(format!("{base}/v1/command"))
+        .json(&serde_json::json!({
+            "command": {
+                "kind": "hud-set-waypoint",
+                "waypoint": null
+            }
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(clear_res.status(), StatusCode::OK);
+
+    let events: Value = http
+        .get(format!("{base}/v1/events?topics=hud"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let hud_events = events["events"].as_array().unwrap();
+    assert_eq!(hud_events.len(), 2);
+    assert_eq!(hud_events[0]["topic"], "hud");
+    assert_eq!(hud_events[0]["event"]["kind"], "waypoint-changed");
+    assert_eq!(
+        hud_events[0]["event"]["waypoint"]["label"],
+        "Dungeon Entrance"
+    );
+    assert!(hud_events[1]["event"]["waypoint"].is_null());
+
+    // 3. Audio attention cues (including "error" aligned with HudToastLevel) work while paused.
+    for cue in ["alert", "error"] {
+        let cue_res = http
+            .post(format!("{base}/v1/command"))
+            .json(&serde_json::json!({
+                "command": { "kind": "hud-play-cue", "cue": cue }
+            }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(cue_res.status(), StatusCode::OK);
+    }
+    assert_eq!(
+        *hud.cues.lock().unwrap(),
+        vec![HudAudioCue::Alert, HudAudioCue::Error]
+    );
+
+    // 4. OpenAPI advertises /v1/hud/waypoint.
+    let openapi: Value = http
+        .get(format!("{base}/v1/openapi.json"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(openapi["paths"]["/v1/hud/waypoint"].is_object());
+
+    drop(server);
+}
+
+#[tokio::test]
+async fn tui_without_hud_hook_rejects_waypoint_and_cue_with_unsupported_capability() {
+    let fixture = spawn_synthetic_client();
+    let server = start_server(
+        fixture.handle.clone(),
+        LiveApiServerConfig {
+            client_kind: "tui",
+            port: 0,
+            catalogs: None,
+            ui: None,
+            hud: None,
+            discovery_dir: None,
+            write_discovery: false,
+        },
+    )
+    .await
+    .unwrap();
+
+    let http = reqwest::Client::new();
+    let base = server.base_url();
+
+    let wp_get = http
+        .get(format!("{base}/v1/hud/waypoint"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(wp_get.status(), StatusCode::NOT_IMPLEMENTED);
+    let body: Value = wp_get.json().await.unwrap();
+    assert_eq!(body["code"], "unsupported_capability");
+
+    let cue_post = http
+        .post(format!("{base}/v1/command"))
+        .json(&serde_json::json!({
+            "command": { "kind": "hud-play-cue", "cue": "info" }
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(cue_post.status(), StatusCode::NOT_IMPLEMENTED);
+    let body: Value = cue_post.json().await.unwrap();
+    assert_eq!(body["code"], "unsupported_capability");
+
+    drop(server);
 }

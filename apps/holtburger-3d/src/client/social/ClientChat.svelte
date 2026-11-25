@@ -484,7 +484,7 @@
 		name: string,
 		guid: number,
 	): Promise<void> {
-		if (sending || composing || recipientOpen || (guid >>> 0) === 0) return;
+		if (sending || composing || recipientOpen || guid >>> 0 === 0) return;
 		openMenu = null;
 		const syncedInput =
 			inputElement !== null && inputElement.value === message
@@ -654,7 +654,9 @@
 							class:chat-tone-npc={tone === "npc"}
 							class:chat-tone-combat={tone === "combat"}
 							class:chat-tone-system={tone === "system"}
+							class:chat-tone-warning={tone === "warning"}
 							class:chat-tone-error={tone === "error"}
+							class:chat-tone-magic={tone === "magic"}
 							class:chat-tone-party={tone === "party"}
 							class:chat-tone-guild={tone === "guild"}
 							class:chat-tone-trade={tone === "trade"}
@@ -1097,6 +1099,12 @@
 		}
 		.chat-tone-system {
 			color: var(--ui-chat-system-text);
+		}
+		.chat-tone-warning {
+			color: var(--ui-color-warning);
+		}
+		.chat-tone-magic {
+			color: var(--ui-color-mana);
 		}
 		.chat-tone-tell {
 			color: var(--ui-chat-tell-text);

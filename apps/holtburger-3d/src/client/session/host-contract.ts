@@ -1464,11 +1464,12 @@ const finiteVec3Schema = z.tuple([
 	z.number().finite(),
 	z.number().finite(),
 ]);
+const normalizedColorChannel = z.number().finite().min(0).max(1);
 const rgbaColorSchema = z.tuple([
-	z.number().finite(),
-	z.number().finite(),
-	z.number().finite(),
-	z.number().finite(),
+	normalizedColorChannel,
+	normalizedColorChannel,
+	normalizedColorChannel,
+	normalizedColorChannel,
 ]);
 
 /** Live API status summary emitted by the client host sidecar for the HUD pill. */
@@ -1480,6 +1481,37 @@ const clientApiStateSchema = z
 	})
 	.strict();
 export type ClientApiState = z.infer<typeof clientApiStateSchema>;
+
+/** Projected outdoor waypoint forwarded from the Live API `h3d.hud` hook. */
+const clientApiWaypointSchema = z
+	.object({
+		sceneX: z.number().finite(),
+		sceneZ: z.number().finite(),
+		coords: z.string(),
+		label: z.string(),
+	})
+	.strict();
+
+/** Semantic non-diegetic UI attention chime identifiers for `hud-play-cue`. */
+const clientApiAudioCueSchema = z.enum([
+	"info",
+	"success",
+	"warn",
+	"error",
+	"alert",
+]);
+export type ClientApiAudioCue = z.infer<typeof clientApiAudioCueSchema>;
+
+/** Print style variants forwarded from the Live API `ui.print` hook. */
+const clientApiPrintStyleSchema = z.enum([
+	"info",
+	"warn",
+	"error",
+	"system",
+	"combat",
+	"magic",
+	"trade",
+]);
 
 /** One projected 3D overlay marker emitted by the h3d Live API HUD hook. */
 const clientApiWorldMarkerSchema = z.discriminatedUnion("kind", [
@@ -1507,6 +1539,22 @@ const clientApiWorldMarkerSchema = z.discriminatedUnion("kind", [
 			ttlMs: z.number().int().positive(),
 		})
 		.strict(),
+	z
+		.object({
+			kind: z.literal("entity"),
+			id: z.string(),
+			namespace: z.string().nullable(),
+			guid: guid.refine(
+				(value) => value !== 0,
+				"entity marker guid must be non-zero",
+			),
+			label: z.string().nullable(),
+			beacon: z.boolean(),
+			throughWall: z.boolean(),
+			color: rgbaColorSchema,
+			ttlMs: z.number().int().positive(),
+		})
+		.strict(),
 ]);
 export type ClientApiWorldMarker = z.infer<typeof clientApiWorldMarkerSchema>;
 
@@ -1522,15 +1570,7 @@ const clientApiHudEventSchema = z.discriminatedUnion("kind", [
 		.object({
 			kind: z.literal("print"),
 			message: z.string(),
-			style: z.enum([
-				"info",
-				"warn",
-				"error",
-				"system",
-				"combat",
-				"magic",
-				"trade",
-			]),
+			style: clientApiPrintStyleSchema,
 		})
 		.strict(),
 	z
@@ -1550,6 +1590,18 @@ const clientApiHudEventSchema = z.discriminatedUnion("kind", [
 		.object({
 			kind: z.literal("clear-markers"),
 			namespace: z.string().nullable(),
+		})
+		.strict(),
+	z
+		.object({
+			kind: z.literal("set-waypoint"),
+			waypoint: clientApiWaypointSchema.nullable(),
+		})
+		.strict(),
+	z
+		.object({
+			kind: z.literal("play-cue"),
+			cue: clientApiAudioCueSchema,
 		})
 		.strict(),
 	z

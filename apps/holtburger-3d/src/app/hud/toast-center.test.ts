@@ -117,4 +117,21 @@ describe("HudToastCenter", () => {
 		scheduler.fire(1);
 		expect(center.snapshot()?.message).toBe("You're too busy!");
 	});
+
+	it("preserves success and error tones and prevents progress notices from clobbering errors", () => {
+		const { center, scheduler } = fixture();
+		center.publish({ message: "Saved!", tone: "success" });
+		expect(center.snapshot()).toMatchObject({
+			message: "Saved!",
+			tone: "success",
+		});
+
+		center.publish({ message: "Cast failed", tone: "error" });
+		center.publish({ message: "Using item...", tone: "progress" });
+		expect(center.snapshot()).toMatchObject({
+			message: "Cast failed",
+			tone: "error",
+		});
+		expect(scheduler.cancelled).toEqual([1]);
+	});
 });

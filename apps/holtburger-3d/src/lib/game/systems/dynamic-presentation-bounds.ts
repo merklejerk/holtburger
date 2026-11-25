@@ -24,10 +24,11 @@ import {
 	type DynamicEntitySelectionGeometry,
 	type DynamicEntitySelectionPart,
 } from "./dynamic-entity-types";
-import type {
-	DynamicEntityPresentationState,
-	DynamicPresentationSource,
-	NameplateContent,
+import {
+	nameplateContentEqual,
+	type DynamicEntityPresentationState,
+	type DynamicPresentationSource,
+	type NameplateContent,
 } from "./dynamic-presentation-source";
 import type { DynamicEntitySceneAndAttachmentAdapter } from "./dynamic-scene-attachments";
 import type { EffectSystem } from "./effect-system";
@@ -326,18 +327,7 @@ export class DynamicPresentationAndBoundsPublisher {
 	updateNameplateContent(nodeId: SceneNodeId, content: NameplateContent): void {
 		const entity = this.#sceneAttachments.entities.get(nodeId);
 		if (!entity) throw new Error(`Dynamic entity ${nodeId} does not exist.`);
-		if (
-			entity.nameplateContent?.name === content.name &&
-			entity.nameplateContent.level === content.level &&
-			entity.nameplateContent.nameColor === content.nameColor &&
-			entity.nameplateContent.strikeThrough === content.strikeThrough &&
-			entity.nameplateContent.crest === content.crest &&
-			orderedIndicatorsEqual(
-				entity.nameplateContent.indicators,
-				content.indicators,
-			)
-		)
-			return;
+		if (nameplateContentEqual(entity.nameplateContent, content)) return;
 		entity.nameplateContent = content;
 		this.nameplatePopulationRevision += 1;
 	}
@@ -576,19 +566,4 @@ export class DynamicPresentationAndBoundsPublisher {
 		}
 		return target;
 	}
-}
-
-/** Compare small immutable compositor rows without making object identity semantic. */
-function orderedIndicatorsEqual(
-	left: NameplateContent["indicators"],
-	right: NameplateContent["indicators"],
-): boolean {
-	return (
-		left.length === right.length &&
-		left.every(
-			(value, index) =>
-				value.kind === right[index]?.kind &&
-				value.iconId === right[index]?.iconId,
-		)
-	);
 }

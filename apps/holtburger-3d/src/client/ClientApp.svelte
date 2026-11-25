@@ -49,7 +49,9 @@
 	import { ClientEmoteController } from "./social/emote-controller";
 	import type { SceneInterestMembership } from "../lib/game/runtime/render-scene-interest-controller";
 	import { startPresentationFrameLoop } from "../app/performance/presentation-frame-loop";
+	import { sceneMapPoint } from "../lib/game/map/map-coordinates";
 	import type { MapWaypointTarget } from "../lib/game/map/map-waypoint";
+	import { ClientApiCuePlayer } from "./hud/api-cue-player";
 	import { ClientNavigationWaypointOwner } from "./world/navigation-waypoint";
 	import { runClientAssetsCommand } from "./session/assets-command";
 	import { runClientVersionCommand } from "./session/version-command";
@@ -387,8 +389,25 @@
 	let emoteController: ClientEmoteController | null = null;
 	let postureController: ClientRestPostureController | null = null;
 	let session = $state<ClientLifecycleSession | null>(null);
+	let suppressWaypointReport = false;
 	const navigationWaypoint = new ClientNavigationWaypointOwner(
 		CLIENT_WAYPOINT_NEAR_RADIUS_METERS,
+		(target) => {
+			if (suppressWaypointReport) return;
+			const activeSession = session;
+			if (activeSession === null) return;
+			void activeSession
+				.reportNavigationWaypoint(
+					target === null
+						? null
+						: {
+								sceneX: target.position.x,
+								sceneZ: target.position.z,
+								label: target.label,
+							},
+				)
+				.catch(() => undefined);
+		},
 	);
 	const emptySpellBarBindings = initialSpellBarBindings();
 	let selectedSpellTab = $state<InputDigitIndex>(0);
@@ -657,6 +676,7 @@
 	let toast = $state<ClientToast | null>(null);
 	let apiState = $state<ClientApiState | null>(null);
 	let apiPausePending = $state(false);
+	let apiAudioMuted = $state(false);
 	let suppressSelectionReport = false;
 	const pendingScreenshotRequests: Array<{
 		requestId: string;
@@ -687,20 +707,30 @@
 	);
 	let audioForeground = true;
 	let titleMusic = $state.raw<ClientTitleMusic | null>(null);
+	let apiCuePlayer = $state.raw<ClientApiCuePlayer | null>(null);
 	onMount(() => {
 		const music = new ClientTitleMusic(titleMusicUrl, (error) =>
 			console.warn("Optional title music unavailable:", error),
 		);
+		const cuePlayer = new ClientApiCuePlayer({
+			initialSettings: userSettings.audio,
+			initialForeground: audioForeground,
+		});
+		cuePlayer.setApiMuted(apiAudioMuted);
 		const unbindForeground = bindClientAudioForeground((foreground) => {
 			audioForeground = foreground;
 			music.setForeground(foreground);
+			cuePlayer.setForeground(foreground);
 			presentationRoot?.setForeground(foreground);
 		}, window);
 		titleMusic = music;
+		apiCuePlayer = cuePlayer;
 		return () => {
 			unbindForeground();
 			music.destroy();
 			titleMusic = null;
+			cuePlayer.destroy();
+			apiCuePlayer = null;
 		};
 	});
 	$effect(() => {
@@ -708,6 +738,10 @@
 	});
 	$effect(() => {
 		titleMusic?.setSettings(userSettings.audio);
+		apiCuePlayer?.setAudioSettings(userSettings.audio);
+	});
+	$effect(() => {
+		apiCuePlayer?.setApiMuted(apiAudioMuted);
 	});
 	const pregameScene = $derived(
 		presentationRoot === null || canvasElement === null
@@ -1601,6 +1635,7 @@
 				rejectPendingScreenshots("Client session ended.");
 				apiState = null;
 				apiPausePending = false;
+				apiAudioMuted = false;
 				inputGate.cancel("reset");
 				appLifecycle.acceptExit(event.exit);
 				return;
@@ -1629,22 +1664,38 @@
 				}
 				return;
 			}
-			case "print":
-				appendChatLine(
+			case "print": {
+				const tone =
 					hud.style === "error"
-						? { kind: "error", message: hud.message }
-						: hud.style === "combat"
-							? { kind: "combat-notice", message: hud.message }
-							: { kind: "system", message: hud.message },
-				);
+						? "error"
+						: hud.style === "warn"
+							? "warning"
+							: hud.style === "combat"
+								? "combat"
+								: hud.style === "magic"
+									? "magic"
+									: hud.style === "trade"
+										? "trade"
+										: "system";
+				appendChatLine({
+					kind: "local-notice",
+					tone,
+					...(hud.style === "combat" ? { filterTag: "combat" as const } : {}),
+					message: hud.message,
+				});
 				return;
+			}
 			case "toast":
 				toastCenter.publish({
 					message: hud.message,
 					tone:
-						hud.level === "warn" || hud.level === "error"
-							? "warning"
-							: "status",
+						hud.level === "error"
+							? "error"
+							: hud.level === "warn"
+								? "warning"
+								: hud.level === "success"
+									? "success"
+									: "status",
 				});
 				return;
 			case "upsert-markers":
@@ -1658,6 +1709,33 @@
 					hud.namespace,
 					performance.now(),
 				);
+				return;
+			case "set-waypoint": {
+				suppressWaypointReport = true;
+				try {
+					if (hud.waypoint === null) {
+						navigationWaypoint.clear();
+					} else {
+						navigationWaypoint.set(
+							{
+								position: sceneMapPoint(
+									hud.waypoint.sceneX,
+									hud.waypoint.sceneZ,
+								),
+								label: hud.waypoint.label,
+							},
+							() => {},
+						);
+					}
+				} catch {
+					// Character may have logged out concurrently with an in-flight API event.
+				} finally {
+					suppressWaypointReport = false;
+				}
+				return;
+			}
+			case "play-cue":
+				apiCuePlayer?.play(hud.cue);
 				return;
 			case "capture-screenshot":
 				if (presentationRoot === null) {
@@ -1921,6 +1999,18 @@
 				setAutomationPaused,
 				(text) => currentSession.sendApiMessage(text),
 				appendChatLine,
+				undefined,
+				{
+					clearOverlays: () =>
+						gameplayPresentation?.clearApiWorldMarkers(
+							null,
+							performance.now(),
+						) ?? false,
+					isAudioMuted: () => apiAudioMuted,
+					setAudioMuted: (muted) => {
+						apiAudioMuted = muted;
+					},
+				},
 			)) ||
 			runClientScanCommand(
 				message,
@@ -2763,7 +2853,12 @@
 		const summonOwner = new ClientSummonPresentation(
 			owner,
 			(message) => {
-				appendChatLine({ kind: "combat-notice", message });
+				appendChatLine({
+					kind: "local-notice",
+					tone: "combat",
+					filterTag: "combat",
+					message,
+				});
 				toastCenter.publish({ message, tone: "status" });
 			},
 			appendChatError,
@@ -3022,6 +3117,7 @@
 					rejectPendingScreenshots("Client composition retired.");
 					apiState = null;
 					apiPausePending = false;
+					apiAudioMuted = false;
 					session = null;
 					chatCharacterGuid = null;
 					housing = emptyHousing();
@@ -3226,8 +3322,15 @@
 			return {
 				state: apiState,
 				pausePending: apiPausePending,
+				audioMuted: apiAudioMuted,
 				onTogglePaused: () => {
 					void toggleAutomationPaused();
+				},
+				onToggleAudioMuted: () => {
+					apiAudioMuted = !apiAudioMuted;
+				},
+				onClearOverlays: () => {
+					gameplayPresentation?.clearApiWorldMarkers(null, performance.now());
 				},
 			};
 		},

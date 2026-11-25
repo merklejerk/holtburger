@@ -22,9 +22,11 @@ function line(message: ClientChatEntry): ClientChatLine {
 }
 
 describe("client chat presentation policy", () => {
-	it("routes local summon notices through combat filtering without marking them as evasion", () => {
+	it("routes local combat notices through combat filtering and preserves warning/magic tones unconditionally", () => {
 		const notice = line({
-			kind: "combat-notice",
+			kind: "local-notice",
+			tone: "combat",
+			filterTag: "combat",
 			message: "Your summon is no longer active",
 		});
 		expect(clientChatTone(notice)).toBe("combat");
@@ -40,6 +42,22 @@ describe("client chat presentation policy", () => {
 				notice,
 			),
 		).toBe(false);
+
+		const warnNotice = line({
+			kind: "local-notice",
+			tone: "warning",
+			message: "Buffs expiring in 60s",
+		});
+		expect(clientChatTone(warnNotice)).toBe("warning");
+		expect(clientChatFiltersAllow([], warnNotice, channelFilters)).toBe(true);
+
+		const magicNotice = line({
+			kind: "local-notice",
+			tone: "magic",
+			message: "Spell ready",
+		});
+		expect(clientChatTone(magicNotice)).toBe("magic");
+		expect(clientChatFiltersAllow([], magicNotice, channelFilters)).toBe(true);
 	});
 	it.each([
 		["general", "general"],

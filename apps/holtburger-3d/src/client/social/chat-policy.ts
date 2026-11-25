@@ -46,8 +46,10 @@ export type ClientChatEntry =
 	| ClientChatMessage
 	| ClientChatFormattedSystemMessage
 	| {
-			/** App-owned combat notice, independent of server provenance and damage outcomes. */
-			readonly kind: "combat-notice";
+			/** App-owned local notice with explicit semantic tone and optional filter family. */
+			readonly kind: "local-notice";
+			readonly tone: ClientChatTone;
+			readonly filterTag?: ClientChatFilterTag;
 			readonly message: string;
 	  };
 
@@ -108,7 +110,9 @@ export type ClientChatTone =
 	| "emote"
 	| "combat"
 	| "system"
+	| "warning"
 	| "error"
+	| "magic"
 	| "party"
 	| "guild"
 	| "trade"
@@ -214,8 +218,11 @@ export function clientChatFiltersAllow(
 		case "error":
 			return true;
 		case "combat":
-		case "combat-notice":
 			return enabledTags.includes("combat");
+		case "local-notice":
+			return (
+				line.filterTag === undefined || enabledTags.includes(line.filterTag)
+			);
 		case "speech":
 		case "server": {
 			const tag = categoryFilter(line.category);
@@ -250,8 +257,9 @@ export function clientChatTone(line: ClientChatLine): ClientChatTone {
 		case "soul-emote":
 			return "emote";
 		case "combat":
-		case "combat-notice":
 			return "combat";
+		case "local-notice":
+			return line.tone;
 		case "formatted-system":
 		case "system":
 			return "system";

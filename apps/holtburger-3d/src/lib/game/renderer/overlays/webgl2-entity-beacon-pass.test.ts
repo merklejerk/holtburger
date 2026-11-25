@@ -216,4 +216,44 @@ describe("WebGL2EntityBeaconPass", () => {
 		]);
 		pass.destroy();
 	});
+
+	it("uploads per-instance custom RGBA alongside theme-default alert beacons", () => {
+		const fake = createFakeGl();
+		const pass = new WebGL2EntityBeaconPass(fake.gl);
+		const ctx = makeContext();
+		const customColor = { red: 1, green: 0.2, blue: 0.1, alpha: 0.9 };
+
+		pass.draw(ctx, [
+			{ base: new Vec3(1, 0, -5), height: 10, radius: 1 },
+			{ base: new Vec3(4, 0, -8), height: 4, radius: 0.6, color: customColor },
+		]);
+
+		const subDataCall = (
+			fake.gl.bufferSubData as unknown as ReturnType<typeof vi.fn>
+		).mock.calls.at(-1);
+		expect(subDataCall).toBeDefined();
+		const uploaded = subDataCall?.[2] as Float32Array;
+		// Instance 0 uses resolved theme color; instance 1 uses its custom color override.
+		expect(Array.from(uploaded.slice(6, 10))).toEqual(
+			Array.from(
+				new Float32Array([
+					ctx.settings.color!.red,
+					ctx.settings.color!.green,
+					ctx.settings.color!.blue,
+					ctx.settings.color!.alpha,
+				]),
+			),
+		);
+		expect(Array.from(uploaded.slice(16, 20))).toEqual(
+			Array.from(
+				new Float32Array([
+					customColor.red,
+					customColor.green,
+					customColor.blue,
+					customColor.alpha,
+				]),
+			),
+		);
+		pass.destroy();
+	});
 });

@@ -30,10 +30,15 @@
 				class="hud-toast ui-readout"
 				class:hud-toast-ephemeral={presentation.kind === "toast"}
 				class:hud-toast-preview={presentation.kind === "preview"}
+				class:hud-toast-success={presentation.kind === "toast" &&
+					presentation.toast.tone === "success"}
 				class:hud-toast-warning={presentation.kind === "toast" &&
 					presentation.toast.tone === "warning"}
+				class:hud-toast-error={presentation.kind === "toast" &&
+					presentation.toast.tone === "error"}
 				role={presentation.kind === "toast"
-					? presentation.toast.tone === "warning"
+					? presentation.toast.tone === "warning" ||
+						presentation.toast.tone === "error"
 						? "alert"
 						: "status"
 					: presentation.kind === "status"
@@ -74,8 +79,14 @@
 			animation: var(--ui-toast-pop-animation) var(--ui-toast-pop-duration)
 				var(--ui-toast-pop-easing);
 		}
+		.hud-toast-success {
+			color: var(--ui-color-success);
+		}
 		.hud-toast-warning {
 			color: var(--ui-color-warning);
+		}
+		.hud-toast-error {
+			color: var(--ui-color-danger);
 		}
 		.hud-toast-preview {
 			color: var(--ui-color-muted);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ApiWorldMarkersStore } from "./api-markers";
+import { ApiWorldMarkersStore, MAX_API_MARKERS } from "./api-markers";
 import type { ClientApiWorldMarker } from "../session/host-contract";
 
 describe("ApiWorldMarkersStore", () => {
@@ -55,5 +55,90 @@ describe("ApiWorldMarkersStore", () => {
 		const snap3 = store.snapshot(3_200);
 		expect(snap3.markers).toHaveLength(0);
 		expect(snap3.polylines).toHaveLength(0);
+	});
+
+	it("resolves entity callouts by latest revision, preserves map identity across ring updates, and enforces MAX_API_MARKERS", () => {
+		const store = new ApiWorldMarkersStore();
+		const guid = 0x8000_0042;
+		store.upsert(
+			[
+				{
+					kind: "entity",
+					id: "older",
+					namespace: "base",
+					guid,
+					label: "Fallback",
+					beacon: true,
+					throughWall: false,
+					color: [0.2, 0.8, 1, 0.9],
+					ttlMs: 10_000,
+				},
+				{
+					kind: "entity",
+					id: "newer",
+					namespace: "combat",
+					guid,
+					label: "Kill 1st",
+					beacon: true,
+					throughWall: true,
+					color: [1, 0.2, 0.2, 0.95],
+					ttlMs: 3_000,
+				},
+			],
+			1_000,
+		);
+
+		const snap1 = store.snapshot(1_500);
+		expect(snap1.entityCallouts.get(guid)?.label).toBe("Kill 1st");
+		expect(snap1.entityCallouts.get(guid)?.throughWall).toBe(true);
+
+		// Upserting a ring does not break referential identity of entityCallouts.
+		store.upsert(
+			[
+				{
+					kind: "ring",
+					id: "r1",
+					namespace: "nav",
+					position: [1, 0, -2],
+					renderScopeKey: "outdoor",
+					radius: 1,
+					spin: false,
+					color: [0, 1, 0, 1],
+					ttlMs: 5_000,
+				},
+			],
+			1_600,
+		);
+		const snap2 = store.snapshot(1_700);
+		expect(snap2.entityCallouts).toBe(snap1.entityCallouts);
+
+		// Expiring the newer entity callout falls back cleanly to the surviving older one.
+		const snap3 = store.snapshot(4_500);
+		expect(snap3.entityCallouts.get(guid)?.label).toBe("Fallback");
+		expect(snap3.entityCallouts.get(guid)?.throughWall).toBe(false);
+
+		// Exceeding MAX_API_MARKERS evicts the oldest entries deterministically.
+		const overflow: ClientApiWorldMarker[] = [];
+		for (let i = 0; i < MAX_API_MARKERS + 5; i += 1) {
+			overflow.push({
+				kind: "ring",
+				id: `bulk-${i}`,
+				namespace: "bulk",
+				position: [i, 0, 0],
+				renderScopeKey: "outdoor",
+				radius: 1,
+				spin: false,
+				color: [0.5, 0.5, 1, 1],
+				ttlMs: 20_000,
+			});
+		}
+		store.upsert(overflow, 5_000);
+		const snap4 = store.snapshot(5_100);
+		expect(snap4.markers.length + snap4.entityCallouts.size).toBe(
+			MAX_API_MARKERS,
+		);
+		expect(store.clear(null)).toBe(true);
+		expect(store.clear(null)).toBe(false);
+		expect(store.snapshot(5_200).markers).toHaveLength(0);
 	});
 });

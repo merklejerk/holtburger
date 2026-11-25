@@ -45,7 +45,8 @@ use crate::event_log::{
 };
 use crate::hooks::{
     ApiError, ApiErrorCode, ApiResult, ClientHudHook, ClientUiHook, HudScreenshotRequest,
-    HudScreenshotResponse, StaticReferenceCatalogs,
+    HudScreenshotResponse, HudWaypointView, StaticReferenceCatalogs, validate_marker_namespace,
+    validate_markers_request,
 };
 use crate::types::{
     AllegianceCommandSpec, AllegianceMemberView, AllegianceProfileView, AllegianceView, ApiCommand,
@@ -64,7 +65,8 @@ use crate::types::{
     SpellCastReadinessView, SpellCastingRouteView, SpellDefinitionView, SpellFormulaPreview,
     SpellInspectionPreview, SpellbookView, SphereSweepPreview, SquelchCharacterView,
     SquelchCommandSpec, SquelchGlobalView, SquelchView, TradeView, VendorTradeSpec, VendorView,
-    WaitPolicy, WaitUntil, WeaponProfileView, WorldCellsView, camelize_json, to_camel_json,
+    WaitPolicy, WaitUntil, WaypointView, WeaponProfileView, WorldCellsView, camelize_json,
+    to_camel_json,
 };
 
 /// Live metadata snapshot pushed whenever lifecycle, world, or character changes (e.g., for discovery).
@@ -204,6 +206,13 @@ impl LiveApiEngine {
         );
     }
 
+    /// Emits a `hud` event into the semantic log when the frontend's outdoor navigation waypoint changes.
+    pub fn notify_waypoint_changed(&self, waypoint: Option<HudWaypointView>) {
+        self.inner
+            .event_log
+            .push(ApiEventTopic::Hud, ApiEvent::WaypointChanged { waypoint });
+    }
+
     /// Emits a local `user-message` event on `automation` for `/api say` and `/bot`.
     pub fn emit_user_message(&self, text: String) -> ApiEventEnvelope {
         self.inner
@@ -280,6 +289,7 @@ impl LiveApiEngine {
             ApiQuery::Vendor => to_json(self.vendor().await?),
             ApiQuery::Social => to_json(self.social().await?),
             ApiQuery::Selection => to_json(self.selection().await?),
+            ApiQuery::Waypoint => to_json(self.waypoint().await?),
             ApiQuery::WorldCells { landblock } => to_json(self.world_cells(landblock).await?),
             ApiQuery::ContentSpells {
                 search,
@@ -717,6 +727,15 @@ impl LiveApiEngine {
         };
         Ok(SelectionView {
             guid: ui.get_selection().await?,
+        })
+    }
+
+    pub async fn waypoint(&self) -> ApiResult<WaypointView> {
+        let Some(hud) = &self.inner.hud else {
+            return Err(ApiError::unsupported("h3d.hud"));
+        };
+        Ok(WaypointView {
+            waypoint: hud.get_waypoint().await?,
         })
     }
 
@@ -1225,19 +1244,26 @@ impl LiveApiEngine {
                     .ui
                     .as_ref()
                     .ok_or_else(|| ApiError::unsupported("ui.selection"))?;
-                if guid.is_some() {
-                    let in_world = self
-                        .inner
+                if let Some(target) = guid {
+                    self.inner
                         .handle
-                        .read(|ctx| matches!(ctx.lifecycle(), ClientLifecycleState::InWorld))
+                        .read(move |ctx| -> ApiResult<()> {
+                            if !matches!(ctx.lifecycle(), ClientLifecycleState::InWorld) {
+                                return Err(ApiError::new(
+                                    ApiErrorCode::NotInWorld,
+                                    "cannot select an entity while not in-world",
+                                ));
+                            }
+                            if ctx.world().entities.get(target).is_none() {
+                                return Err(ApiError::not_found(format!(
+                                    "entity {} not found in world state",
+                                    target.0
+                                )));
+                            }
+                            Ok(())
+                        })
                         .await
-                        .map_err(|e| ApiError::runtime(e.to_string()))?;
-                    if !in_world {
-                        return Err(ApiError::new(
-                            ApiErrorCode::NotInWorld,
-                            "cannot select an entity while not in-world",
-                        ));
-                    }
+                        .map_err(|e| ApiError::runtime(e.to_string()))??;
                 }
                 let previous = ui.get_selection().await.ok().flatten();
                 ui.set_selection(guid).await?;
@@ -1252,6 +1278,9 @@ impl LiveApiEngine {
                     .ui
                     .as_ref()
                     .ok_or_else(|| ApiError::unsupported("ui.print"))?;
+                if request.message.trim().is_empty() {
+                    return Err(ApiError::invalid("ui-print `message` must not be empty"));
+                }
                 ui.print(request).await?;
                 Ok(immediate_accepted(self.inner.event_log.latest_seq()))
             }
@@ -1261,6 +1290,9 @@ impl LiveApiEngine {
                     .hud
                     .as_ref()
                     .ok_or_else(|| ApiError::unsupported("h3d.hud"))?;
+                if request.message.trim().is_empty() {
+                    return Err(ApiError::invalid("hud-toast `message` must not be empty"));
+                }
                 hud.toast(request).await?;
                 Ok(immediate_accepted(self.inner.event_log.latest_seq()))
             }
@@ -1270,6 +1302,7 @@ impl LiveApiEngine {
                     .hud
                     .as_ref()
                     .ok_or_else(|| ApiError::unsupported("h3d.hud"))?;
+                validate_markers_request(&request)?;
                 hud.upsert_markers(request).await?;
                 Ok(immediate_accepted(self.inner.event_log.latest_seq()))
             }
@@ -1279,7 +1312,44 @@ impl LiveApiEngine {
                     .hud
                     .as_ref()
                     .ok_or_else(|| ApiError::unsupported("h3d.hud"))?;
+                validate_marker_namespace(namespace.as_deref())?;
                 hud.clear_markers(namespace).await?;
+                Ok(immediate_accepted(self.inner.event_log.latest_seq()))
+            }
+            ApiCommand::HudSetWaypoint { waypoint } => {
+                let hud = self
+                    .inner
+                    .hud
+                    .as_ref()
+                    .ok_or_else(|| ApiError::unsupported("h3d.hud"))?;
+                if waypoint.is_some() {
+                    let in_world = self
+                        .inner
+                        .handle
+                        .read(|ctx| matches!(ctx.lifecycle(), ClientLifecycleState::InWorld))
+                        .await
+                        .map_err(|e| ApiError::runtime(e.to_string()))?;
+                    if !in_world {
+                        return Err(ApiError::new(
+                            ApiErrorCode::NotInWorld,
+                            "cannot set a navigation waypoint while not in-world",
+                        ));
+                    }
+                }
+                let previous = hud.get_waypoint().await.ok().flatten();
+                let next = hud.set_waypoint(waypoint).await?;
+                if previous != next {
+                    self.notify_waypoint_changed(next);
+                }
+                Ok(immediate_accepted(self.inner.event_log.latest_seq()))
+            }
+            ApiCommand::HudPlayCue { request } => {
+                let hud = self
+                    .inner
+                    .hud
+                    .as_ref()
+                    .ok_or_else(|| ApiError::unsupported("h3d.hud"))?;
+                hud.play_cue(request).await?;
                 Ok(immediate_accepted(self.inner.event_log.latest_seq()))
             }
             other => self.execute_core_command(other, wait).await,
@@ -1759,7 +1829,9 @@ impl LiveApiEngine {
             | ApiCommand::UiPrint { .. }
             | ApiCommand::HudToast { .. }
             | ApiCommand::HudUpsertMarkers { .. }
-            | ApiCommand::HudClearMarkers { .. } => {
+            | ApiCommand::HudClearMarkers { .. }
+            | ApiCommand::HudSetWaypoint { .. }
+            | ApiCommand::HudPlayCue { .. } => {
                 unreachable!("UI/HUD hook commands handled before translate_command")
             }
         })

@@ -676,4 +676,74 @@ describe("ClientEntityOverlays", () => {
 		expect(always.entities.get(22)?.presentation.nameplate).toBe("focus");
 		expect(always.entities.get(23)?.presentation.nameplate).toBe("focus");
 	});
+
+	it("admits Live API entity callouts with custom colored beacons and configurable occlusion", () => {
+		const policy = new ClientEntityOverlays({
+			tuning: TEST_TUNING,
+			initialMode: "minimal",
+		});
+		const boss = dynamicEntity(30, 0, 15, { name: "Olthoi Queen" });
+		const lever = dynamicEntity(31, 5, 15, {
+			name: "Dungeon Lever",
+			entityClass: "other",
+		});
+		const facts = new Map<number, ClientEntityFacts>([
+			[30, entityFacts(30, { targeting: "creature" })],
+			[31, entityFacts(31, { targeting: "non-creature" })],
+		]);
+		const bossColor = { red: 1, green: 0.2, blue: 0.2, alpha: 0.95 };
+		const leverColor = { red: 0.2, green: 0.9, blue: 1, alpha: 0.9 };
+		const frame = policy.composeFrame({
+			nowMs: 1_000,
+			hostNowSeconds: 100,
+			playerGuid: 1,
+			playerPose: pose(0, 0),
+			dynamicEntities: [boss, lever],
+			resolveDynamicGeneration: () => 1,
+			factsEntities: facts,
+			selectedGuid: null,
+			hoveredGuid: null,
+			activeCombatTargetGuid: null,
+			alertGuids: new Set([30]),
+			apiCallouts: new Map([
+				[
+					30,
+					{
+						guid: 30,
+						label: "Kill 1st",
+						beacon: true,
+						throughWall: true,
+						color: bossColor,
+					},
+				],
+				[
+					31,
+					{
+						guid: 31,
+						label: "Pull",
+						beacon: false,
+						throughWall: false,
+						color: leverColor,
+					},
+				],
+			]),
+			categoryVisibility: CATEGORY_VISIBILITY,
+		});
+
+		expect(frame.kind).toBe("resolved");
+		if (frame.kind !== "resolved") throw new Error("Expected resolved frame");
+		// Alert + API callout: API explicit color tints the beacon while keeping alert priority.
+		expect(frame.entities.get(30)?.presentation).toEqual({
+			occlusion: "overlay",
+			nameplate: "alert",
+			healthBar: null,
+			beacon: { kind: "custom", color: bossColor },
+		});
+		// Non-beacon, non-through-wall callout admits scene-occluded nameplate without a beacon.
+		expect(frame.entities.get(31)?.presentation).toEqual({
+			occlusion: "scene",
+			nameplate: "alert",
+			healthBar: null,
+		});
+	});
 });

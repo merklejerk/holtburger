@@ -511,6 +511,7 @@ export interface PreparedEntityBeacon {
 	readonly base: Vec3;
 	readonly height: number;
 	readonly radius: number;
+	readonly color?: EntityBeaconDrawInstance["color"];
 	readonly distanceSquared: number;
 	readonly identity: string;
 	readonly renderScopeKeys: readonly string[];
@@ -520,12 +521,14 @@ export interface MutableEntityBeaconDrawInstance extends EntityBeaconDrawInstanc
 	base: Vec3;
 	height: number;
 	radius: number;
+	color?: EntityBeaconDrawInstance["color"];
 }
 
 export interface MutableEntityBeaconScopedDrawInstance extends EntityBeaconScopedDrawInstance {
 	base: Vec3;
 	height: number;
 	radius: number;
+	color?: EntityBeaconDrawInstance["color"];
 	renderScopeKey: string;
 }
 

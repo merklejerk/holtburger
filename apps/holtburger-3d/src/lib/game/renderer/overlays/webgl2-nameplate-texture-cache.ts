@@ -11,7 +11,7 @@ import type {
 	NameplateIconRepository,
 } from "./nameplate-icon-repository";
 
-const NAMEPLATE_STYLE_REVISION = 5;
+const NAMEPLATE_STYLE_REVISION = 6;
 const MAX_NAMEPLATE_TEXTURE_BYTES = 16 * 1024 * 1024;
 const NAMEPLATE_ATLAS_HEIGHT = 2048;
 const NAMEPLATE_ATLAS_WIDTH = 2048;
@@ -271,6 +271,15 @@ export class WebGL2NameplateTextureCache {
 			visual.content.level,
 			visual.content.strikeThrough,
 			visual.content.crest ?? null,
+			visual.content.badge
+				? [
+						visual.content.badge.text,
+						visual.content.badge.color.red,
+						visual.content.badge.color.green,
+						visual.content.badge.color.blue,
+						visual.content.badge.color.alpha,
+					]
+				: null,
 			visual.content.indicators.map(({ kind, iconId }) => [kind, iconId]),
 		]);
 		categoryKeys.set(colorCategory, { generation: style.generation, key });
@@ -450,6 +459,27 @@ export class Canvas2DNameplateRasterizer implements NameplateRasterizer {
 			textWidth = Math.max(textWidth, context.measureText(row.text).width);
 			textHeight += row.style.fontSizePixels;
 		}
+		const badgeStyle = appearance.level;
+		let badgePillWidth = 0;
+		let badgePillHeight = 0;
+		let badgeBorderWidth = 0;
+		if (content.badge !== undefined) {
+			context.font = canvasFont(badgeStyle, appearance.fontFamily);
+			const badgeTextWidth = context.measureText(content.badge.text).width;
+			const padX = Math.round(badgeStyle.fontSizePixels * 0.45);
+			const padY = Math.round(badgeStyle.fontSizePixels * 0.22);
+			badgeBorderWidth = Math.max(
+				1.5,
+				Math.round(badgeStyle.fontSizePixels * 0.08),
+			);
+			badgePillWidth = badgeTextWidth + padX * 2 + badgeBorderWidth * 2;
+			badgePillHeight =
+				badgeStyle.fontSizePixels + padY * 2 + badgeBorderWidth * 2;
+		}
+		const badgeBlockHeight =
+			content.badge !== undefined
+				? badgePillHeight + appearance.lineGapPixels
+				: 0;
 		const hasAlertCrest = content.crest === "alert";
 		if (hasAlertCrest && appearance.alertCrestColor === null)
 			throw new Error(
@@ -464,13 +494,14 @@ export class Canvas2DNameplateRasterizer implements NameplateRasterizer {
 			Math.max(0, content.indicators.length - 1) *
 				appearance.indicatorGapPixels;
 		const cssWidth = Math.ceil(
-			Math.max(textWidth, iconRowWidth, crestWidth) +
+			Math.max(textWidth, badgePillWidth, iconRowWidth, crestWidth) +
 				appearance.horizontalPaddingPixels * 2,
 		);
 		const rowCount = rows.length + (content.indicators.length > 0 ? 1 : 0);
 		const cssHeight = Math.ceil(
 			appearance.verticalPaddingPixels * 2 +
 				crestBlockHeight +
+				badgeBlockHeight +
 				textHeight +
 				(content.indicators.length > 0 ? appearance.indicatorSizePixels : 0) +
 				(rowCount - 1) * appearance.lineGapPixels,
@@ -493,6 +524,35 @@ export class Canvas2DNameplateRasterizer implements NameplateRasterizer {
 		context.textAlign = "center";
 		context.textBaseline = "middle";
 		context.lineJoin = "round";
+		if (content.badge !== undefined) {
+			const pillCenterY = top + badgePillHeight / 2;
+			const innerWidth = badgePillWidth - badgeBorderWidth;
+			const innerHeight = badgePillHeight - badgeBorderWidth;
+			paintBadgePill(
+				context,
+				cssWidth / 2,
+				pillCenterY,
+				innerWidth,
+				innerHeight,
+				badgeBorderWidth,
+				canvasColor(content.badge.color),
+			);
+			// Blend badge hue toward white so saturated colors stay crisp against the dark pill fill.
+			context.fillStyle = canvasColor({
+				red: content.badge.color.red + (1 - content.badge.color.red) * 0.55,
+				green:
+					content.badge.color.green + (1 - content.badge.color.green) * 0.55,
+				blue: content.badge.color.blue + (1 - content.badge.color.blue) * 0.55,
+				alpha: content.badge.color.alpha,
+			});
+			context.strokeStyle = canvasColor(appearance.outlineColor);
+			context.font = canvasFont(badgeStyle, appearance.fontFamily);
+			context.lineWidth = Math.max(1, badgeStyle.outlineWidthPixels * 0.6);
+			if (badgeStyle.outlineWidthPixels > 0)
+				context.strokeText(content.badge.text, cssWidth / 2, pillCenterY);
+			context.fillText(content.badge.text, cssWidth / 2, pillCenterY);
+			top += badgeBlockHeight;
+		}
 		context.strokeStyle = canvasColor(appearance.outlineColor);
 		context.fillStyle = canvasColor(
 			appearance.fillColors[
@@ -564,6 +624,40 @@ function canvasFont(
 	fontFamily: string,
 ): string {
 	return `${appearance.fontStyle} ${appearance.fontWeight} ${appearance.fontSizePixels}px ${fontFamily}`;
+}
+
+function paintBadgePill(
+	context: CanvasRenderingContext2D,
+	centerX: number,
+	centerY: number,
+	width: number,
+	height: number,
+	borderWidth: number,
+	borderColor: string,
+): void {
+	const left = centerX - width / 2;
+	const top = centerY - height / 2;
+	const right = left + width;
+	const bottom = top + height;
+	const radius = Math.min(height / 2, width / 2);
+
+	context.beginPath();
+	context.moveTo(left + radius, top);
+	context.lineTo(right - radius, top);
+	context.arcTo(right, top, right, top + radius, radius);
+	context.lineTo(right, bottom - radius);
+	context.arcTo(right, bottom, right - radius, bottom, radius);
+	context.lineTo(left + radius, bottom);
+	context.arcTo(left, bottom, left, bottom - radius, radius);
+	context.lineTo(left, top + radius);
+	context.arcTo(left, top, left + radius, top, radius);
+	context.closePath();
+
+	context.fillStyle = "rgba(14, 16, 20, 0.84)";
+	context.fill();
+	context.strokeStyle = borderColor;
+	context.lineWidth = borderWidth;
+	context.stroke();
 }
 
 function canvasColor(color: NameplateColor): string {

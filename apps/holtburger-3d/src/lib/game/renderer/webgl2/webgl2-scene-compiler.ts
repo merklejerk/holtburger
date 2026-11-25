@@ -552,6 +552,7 @@ export class SceneContributionCompilerAndSelector {
 						) {
 							overlayPasses.prepareEntityBeacon(
 								nodeId,
+								tinyOverlay.beacon,
 								tinyTarget,
 								contribution,
 								prepared,
@@ -746,6 +747,7 @@ export class SceneContributionCompilerAndSelector {
 					if (overlay.beacon != null) {
 						overlayPasses.prepareEntityBeacon(
 							nodeId,
+							overlay.beacon,
 							renderTarget,
 							contribution,
 							prepared,

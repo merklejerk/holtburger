@@ -132,7 +132,10 @@
 					<ClientLiveApiBadge
 						state={liveApi.state}
 						pausePending={liveApi.pausePending}
+						audioMuted={liveApi.audioMuted}
 						onTogglePaused={liveApi.onTogglePaused}
+						onToggleAudioMuted={liveApi.onToggleAudioMuted}
+						onClearOverlays={liveApi.onClearOverlays}
 					/>
 				{/if}
 			</span>

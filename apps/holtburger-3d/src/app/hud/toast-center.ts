@@ -1,5 +1,6 @@
-/** Presentation class; progress is neutral and yields to active warnings. */
-export type HudToastTone = "progress" | "status" | "warning";
+/** Presentation class; progress is neutral and yields to active warnings and errors. */
+export type HudToastTone =
+	"progress" | "status" | "success" | "warning" | "error";
 
 /** Complete cold-UI snapshot rendered by the toast overlay. */
 export interface HudToast {
@@ -56,7 +57,11 @@ export class HudToastCenter {
 		this.#assertActive();
 		if (input.message.trim().length === 0)
 			throw new Error("Toast message must not be empty.");
-		if (this.#current?.tone === "warning" && input.tone === "progress") return;
+		if (
+			(this.#current?.tone === "warning" || this.#current?.tone === "error") &&
+			input.tone === "progress"
+		)
+			return;
 		this.#cancelExpiry();
 		const toast: HudToast = {
 			id: this.#nextId++,

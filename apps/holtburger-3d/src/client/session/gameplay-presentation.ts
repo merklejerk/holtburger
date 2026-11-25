@@ -97,7 +97,10 @@ import type {
 	WorldIndicatorInput,
 	WorldOverlayBatchInput,
 } from "../../lib/game/renderer/renderer";
-import { ApiWorldMarkersStore } from "../hud/api-markers";
+import {
+	ApiWorldMarkersStore,
+	EMPTY_API_ENTITY_CALLOUTS,
+} from "../hud/api-markers";
 import type { ClientApiWorldMarker } from "./host-contract";
 import type { MinimapFrame } from "../../app/minimap/frame";
 import type { MapEntity } from "../../lib/game/map/map-blips";
@@ -482,28 +485,35 @@ export class ClientGameplayPresentation {
 		this.#syncApiWorldOverlays(this.#activeResources?.runtime, nowMs);
 	}
 
-	/** Clear Live API 3D world markers (optionally scoped to one namespace). */
-	clearApiWorldMarkers(namespace: string | null, nowMs: number): void {
-		this.#apiMarkers.clear(namespace);
+	/** Clear Live API 3D world markers (optionally scoped to one namespace). Returns true if any were removed. */
+	clearApiWorldMarkers(namespace: string | null, nowMs: number): boolean {
+		const removed = this.#apiMarkers.clear(namespace);
 		this.#syncApiWorldOverlays(this.#activeResources?.runtime, nowMs);
+		return removed;
 	}
 
 	#clearAllApiWorldMarkers(): void {
 		this.#apiMarkers.clear(null);
 		this.#activeResources?.runtime.setWorldOverlays?.(null);
+		this.#combatOverlays.setApiEntityCallouts(
+			EMPTY_API_ENTITY_CALLOUTS,
+			this.#activeResources?.runtime,
+		);
 	}
 
 	#syncApiWorldOverlays(
 		runtime: ClientGameplayRuntime | undefined,
 		nowMs: number,
 	): void {
-		if (runtime?.setWorldOverlays === undefined) return;
 		const snapshot = this.#apiMarkers.snapshot(nowMs);
-		runtime.setWorldOverlays(
-			snapshot.markers.length === 0 && snapshot.polylines.length === 0
-				? null
-				: snapshot,
-		);
+		if (runtime?.setWorldOverlays !== undefined) {
+			runtime.setWorldOverlays(
+				snapshot.markers.length === 0 && snapshot.polylines.length === 0
+					? null
+					: snapshot,
+			);
+		}
+		this.#combatOverlays.setApiEntityCallouts(snapshot.entityCallouts, runtime);
 	}
 
 	/** Forward the cold identity level once; presentation resolves realization and pose per frame. */

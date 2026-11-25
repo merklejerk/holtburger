@@ -20,7 +20,10 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::hooks::{ApiError, HudMarkersUpsertRequest, HudToastRequest, UiPrintRequest};
+use crate::hooks::{
+    ApiError, HudMarkersUpsertRequest, HudPlayCueRequest, HudToastRequest, HudWaypointInput,
+    HudWaypointView, UiPrintRequest,
+};
 
 pub const LIVE_API_VERSION: &str = "1.0";
 /// Hard upper bound for automation `drive-pulse` commands (5 seconds).
@@ -528,6 +531,14 @@ pub struct SocialView {
 pub struct SelectionView {
     /// Selected entity GUID in decimal, or `null` when nothing is selected.
     pub guid: Option<Guid>,
+}
+
+/// Active outdoor navigation waypoint in the frontend HUD (`GET /v1/hud/waypoint`, h3d only).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct WaypointView {
+    /// Active outdoor waypoint, or `null` when no waypoint is set.
+    pub waypoint: Option<HudWaypointView>,
 }
 
 /// Known spells and active cast target (`GET /v1/self/spells`).
@@ -1201,7 +1212,7 @@ pub enum ApiCommand {
         #[serde(flatten)]
         request: HudToastRequest,
     },
-    /// Upserts keyed 3D world-space overlay markers (rings or polylines) with TTL (h3d only).
+    /// Upserts keyed 3D world-space overlay markers (rings, polylines, or entity callouts) with TTL (h3d only).
     #[serde(rename_all = "camelCase")]
     HudUpsertMarkers {
         #[serde(flatten)]
@@ -1212,6 +1223,19 @@ pub enum ApiCommand {
     HudClearMarkers {
         #[serde(default)]
         namespace: Option<String>,
+    },
+    /// Sets the active outdoor navigation waypoint on h3d's compass, minimap, and world map, or
+    /// clears it when `waypoint` is `null` or omitted (h3d only).
+    #[serde(rename_all = "camelCase")]
+    HudSetWaypoint {
+        #[serde(default)]
+        waypoint: Option<HudWaypointInput>,
+    },
+    /// Plays a non-diegetic synthesized UI attention chime in h3d (respects mute and rate-limiting).
+    #[serde(rename_all = "camelCase")]
+    HudPlayCue {
+        #[serde(flatten)]
+        request: HudPlayCueRequest,
     },
 }
 
@@ -1337,6 +1361,7 @@ pub enum ApiQuery {
     Vendor,
     Social,
     Selection,
+    Waypoint,
     #[serde(rename_all = "camelCase")]
     WorldCells {
         #[serde(default)]
@@ -1383,6 +1408,7 @@ pub enum ApiEventTopic {
     Social,
     Movement,
     Selection,
+    Hud,
     Automation,
 }
 
@@ -1410,6 +1436,7 @@ impl ApiEventTopic {
             "social" => Some(Self::Social),
             "movement" => Some(Self::Movement),
             "selection" => Some(Self::Selection),
+            "hud" => Some(Self::Hud),
             "automation" => Some(Self::Automation),
             _ => None,
         }
@@ -1629,6 +1656,11 @@ pub enum ApiEvent {
     #[serde(rename_all = "camelCase")]
     SelectionChanged {
         guid: Option<Guid>,
+    },
+    /// Emitted on `hud` when h3d's active outdoor navigation waypoint changes or is cleared.
+    #[serde(rename_all = "camelCase")]
+    WaypointChanged {
+        waypoint: Option<HudWaypointView>,
     },
     #[serde(rename_all = "camelCase")]
     AutomationPausedChanged {

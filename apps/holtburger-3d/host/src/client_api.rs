@@ -8,10 +8,13 @@ use std::time::Duration;
 use async_trait::async_trait;
 use base64::Engine as _;
 use holtburger_common::Guid;
+use holtburger_common::position::{MAP_DEGREE_ORIGIN, METERS_PER_MAP_DEGREE, WorldPosition};
 use holtburger_live_api::hooks::{
-    ApiError, ApiErrorCode, ApiResult, ClientHudHook, ClientUiHook, HudMarkerGeometry,
-    HudMarkerSpec, HudMarkersUpsertRequest, HudScreenshotRequest, HudScreenshotResponse,
-    HudToastLevel, HudToastRequest, UiPrintRequest, UiPrintStyle,
+    ApiError, ApiErrorCode, ApiResult, ClientHudHook, ClientUiHook, HudAudioCue, HudMarkerGeometry,
+    HudMarkerSpec, HudMarkersUpsertRequest, HudPlayCueRequest, HudScreenshotRequest,
+    HudScreenshotResponse, HudToastLevel, HudToastRequest, HudWaypointInput, HudWaypointView,
+    MAX_MARKER_LABEL_CHARS, MAX_WAYPOINT_LABEL_CHARS, UiPrintRequest, UiPrintStyle,
+    resolve_waypoint_input, sanitize_single_line_label, validate_marker_spec,
 };
 use serde::Serialize;
 use tokio::sync::oneshot;
@@ -29,7 +32,18 @@ pub struct ClientApiStateWire {
     pub endpoint: Option<String>,
 }
 
-/// Projected 3D world marker ready for `WebGL2WorldMarkerPass` or `WebGL2WorldTrajectoryPass`.
+/// Projected outdoor navigation waypoint forwarded to the renderer's waypoint owner.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientApiWaypointWire {
+    pub scene_x: f32,
+    pub scene_z: f32,
+    pub coords: String,
+    pub label: String,
+}
+
+/// Projected 3D world marker ready for `WebGL2WorldMarkerPass`, `WebGL2WorldTrajectoryPass`,
+/// or entity overlay callouts.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(
     tag = "kind",
@@ -52,6 +66,16 @@ pub enum ClientApiWorldMarkerWire {
         namespace: Option<String>,
         points: Vec<[f32; 3]>,
         render_scope_keys: Vec<String>,
+        color: [f32; 4],
+        ttl_ms: u32,
+    },
+    Entity {
+        id: String,
+        namespace: Option<String>,
+        guid: Guid,
+        label: Option<String>,
+        beacon: bool,
+        through_wall: bool,
         color: [f32; 4],
         ttl_ms: u32,
     },
@@ -81,6 +105,12 @@ pub enum ClientApiHudEventWire {
     },
     ClearMarkers {
         namespace: Option<String>,
+    },
+    SetWaypoint {
+        waypoint: Option<ClientApiWaypointWire>,
+    },
+    PlayCue {
+        cue: HudAudioCue,
     },
     CaptureScreenshot {
         request_id: String,
@@ -159,52 +189,96 @@ impl H3dScreenshotBroker {
     }
 }
 
-/// Shared selection mirror synchronized between the h3d renderer and `LiveApiEngine`.
-#[derive(Clone, Default)]
-pub struct H3dSelectionState {
-    selected: Arc<Mutex<Option<Guid>>>,
+#[derive(Default)]
+struct FrontendMirrorInner {
+    selection: Option<Guid>,
+    waypoint: Option<HudWaypointView>,
 }
 
-impl H3dSelectionState {
-    pub fn get(&self) -> Option<Guid> {
-        *self
-            .selected
+/// Session-scoped mirror of renderer-owned UI state (`selection` and outdoor `waypoint`)
+/// synchronized between the h3d renderer and `LiveApiEngine`.
+#[derive(Clone, Default)]
+pub struct H3dFrontendMirror {
+    inner: Arc<Mutex<FrontendMirrorInner>>,
+}
+
+impl H3dFrontendMirror {
+    pub fn get_selection(&self) -> Option<Guid> {
+        self.inner
             .lock()
-            .expect("selection state mutex poisoned")
+            .expect("frontend mirror mutex poisoned")
+            .selection
     }
 
-    pub fn set(&self, guid: Option<Guid>) -> bool {
-        let mut guard = self
-            .selected
-            .lock()
-            .expect("selection state mutex poisoned");
-        if *guard == guid {
+    pub fn set_selection(&self, guid: Option<Guid>) -> bool {
+        let mut guard = self.inner.lock().expect("frontend mirror mutex poisoned");
+        if guard.selection == guid {
             return false;
         }
-        *guard = guid;
+        guard.selection = guid;
         true
     }
+
+    pub fn get_waypoint(&self) -> Option<HudWaypointView> {
+        self.inner
+            .lock()
+            .expect("frontend mirror mutex poisoned")
+            .waypoint
+            .clone()
+    }
+
+    pub fn set_waypoint(&self, waypoint: Option<HudWaypointView>) -> bool {
+        let mut guard = self.inner.lock().expect("frontend mirror mutex poisoned");
+        if guard.waypoint == waypoint {
+            return false;
+        }
+        guard.waypoint = waypoint;
+        true
+    }
+
+    /// Clears all mirrored session state symmetrically on disconnect or shutdown.
+    pub fn clear(&self) {
+        let mut guard = self.inner.lock().expect("frontend mirror mutex poisoned");
+        guard.selection = None;
+        guard.waypoint = None;
+    }
+}
+
+/// Converts a renderer-reported outdoor `SceneMapPoint` (`scene_x`, `scene_z`) and display label
+/// into a canonical `HudWaypointView`.
+pub fn waypoint_from_scene_point(
+    scene_x: f32,
+    scene_z: f32,
+    label: &str,
+) -> Option<HudWaypointView> {
+    if !scene_x.is_finite() || !scene_z.is_finite() {
+        return None;
+    }
+    let lon = (scene_x / METERS_PER_MAP_DEGREE) - MAP_DEGREE_ORIGIN;
+    let lat = (-scene_z / METERS_PER_MAP_DEGREE) - MAP_DEGREE_ORIGIN;
+    let pos = WorldPosition::from_outdoor_degrees(lat, lon, 0.0)?;
+    let custom_label = sanitize_single_line_label(Some(label), MAX_WAYPOINT_LABEL_CHARS, "label")
+        .ok()
+        .flatten();
+    HudWaypointView::from_outdoor_position(pos, custom_label)
 }
 
 /// `ClientUiHook` implementation bridging `ui.selection` and `ui.print` to h3d's renderer.
 pub struct H3dUiHook {
-    selection: H3dSelectionState,
+    mirror: H3dFrontendMirror,
     event_sink: Arc<dyn ClientEventSink>,
 }
 
 impl H3dUiHook {
-    pub fn new(selection: H3dSelectionState, event_sink: Arc<dyn ClientEventSink>) -> Self {
-        Self {
-            selection,
-            event_sink,
-        }
+    pub fn new(mirror: H3dFrontendMirror, event_sink: Arc<dyn ClientEventSink>) -> Self {
+        Self { mirror, event_sink }
     }
 }
 
 #[async_trait]
 impl ClientUiHook for H3dUiHook {
     async fn get_selection(&self) -> ApiResult<Option<Guid>> {
-        Ok(self.selection.get())
+        Ok(self.mirror.get_selection())
     }
 
     async fn set_selection(&self, guid: Option<Guid>) -> ApiResult<()> {
@@ -213,7 +287,7 @@ impl ClientUiHook for H3dUiHook {
                 ClientApiHudEventWire::SelectEntity { guid },
             ))
             .map_err(|e| ApiError::runtime(e.to_string()))?;
-        self.selection.set(guid);
+        self.mirror.set_selection(guid);
         Ok(())
     }
 
@@ -227,15 +301,22 @@ impl ClientUiHook for H3dUiHook {
     }
 }
 
-/// `ClientHudHook` implementation bridging `h3d.hud` (toasts, 3D markers, screenshots) to h3d.
+/// `ClientHudHook` implementation bridging `h3d.hud` (toasts, 3D markers, waypoints, audio cues,
+/// and screenshots) to h3d.
 pub struct H3dHudHook {
+    mirror: H3dFrontendMirror,
     event_sink: Arc<dyn ClientEventSink>,
     screenshots: H3dScreenshotBroker,
 }
 
 impl H3dHudHook {
-    pub fn new(event_sink: Arc<dyn ClientEventSink>, screenshots: H3dScreenshotBroker) -> Self {
+    pub fn new(
+        mirror: H3dFrontendMirror,
+        event_sink: Arc<dyn ClientEventSink>,
+        screenshots: H3dScreenshotBroker,
+    ) -> Self {
         Self {
+            mirror,
             event_sink,
             screenshots,
         }
@@ -270,6 +351,46 @@ impl ClientHudHook for H3dHudHook {
             .publish_client_event(ClientHostEvent::ApiHud(
                 ClientApiHudEventWire::ClearMarkers { namespace },
             ))
+            .map_err(|e| ApiError::runtime(e.to_string()))
+    }
+
+    async fn get_waypoint(&self) -> ApiResult<Option<HudWaypointView>> {
+        Ok(self.mirror.get_waypoint())
+    }
+
+    async fn set_waypoint(
+        &self,
+        waypoint: Option<HudWaypointInput>,
+    ) -> ApiResult<Option<HudWaypointView>> {
+        let (view, wire) = match waypoint {
+            Some(input) => {
+                let view = resolve_waypoint_input(&input)?;
+                let (scene_pos, _) = world_position_to_scene_point(&view.position)
+                    .map_err(|e| ApiError::invalid(e.to_string()))?;
+                let wire = ClientApiWaypointWire {
+                    scene_x: scene_pos[0],
+                    scene_z: scene_pos[2],
+                    coords: view.coords.clone(),
+                    label: view.label.clone(),
+                };
+                (Some(view), Some(wire))
+            }
+            None => (None, None),
+        };
+        self.event_sink
+            .publish_client_event(ClientHostEvent::ApiHud(
+                ClientApiHudEventWire::SetWaypoint { waypoint: wire },
+            ))
+            .map_err(|e| ApiError::runtime(e.to_string()))?;
+        self.mirror.set_waypoint(view.clone());
+        Ok(view)
+    }
+
+    async fn play_cue(&self, req: HudPlayCueRequest) -> ApiResult<()> {
+        self.event_sink
+            .publish_client_event(ClientHostEvent::ApiHud(ClientApiHudEventWire::PlayCue {
+                cue: req.cue,
+            }))
             .map_err(|e| ApiError::runtime(e.to_string()))
     }
 
@@ -313,6 +434,8 @@ impl ClientHudHook for H3dHudHook {
 }
 
 pub fn project_world_marker(marker: HudMarkerSpec) -> ApiResult<ClientApiWorldMarkerWire> {
+    validate_marker_spec(&marker)?;
+    let color = marker.color;
     let ttl_ms = marker.ttl_ms.clamp(1_000, 300_000);
     match marker.geometry {
         HudMarkerGeometry::Ring {
@@ -320,11 +443,6 @@ pub fn project_world_marker(marker: HudMarkerSpec) -> ApiResult<ClientApiWorldMa
             radius,
             spin,
         } => {
-            if !radius.is_finite() || radius <= 0.0 {
-                return Err(ApiError::invalid(
-                    "marker radius must be finite and positive",
-                ));
-            }
             let (scene_pos, render_scope_key) = world_position_to_scene_point(&position)
                 .map_err(|e| ApiError::invalid(e.to_string()))?;
             Ok(ClientApiWorldMarkerWire::Ring {
@@ -334,16 +452,11 @@ pub fn project_world_marker(marker: HudMarkerSpec) -> ApiResult<ClientApiWorldMa
                 render_scope_key,
                 radius: radius.min(25.0),
                 spin,
-                color: marker.color,
+                color,
                 ttl_ms,
             })
         }
         HudMarkerGeometry::Polyline { points } => {
-            if points.len() < 2 {
-                return Err(ApiError::invalid(
-                    "polyline marker requires at least 2 points",
-                ));
-            }
             let mut scene_points = Vec::with_capacity(points.len());
             let mut scopes = Vec::with_capacity(points.len());
             for point in &points {
@@ -357,7 +470,26 @@ pub fn project_world_marker(marker: HudMarkerSpec) -> ApiResult<ClientApiWorldMa
                 namespace: marker.namespace,
                 points: scene_points,
                 render_scope_keys: scopes,
-                color: marker.color,
+                color,
+                ttl_ms,
+            })
+        }
+        HudMarkerGeometry::Entity {
+            guid,
+            label,
+            beacon,
+            through_wall,
+        } => {
+            let label =
+                sanitize_single_line_label(label.as_deref(), MAX_MARKER_LABEL_CHARS, "label")?;
+            Ok(ClientApiWorldMarkerWire::Entity {
+                id: marker.id,
+                namespace: marker.namespace,
+                guid,
+                label,
+                beacon,
+                through_wall,
+                color,
                 ttl_ms,
             })
         }
@@ -383,18 +515,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn selection_hook_and_world_marker_projection_round_trip() {
+    async fn frontend_mirror_markers_waypoints_and_cues_round_trip() {
         let sink = Arc::new(CaptureSink::default());
-        let selection = H3dSelectionState::default();
-        let ui = H3dUiHook::new(selection.clone(), sink.clone());
-        let hud = H3dHudHook::new(sink.clone(), H3dScreenshotBroker::default());
+        let mirror = H3dFrontendMirror::default();
+        let ui = H3dUiHook::new(mirror.clone(), sink.clone());
+        let hud = H3dHudHook::new(mirror.clone(), sink.clone(), H3dScreenshotBroker::default());
 
         assert_eq!(ui.get_selection().await.unwrap(), None);
-        assert!(selection.set(Some(Guid(0x8000_0010))));
+        assert!(mirror.set_selection(Some(Guid(0x8000_0010))));
         assert_eq!(ui.get_selection().await.unwrap(), Some(Guid(0x8000_0010)));
 
         ui.set_selection(Some(Guid(0x8000_0020))).await.unwrap();
-        assert_eq!(selection.get(), Some(Guid(0x8000_0020)));
+        assert_eq!(mirror.get_selection(), Some(Guid(0x8000_0020)));
 
         // Outdoor WorldPosition -> canonical scene coordinates + "outdoor" scope.
         let outdoor = WorldPosition::from_outdoor_frame(
@@ -431,16 +563,91 @@ mod tests {
                         points: vec![outdoor, interior],
                     },
                 },
+                HudMarkerSpec {
+                    id: "e1".into(),
+                    namespace: Some("combat".into()),
+                    color: [1.0, 0.25, 0.2, 0.95],
+                    ttl_ms: 10_000,
+                    geometry: HudMarkerGeometry::Entity {
+                        guid: Guid(0x8000_0099),
+                        label: Some("  Kill 1st  ".into()),
+                        beacon: true,
+                        through_wall: false,
+                    },
+                },
             ],
         })
         .await
         .unwrap();
 
+        // Reject out-of-range RGBA and null entity GUID before reaching renderer.
+        assert!(
+            project_world_marker(HudMarkerSpec {
+                id: "bad-color".into(),
+                namespace: None,
+                color: [1.2, 0.0, 0.0, 1.0],
+                ttl_ms: 5_000,
+                geometry: HudMarkerGeometry::Entity {
+                    guid: Guid(0x8000_0099),
+                    label: None,
+                    beacon: true,
+                    through_wall: true,
+                },
+            })
+            .is_err()
+        );
+        assert!(
+            project_world_marker(HudMarkerSpec {
+                id: "null-guid".into(),
+                namespace: None,
+                color: [1.0, 0.0, 0.0, 1.0],
+                ttl_ms: 5_000,
+                geometry: HudMarkerGeometry::Entity {
+                    guid: Guid(0),
+                    label: None,
+                    beacon: true,
+                    through_wall: true,
+                },
+            })
+            .is_err()
+        );
+
+        // Waypoint set, readback, round-trip scene conversion, clear, and mirror.clear().
+        let wp = hud
+            .set_waypoint(Some(HudWaypointInput {
+                coords: Some("42.3N, 15.8E".into()),
+                position: None,
+                label: Some("Holtburg".into()),
+            }))
+            .await
+            .unwrap()
+            .expect("waypoint set");
+        assert_eq!(wp.coords, "42.3N, 15.8E");
+        assert_eq!(wp.label, "Holtburg");
+        assert_eq!(hud.get_waypoint().await.unwrap(), Some(wp.clone()));
+
+        // Indoor waypoint is rejected.
+        assert!(
+            hud.set_waypoint(Some(HudWaypointInput {
+                coords: None,
+                position: Some(interior),
+                label: None,
+            }))
+            .await
+            .is_err()
+        );
+
+        hud.play_cue(HudPlayCueRequest {
+            cue: HudAudioCue::Alert,
+        })
+        .await
+        .unwrap();
+
         let events = sink.events.lock().unwrap();
-        assert_eq!(events.len(), 2);
+        assert_eq!(events.len(), 4);
         match &events[1] {
             ClientHostEvent::ApiHud(ClientApiHudEventWire::UpsertMarkers { markers }) => {
-                assert_eq!(markers.len(), 2);
+                assert_eq!(markers.len(), 3);
                 match &markers[0] {
                     ClientApiWorldMarkerWire::Ring {
                         position,
@@ -460,8 +667,46 @@ mod tests {
                     }
                     other => panic!("expected polyline, got {other:?}"),
                 }
+                match &markers[2] {
+                    ClientApiWorldMarkerWire::Entity {
+                        guid,
+                        label,
+                        beacon,
+                        through_wall,
+                        ..
+                    } => {
+                        assert_eq!(*guid, Guid(0x8000_0099));
+                        assert_eq!(label.as_deref(), Some("Kill 1st"));
+                        assert!(*beacon);
+                        assert!(!*through_wall);
+                    }
+                    other => panic!("expected entity, got {other:?}"),
+                }
             }
             other => panic!("expected UpsertMarkers, got {other:?}"),
         }
+        match &events[2] {
+            ClientHostEvent::ApiHud(ClientApiHudEventWire::SetWaypoint {
+                waypoint: Some(wire),
+            }) => {
+                let round_tripped =
+                    waypoint_from_scene_point(wire.scene_x, wire.scene_z, &wire.label)
+                        .expect("round trip scene point");
+                assert_eq!(round_tripped.coords, "42.3N, 15.8E");
+                assert_eq!(round_tripped.label, "Holtburg");
+            }
+            other => panic!("expected SetWaypoint, got {other:?}"),
+        }
+        assert!(matches!(
+            &events[3],
+            ClientHostEvent::ApiHud(ClientApiHudEventWire::PlayCue {
+                cue: HudAudioCue::Alert
+            })
+        ));
+        drop(events);
+
+        mirror.clear();
+        assert_eq!(mirror.get_selection(), None);
+        assert_eq!(mirror.get_waypoint(), None);
     }
 }

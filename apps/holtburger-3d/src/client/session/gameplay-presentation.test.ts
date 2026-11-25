@@ -31,7 +31,10 @@ import {
 import { AABB3, Mat4, Vec3 } from "../../lib/game/math/types";
 import type { MapTerrainSource } from "../../lib/game/map/map-renderer";
 import type { ScenePlacement, SceneResidency } from "../../lib/game/scene";
-import type { NameplateDecoration } from "../../lib/game/systems/dynamic-presentation-source";
+import {
+	isEmptyNameplateDecoration,
+	type NameplateDecoration,
+} from "../../lib/game/systems/dynamic-presentation-source";
 import { createLandblockWorldOrigin } from "../../lib/game/landblocks";
 import type {
 	ClientAttackProfile,
@@ -2479,12 +2482,7 @@ class FakePresentationRuntime implements ClientGameplayRuntime {
 		guid: number,
 		decoration: NameplateDecoration,
 	): void {
-		if (
-			decoration.indicators.length === 0 &&
-			!decoration.strikeThrough &&
-			decoration.nameColor === undefined &&
-			decoration.crest === undefined
-		)
+		if (isEmptyNameplateDecoration(decoration))
 			this.nameplateDecoration.delete(guid);
 		else this.nameplateDecoration.set(guid, decoration);
 	}

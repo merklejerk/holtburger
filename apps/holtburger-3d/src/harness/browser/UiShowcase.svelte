@@ -1220,7 +1220,12 @@
 		const summonOwner = new ClientSummonPresentation(
 			interactionLifecycle,
 			(message) => {
-				appendChat({ kind: "combat-notice", message });
+				appendChat({
+					kind: "local-notice",
+					tone: "combat",
+					filterTag: "combat",
+					message,
+				});
 				inventoryToasts.publish({ message, tone: "status" });
 			},
 			(error) => {

@@ -1,3 +1,4 @@
+import type { NormalizedRgbaColor } from "../../../frontend-color";
 import type { Vec3 } from "../../math/types";
 import {
 	linkWebGL2Program,
@@ -15,7 +16,8 @@ const BASE_ATTRIBUTE = 1;
 const HEIGHT_ATTRIBUTE = 2;
 const RADIUS_ATTRIBUTE = 3;
 const PORTAL_DOMAIN_ATTRIBUTE = 4;
-const INSTANCE_FLOATS = 6;
+const COLOR_ATTRIBUTE = 5;
+const INSTANCE_FLOATS = 10;
 const INSTANCE_STRIDE_BYTES = INSTANCE_FLOATS * Float32Array.BYTES_PER_ELEMENT;
 const CYLINDER_SEGMENT_COUNT = 32;
 export const BEACON_CYLINDER_VERTEX_COUNT = CYLINDER_SEGMENT_COUNT * 6;
@@ -26,6 +28,7 @@ const INSTANCE_ATTRIBUTES = [
 	[HEIGHT_ATTRIBUTE, 1, 3],
 	[RADIUS_ATTRIBUTE, 1, 4],
 	[PORTAL_DOMAIN_ATTRIBUTE, 1, 5],
+	[COLOR_ATTRIBUTE, 4, 6],
 ] as const;
 
 /** One depth-tested in-scene 3D hollow cylinder beacon submitted to the GPU pass. */
@@ -36,6 +39,8 @@ export interface EntityBeaconDrawInstance {
 	readonly height: number;
 	/** Horizontal cylinder and glowing base-disc radius in world meters. */
 	readonly radius: number;
+	/** Optional per-instance RGBA color override; null/undefined uses the theme alert color. */
+	readonly color?: NormalizedRgbaColor | null;
 }
 
 export interface EntityBeaconScopedDrawInstance extends EntityBeaconDrawInstance {
@@ -62,8 +67,7 @@ interface BeaconCylinderProgram {
 		readonly cameraRight: WebGLUniformLocation;
 		readonly viewportSize: WebGLUniformLocation;
 		readonly minRadiusPx: WebGLUniformLocation;
-		readonly color: WebGLUniformLocation;
-		readonly sparkleColor: WebGLUniformLocation;
+		readonly sparkleAlpha: WebGLUniformLocation;
 		readonly shimmer: WebGLUniformLocation;
 	};
 }
@@ -72,7 +76,6 @@ interface BeaconBaseProgram {
 	readonly program: WebGLProgram;
 	readonly uniforms: {
 		readonly clipFromAnchor: WebGLUniformLocation;
-		readonly color: WebGLUniformLocation;
 	};
 }
 
@@ -205,6 +208,7 @@ export class WebGL2EntityBeaconPass {
 			this.#instanceScratch = new Float32Array(floatCount);
 		let offset = 0;
 		for (const instance of instances) {
+			const instanceColor = instance.color ?? color;
 			this.#instanceScratch[offset] = instance.base.x;
 			this.#instanceScratch[offset + 1] = instance.base.y;
 			this.#instanceScratch[offset + 2] = instance.base.z;
@@ -214,6 +218,10 @@ export class WebGL2EntityBeaconPass {
 				routing && "renderScopeKey" in instance
 					? routing.deferredRenderDomainOrdinal(instance.renderScopeKey)
 					: 0;
+			this.#instanceScratch[offset + 6] = instanceColor.red;
+			this.#instanceScratch[offset + 7] = instanceColor.green;
+			this.#instanceScratch[offset + 8] = instanceColor.blue;
+			this.#instanceScratch[offset + 9] = instanceColor.alpha;
 			offset += INSTANCE_FLOATS;
 		}
 
@@ -249,13 +257,6 @@ export class WebGL2EntityBeaconPass {
 			baseProgram.uniforms.clipFromAnchor,
 			false,
 			context.clipFromAnchor,
-		);
-		gl.uniform4f(
-			baseProgram.uniforms.color,
-			color.red,
-			color.green,
-			color.blue,
-			color.alpha,
 		);
 		gl.drawArraysInstanced(
 			gl.TRIANGLES,
@@ -296,20 +297,7 @@ export class WebGL2EntityBeaconPass {
 			cylinderProgram.uniforms.minRadiusPx,
 			context.settings.minimumRadiusCssPixels * context.renderScale,
 		);
-		gl.uniform4f(
-			cylinderProgram.uniforms.color,
-			color.red,
-			color.green,
-			color.blue,
-			color.alpha,
-		);
-		gl.uniform4f(
-			cylinderProgram.uniforms.sparkleColor,
-			sparkleColor.red,
-			sparkleColor.green,
-			sparkleColor.blue,
-			sparkleColor.alpha,
-		);
+		gl.uniform1f(cylinderProgram.uniforms.sparkleAlpha, sparkleColor.alpha);
 		gl.uniform2f(
 			cylinderProgram.uniforms.shimmer,
 			shimmerRate > 0 ? 1 : 0,
@@ -377,6 +365,7 @@ layout(location = ${BASE_ATTRIBUTE}) in vec3 aBase;
 layout(location = ${HEIGHT_ATTRIBUTE}) in float aHeight;
 layout(location = ${RADIUS_ATTRIBUTE}) in float aRadius;
 layout(location = ${PORTAL_DOMAIN_ATTRIBUTE}) in float aPortalRenderDomain;
+layout(location = ${COLOR_ATTRIBUTE}) in vec4 aColor;
 uniform mat4 uBeaconClipFromAnchor;
 uniform vec3 uCameraRight;
 uniform vec2 uViewportSize;
@@ -387,6 +376,7 @@ out float vHeightFraction;
 out float vHeightMeters;
 flat out float vRadius;
 flat out uint vPortalRenderDomain;
+flat out vec4 vColor;
 void main() {
 	vec3 radial = vec3(aVertex.x, 0.0, aVertex.z);
 	float heightMeters = aVertex.y * aHeight;
@@ -412,14 +402,14 @@ void main() {
 	vHeightMeters = heightMeters;
 	vRadius = aRadius;
 	vPortalRenderDomain = uint(aPortalRenderDomain);
+	vColor = aColor;
 }`;
 	const fragment = `#version 300 es
 precision highp float;
 precision highp int;
 ${portal ? PORTAL_DEFERRED_VISIBILITY_INSTANCE_GLSL : ""}
 uniform vec3 uCameraPosition;
-uniform vec4 uColor;
-uniform vec4 uSparkleColor;
+uniform float uSparkleAlpha;
 uniform vec2 uShimmer;
 in vec3 vNormal;
 in vec3 vWorldPosition;
@@ -427,6 +417,7 @@ in float vHeightFraction;
 in float vHeightMeters;
 flat in float vRadius;
 flat in uint vPortalRenderDomain;
+flat in vec4 vColor;
 out vec4 outColor;
 
 vec3 hash32(vec2 p) {
@@ -483,7 +474,7 @@ void main() {
 	float wave = 0.5 + 0.5 * sin((vHeightMeters * 0.5 - phase) * 6.2831853);
 	float shimmer = mix(1.0, 0.85 + 0.25 * wave, animate);
 	float sparkleAlpha = 0.0;
-	if (uSparkleColor.a > 0.001) {
+	if (uSparkleAlpha > 0.001) {
 		float angleUnit = fract(atan(normal.z, normal.x) / 6.2831853 + 1.0);
 		float baseLaunchFade = smoothstep(0.05, 0.3, vHeightMeters);
 		float primarySparkles = sparkleLayer(
@@ -509,15 +500,17 @@ void main() {
 			0.35
 		);
 		float sparkle = clamp(primarySparkles + fineMotes * 0.75, 0.0, 1.0) * verticalFade * baseLaunchFade;
-		sparkleAlpha = sparkle * uSparkleColor.a;
+		sparkleAlpha = sparkle * uSparkleAlpha * vColor.a;
 	}
-	float wallAlpha = (wallPresence * verticalFade * shimmer + baseRingBoost * 0.65) * 0.62 * uColor.a;
+	float wallAlpha = (wallPresence * verticalFade * shimmer + baseRingBoost * 0.65) * 0.62 * vColor.a;
 	float alpha = clamp(wallAlpha + sparkleAlpha * (1.0 - wallAlpha), 0.0, 0.98);
 	if (alpha <= 0.01) discard;
 	${portal ? "if (!portalDeferredFragmentVisible(vPortalRenderDomain)) discard;" : ""}
-	vec3 wallRgb = mix(uColor.rgb, vec3(1.0), clamp(rim * 0.35 + baseRingBoost * 0.55, 0.0, 1.0));
+	vec3 wallRgb = mix(vColor.rgb, vec3(1.0), clamp(rim * 0.35 + baseRingBoost * 0.55, 0.0, 1.0));
+	// Matches --ui-entity-alert-beacon-sparkle-color: 40% beacon color mixed with 60% white.
+	vec3 sparkleRgb = mix(vColor.rgb, vec3(1.0), 0.6);
 	float sparkleBlend = sparkleAlpha / max(wallAlpha + sparkleAlpha, 1e-4);
-	vec3 rgb = mix(wallRgb, uSparkleColor.rgb, sparkleBlend);
+	vec3 rgb = mix(wallRgb, sparkleRgb, sparkleBlend);
 	outColor = vec4(rgb, alpha);
 }`;
 	const program = linkWebGL2Program(
@@ -539,8 +532,7 @@ void main() {
 			cameraRight: requireWebGL2Uniform(gl, program, "uCameraRight"),
 			viewportSize: requireWebGL2Uniform(gl, program, "uViewportSize"),
 			minRadiusPx: requireWebGL2Uniform(gl, program, "uMinRadiusPx"),
-			color: requireWebGL2Uniform(gl, program, "uColor"),
-			sparkleColor: requireWebGL2Uniform(gl, program, "uSparkleColor"),
+			sparkleAlpha: requireWebGL2Uniform(gl, program, "uSparkleAlpha"),
 			shimmer: requireWebGL2Uniform(gl, program, "uShimmer"),
 		},
 	};
@@ -556,32 +548,35 @@ layout(location = ${VERTEX_ATTRIBUTE}) in vec3 aVertex;
 layout(location = ${BASE_ATTRIBUTE}) in vec3 aBase;
 layout(location = ${RADIUS_ATTRIBUTE}) in float aRadius;
 layout(location = ${PORTAL_DOMAIN_ATTRIBUTE}) in float aPortalRenderDomain;
+layout(location = ${COLOR_ATTRIBUTE}) in vec4 aColor;
 uniform mat4 uBeaconClipFromAnchor;
 out vec2 vLocalXZ;
 flat out uint vPortalRenderDomain;
+flat out vec4 vColor;
 void main() {
 	vec3 worldPoint = aBase + vec3(aVertex.x, 0.0, aVertex.z) * aRadius;
 	gl_Position = uBeaconClipFromAnchor * vec4(worldPoint, 1.0);
 	vLocalXZ = aVertex.xz;
 	vPortalRenderDomain = uint(aPortalRenderDomain);
+	vColor = aColor;
 }`;
 	const fragment = `#version 300 es
 precision highp float;
 precision highp int;
 ${portal ? PORTAL_DEFERRED_VISIBILITY_INSTANCE_GLSL : ""}
-uniform vec4 uColor;
 in vec2 vLocalXZ;
 flat in uint vPortalRenderDomain;
+flat in vec4 vColor;
 out vec4 outColor;
 void main() {
 	float r = length(vLocalXZ);
 	if (r > 1.0) discard;
 	float ring = smoothstep(0.82, 0.94, r) * (1.0 - smoothstep(0.96, 1.0, r));
 	float innerGlow = (0.16 + 0.24 * (1.0 - r * r)) * smoothstep(1.0, 0.84, r);
-	float alpha = clamp((ring * 0.9 + innerGlow) * uColor.a, 0.0, 1.0);
+	float alpha = clamp((ring * 0.9 + innerGlow) * vColor.a, 0.0, 1.0);
 	if (alpha <= 0.01) discard;
 	${portal ? "if (!portalDeferredFragmentVisible(vPortalRenderDomain)) discard;" : ""}
-	vec3 rgb = mix(uColor.rgb, vec3(1.0), clamp(ring * 0.55 + (1.0 - r) * 0.2, 0.0, 1.0));
+	vec3 rgb = mix(vColor.rgb, vec3(1.0), clamp(ring * 0.55 + (1.0 - r) * 0.2, 0.0, 1.0));
 	outColor = vec4(rgb, alpha);
 }`;
 	const program = linkWebGL2Program(
@@ -599,7 +594,6 @@ void main() {
 				program,
 				"uBeaconClipFromAnchor",
 			),
-			color: requireWebGL2Uniform(gl, program, "uColor"),
 		},
 	};
 }

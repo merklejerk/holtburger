@@ -65,6 +65,19 @@ export function normalizedRgbaColor(color: HexRgbaColor): NormalizedRgbaColor {
 	};
 }
 
+/** Structural equality for normalized straight-alpha RGBA colors. */
+export function rgbaColorsEqual(
+	left: NormalizedRgbaColor,
+	right: NormalizedRgbaColor,
+): boolean {
+	return (
+		left.red === right.red &&
+		left.green === right.green &&
+		left.blue === right.blue &&
+		left.alpha === right.alpha
+	);
+}
+
 function byte(color: string, offset: number): number {
 	return Number.parseInt(color.slice(offset, offset + 2), 16);
 }

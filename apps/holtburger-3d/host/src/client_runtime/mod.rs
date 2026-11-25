@@ -15,7 +15,8 @@ use holtburger_live_api::server::{LiveApiServerConfig, LiveApiServerHandle, star
 use holtburger_world::spell::SpellCatalog;
 
 use crate::client_api::{
-    ClientApiStateWire, H3dHudHook, H3dScreenshotBroker, H3dSelectionState, H3dUiHook,
+    ClientApiStateWire, H3dFrontendMirror, H3dHudHook, H3dScreenshotBroker, H3dUiHook,
+    waypoint_from_scene_point,
 };
 use crate::client_host::run_client_task;
 use crate::client_projection::{ClientHostEvent, client_exit_requested};
@@ -26,7 +27,8 @@ use crate::shared_host_content::SharedHostContent;
 pub use commands::{
     CLIENT_COMMAND_NAMES, ClientAppearanceOption, ClientCameraIdentityRequest, ClientChatRequest,
     ClientEntitySelectionQueryRequest, ClientHostCommand, ClientMapPosition,
-    ClientPreciseJumpAimRequest, ClientPreciseJumpCommitRequest, RequestedCombatMode,
+    ClientNavigationWaypointReport, ClientPreciseJumpAimRequest, ClientPreciseJumpCommitRequest,
+    RequestedCombatMode,
 };
 pub use dispatch::dispatch_client;
 
@@ -38,7 +40,7 @@ pub(super) struct ClientHostState {
     camera_input: Option<holtburger_core::ClientCameraInputHandle>,
     pub(super) task: Option<tokio::task::JoinHandle<()>>,
     shutdown_requested: Arc<std::sync::atomic::AtomicBool>,
-    selection: H3dSelectionState,
+    frontend_mirror: H3dFrontendMirror,
     screenshots: H3dScreenshotBroker,
     pub(super) live_api: Arc<std::sync::Mutex<Option<LiveApiServerHandle>>>,
 }
@@ -70,7 +72,7 @@ impl ClientHostRuntime {
                 camera_input: None,
                 task: None,
                 shutdown_requested: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-                selection: H3dSelectionState::default(),
+                frontend_mirror: H3dFrontendMirror::default(),
                 screenshots: H3dScreenshotBroker::default(),
                 live_api: Arc::new(std::sync::Mutex::new(None)),
             }),
@@ -180,9 +182,9 @@ impl ClientHostRuntime {
         let handle = client.create_handle();
         let events = handle.subscribe();
         let camera_input = client.camera_input_handle();
-        let (selection, screenshots) = {
+        let (frontend_mirror, screenshots) = {
             let state = self.state.lock().await;
-            (state.selection.clone(), state.screenshots.clone())
+            (state.frontend_mirror.clone(), state.screenshots.clone())
         };
         let live_api_server = if let Some(api_cfg) = startup.live_api {
             let catalogs = StaticReferenceCatalogs {
@@ -196,10 +198,11 @@ impl ClientHostRuntime {
                     port: api_cfg.port,
                     catalogs: Some(catalogs),
                     ui: Some(Arc::new(H3dUiHook::new(
-                        selection,
+                        frontend_mirror.clone(),
                         Arc::clone(&self.event_sink),
                     ))),
                     hud: Some(Arc::new(H3dHudHook::new(
+                        frontend_mirror,
                         Arc::clone(&self.event_sink),
                         screenshots,
                     ))),
@@ -321,10 +324,10 @@ impl ClientHostRuntime {
             .await
     }
 
-    /// Mirrors renderer target selection into `H3dSelectionState` and the Live API event log.
+    /// Mirrors renderer target selection into `H3dFrontendMirror` and the Live API event log.
     pub async fn report_selected_entity(&self, guid: Option<holtburger_common::Guid>) {
         let state = self.state.lock().await;
-        if state.selection.set(guid)
+        if state.frontend_mirror.set_selection(guid)
             && let Some(server) = state
                 .live_api
                 .lock()
@@ -332,6 +335,25 @@ impl ClientHostRuntime {
                 .as_ref()
         {
             server.engine().notify_selection_changed(guid);
+        }
+    }
+
+    /// Mirrors renderer outdoor navigation waypoint into `H3dFrontendMirror` and the Live API event log.
+    pub async fn report_navigation_waypoint(
+        &self,
+        waypoint: Option<ClientNavigationWaypointReport>,
+    ) {
+        let projected =
+            waypoint.and_then(|wp| waypoint_from_scene_point(wp.scene_x, wp.scene_z, &wp.label));
+        let state = self.state.lock().await;
+        if state.frontend_mirror.set_waypoint(projected.clone())
+            && let Some(server) = state
+                .live_api
+                .lock()
+                .expect("live_api mutex poisoned")
+                .as_ref()
+        {
+            server.engine().notify_waypoint_changed(projected);
         }
     }
 
@@ -519,7 +541,7 @@ impl ClientHostRuntime {
     }
 
     async fn retire(&self, host_shutdown: bool) -> Result<()> {
-        let (handle, task, live_api, screenshots) = {
+        let (handle, task, live_api, screenshots, frontend_mirror) = {
             let mut state = self.state.lock().await;
             state.accepting = false;
             state
@@ -535,8 +557,10 @@ impl ClientHostRuntime {
                     .expect("live_api mutex poisoned")
                     .take(),
                 state.screenshots.clone(),
+                state.frontend_mirror.clone(),
             )
         };
+        frontend_mirror.clear();
         screenshots.cancel_all();
         drop(live_api);
         self.stop_startup.notify_one();

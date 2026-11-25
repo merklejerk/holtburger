@@ -1,10 +1,12 @@
 import { tryEntityHorizontalForward } from "../../lib/game/math/camera-orientation";
 import type {
+	EntityBeaconPresentation,
 	EntityOverlayEntry,
 	EntityOverlayFrame,
 	EntityOverlayOcclusion,
 	EntityOverlayPriority,
 } from "../../lib/game/renderer/overlays/entity-overlay-policy";
+import type { ApiEntityCallout } from "../hud/api-markers";
 import {
 	resolveNameplateCategory,
 	type NameplateCategory,
@@ -193,6 +195,7 @@ export interface ClientEntityOverlaysFrameInput {
 	readonly hoveredGuid: number | null;
 	readonly activeCombatTargetGuid: number | null;
 	readonly alertGuids: ReadonlySet<number>;
+	readonly apiCallouts?: ReadonlyMap<number, ApiEntityCallout>;
 	readonly categoryVisibility: Readonly<Record<NameplateCategory, boolean>>;
 	readonly sampleImmediateTarget?: () => number | null;
 }
@@ -256,6 +259,7 @@ export class ClientEntityOverlays {
 			const isHovered = guid === input.hoveredGuid;
 			const isCombatTarget = guid === input.activeCombatTargetGuid;
 			const isAlert = isAlertOverlayEntity(facts, input.alertGuids, guid);
+			const apiCallout = input.apiCallouts?.get(guid);
 			const hasNameplate = dynamic.display.name.trim().length > 0;
 
 			let nameplate: EntityOverlayPriority | null = null;
@@ -274,7 +278,7 @@ export class ClientEntityOverlays {
 						(isCombatTarget || isSmartImmediate)
 					) {
 						nameplate = "focus";
-					} else if (isAlert) {
+					} else if (isAlert || apiCallout !== undefined) {
 						nameplate = "alert";
 					} else if (this.#mode === "smart") {
 						if (
@@ -320,10 +324,17 @@ export class ClientEntityOverlays {
 									: ("ambient" as const),
 						};
 
-			const beacon = isAlert ? ({ kind: "alert" } as const) : null;
+			const beacon: EntityBeaconPresentation | null =
+				apiCallout !== undefined && apiCallout.beacon
+					? { kind: "custom", color: apiCallout.color }
+					: isAlert
+						? { kind: "alert" }
+						: null;
 			if (nameplate === null && healthBar === null && beacon === null) continue;
 			const occlusion: EntityOverlayOcclusion =
-				isSelected || isHovered || isAlert ? "overlay" : "scene";
+				isSelected || isHovered || isAlert || (apiCallout?.throughWall ?? false)
+					? "overlay"
+					: "scene";
 			this.#entities.set(guid, {
 				generation: dynamic.generation,
 				presentation: {

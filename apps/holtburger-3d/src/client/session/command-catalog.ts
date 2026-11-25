@@ -183,13 +183,18 @@ export const LOCAL_COMMANDS = {
 		],
 	},
 	api: {
-		...invocation(["api"], "[status|pause|resume|prompt|say <message>]"),
+		...invocation(
+			["api"],
+			"[status|pause|resume|clear|mute [on|off]|prompt|say <message>]",
+		),
 		description:
-			"Inspect, pause/resume, message, or copy an agent prompt for the Live API.",
+			"Inspect, pause/resume, clear overlays, mute chimes, message, or copy an agent prompt for the Live API.",
 		details: [
-			"/api or /api status shows whether the localhost Live API is active, its endpoint, and whether automation is paused.",
-			"/api pause immediately stops active automation steering/combat and blocks further automation commands.",
+			"/api or /api status shows whether the localhost Live API is active, its endpoint, pause state, and audio mute state.",
+			"/api pause immediately stops active automation steering/combat and blocks further automation commands while keeping passive HUD feedback active.",
 			"/api resume re-enables automation commands.",
+			"/api clear clears all active Live API 3D world markers and entity callouts.",
+			"/api mute [on|off] toggles or sets session-local muting for Live API audio cues.",
 			"/api prompt copies a one-line starter prompt with your live endpoint to the clipboard.",
 			"/api say <message> (alias: /bot <message>) sends a local message to connected Live API clients without transmitting to the game server.",
 		],

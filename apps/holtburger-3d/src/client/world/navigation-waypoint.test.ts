@@ -10,6 +10,7 @@ import {
 	formatWaypointDistance,
 	formatWaypointReadout,
 	mapWaypointGuidance,
+	type MapWaypointTarget,
 } from "../../lib/game/map/map-waypoint";
 import type { ClientLifecycle } from "../session/host-contract";
 import { ClientNavigationWaypointOwner } from "./navigation-waypoint";
@@ -357,5 +358,20 @@ describe("content waypoint activation", () => {
 		expect(() => f.owner.set(target, f.notify)).toThrow("Select a character");
 		expect(f.read()).toBeNull();
 		expect(f.notify).toHaveBeenCalledTimes(1);
+	});
+
+	it("fires onChange on set, clear, and character reset while deduplicating identical sets", () => {
+		const changes: Array<MapWaypointTarget | null> = [];
+		const owner = new ClientNavigationWaypointOwner(15, (next) =>
+			changes.push(next),
+		);
+		owner.acceptCharacter(1);
+		owner.set(target, () => {});
+		owner.set(target, () => {});
+		owner.clear();
+		owner.clear();
+		owner.set(target, () => {});
+		owner.acceptCharacter(null);
+		expect(changes).toEqual([target, null, target, null]);
 	});
 });

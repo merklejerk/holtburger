@@ -92,7 +92,7 @@ describe("runClientApiCommand", () => {
 			(m) => messages.push(m),
 		);
 		expect(messages.at(-1)?.message).toBe(
-			"Usage: /api [status|pause|resume|prompt|say <message>]",
+			"Usage: /api [status|pause|resume|clear|mute [on|off]|prompt|say <message>]",
 		);
 	});
 
@@ -193,5 +193,88 @@ describe("runClientApiCommand", () => {
 			kind: "error",
 			message: "Live API is not active for this launch.",
 		});
+	});
+
+	it("clears overlays and toggles/sets session-local audio mute with status reflection", async () => {
+		const messages: ClientChatMessage[] = [];
+		const active: ClientApiState = {
+			active: true,
+			paused: false,
+			endpoint: "http://127.0.0.1:42000",
+		};
+		let muted = false;
+		let hadOverlays = true;
+		const controls = {
+			clearOverlays: () => {
+				const prev = hadOverlays;
+				hadOverlays = false;
+				return prev;
+			},
+			isAudioMuted: () => muted,
+			setAudioMuted: (next: boolean) => {
+				muted = next;
+			},
+		};
+
+		await runClientApiCommand(
+			"/api clear",
+			() => active,
+			async () => {},
+			noopSend,
+			(m) => messages.push(m),
+			undefined,
+			controls,
+		);
+		expect(messages.at(-1)?.message).toBe("Cleared Live API overlays.");
+
+		await runClientApiCommand(
+			"/api clear",
+			() => active,
+			async () => {},
+			noopSend,
+			(m) => messages.push(m),
+			undefined,
+			controls,
+		);
+		expect(messages.at(-1)?.message).toBe("No active Live API overlays.");
+
+		await runClientApiCommand(
+			"/api mute",
+			() => active,
+			async () => {},
+			noopSend,
+			(m) => messages.push(m),
+			undefined,
+			controls,
+		);
+		expect(muted).toBe(true);
+		expect(messages.at(-1)?.message).toBe(
+			"Live API audio cues muted for this session.",
+		);
+
+		await runClientApiCommand(
+			"/api status",
+			() => active,
+			async () => {},
+			noopSend,
+			(m) => messages.push(m),
+			undefined,
+			controls,
+		);
+		expect(messages.at(-1)?.message).toBe(
+			"Live API: Active · Audio muted (http://127.0.0.1:42000)",
+		);
+
+		await runClientApiCommand(
+			"/api mute off",
+			() => active,
+			async () => {},
+			noopSend,
+			(m) => messages.push(m),
+			undefined,
+			controls,
+		);
+		expect(muted).toBe(false);
+		expect(messages.at(-1)?.message).toBe("Live API audio cues unmuted.");
 	});
 });

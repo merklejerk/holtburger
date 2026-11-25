@@ -36,7 +36,7 @@ use crate::types::{
     CombatView, CommandRequest, CommandResponse, DeathLocationsView, EntityDetail, EntityFilter,
     EntitySummary, EquipmentView, EventsPage, InventoryView, LIVE_API_VERSION, SelectionView,
     SelfView, SkillDefinitionView, SocialView, SpellDefinitionView, SpellbookView, TradeView,
-    VendorView, WorldCellsView, WsClientFrame, WsServerFrame,
+    VendorView, WaypointView, WorldCellsView, WsClientFrame, WsServerFrame,
 };
 
 /// Configuration for launching a localhost Live API server alongside a client runtime.
@@ -324,6 +324,13 @@ fn build_api_router() -> ApiRouter<ServerState> {
             }),
         )
         .api_route(
+            "/v1/hud/waypoint",
+            get_with(get_waypoint, |op| {
+                op.summary("Get active outdoor navigation waypoint (h3d only)")
+                    .description("Returns the active outdoor navigation waypoint shown on h3d's compass, minimap, and world map, or `null` when unset.")
+            }),
+        )
+        .api_route(
             "/v1/world/cells",
             get_with(get_world_cells, |op| {
                 op.summary("Get resident indoor cell-portal topology")
@@ -566,7 +573,7 @@ struct EventsQuery {
     /// Return events with `seq > since` (default `0`).
     #[serde(default)]
     since: u64,
-    /// Optional comma-separated topic names (e.g. `chat,combat,selection,entities_lifecycle`).
+    /// Optional comma-separated topic names (e.g. `chat,combat,selection,hud,entities_lifecycle`).
     /// Valid topics match `ApiEventTopic`.
     #[serde(default)]
     topics: Option<String>,
@@ -711,6 +718,10 @@ async fn get_social(State(state): State<ServerState>) -> HttpResult<SocialView> 
 
 async fn get_selection(State(state): State<ServerState>) -> HttpResult<SelectionView> {
     Ok(Json(state.engine.selection().await?))
+}
+
+async fn get_waypoint(State(state): State<ServerState>) -> HttpResult<WaypointView> {
+    Ok(Json(state.engine.waypoint().await?))
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]

@@ -373,6 +373,7 @@ type ClientCommandName = Extract<
 	| "acknowledge_client_world_reveal"
 	| "stop_client_camera"
 	| "report_client_selected_entity"
+	| "report_client_navigation_waypoint"
 	| "set_client_automation_paused"
 	| "send_client_api_message"
 	| "submit_client_api_screenshot"
@@ -1597,6 +1598,19 @@ export class ClientLifecycleSession {
 	/** Mirrors frontend target selection into the Live API `ui.selection` hook. */
 	async reportSelectedEntity(guid: number | null): Promise<void> {
 		await this.#transport.invoke("report_client_selected_entity", { guid });
+	}
+
+	/** Mirrors frontend outdoor navigation waypoint into the Live API `h3d.hud` hook. */
+	async reportNavigationWaypoint(
+		waypoint: {
+			readonly sceneX: number;
+			readonly sceneZ: number;
+			readonly label: string;
+		} | null,
+	): Promise<void> {
+		await this.#transport.invoke("report_client_navigation_waypoint", {
+			waypoint,
+		});
 	}
 
 	/** Pauses or resumes Live API automation via the client host safety gate. */

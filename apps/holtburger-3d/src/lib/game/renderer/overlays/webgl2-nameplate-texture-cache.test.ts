@@ -495,4 +495,109 @@ describe("WebGL2NameplateTextureCache", () => {
 			"Nameplate texture cache is destroyed",
 		);
 	});
+
+	it("keeps badge rasters distinct by text and color and paints badge above name row", () => {
+		const fixture = createFixture();
+		const redBadge = {
+			...PLATE,
+			content: {
+				...PLATE.content,
+				badge: {
+					text: "Kill 1st",
+					color: { red: 1, green: 0.2, blue: 0.2, alpha: 0.95 },
+				},
+			},
+		};
+		const cyanBadge = {
+			...PLATE,
+			content: {
+				...PLATE.content,
+				badge: {
+					text: "Kill 1st",
+					color: { red: 0.2, green: 0.9, blue: 1, alpha: 0.95 },
+				},
+			},
+		};
+		fixture.cache.reconcile([PLATE, redBadge, cyanBadge], APPEARANCE, 1);
+		expect(fixture.cache.acquire(redBadge)).not.toBe(
+			fixture.cache.acquire(PLATE),
+		);
+		expect(fixture.cache.acquire(redBadge)).not.toBe(
+			fixture.cache.acquire(cyanBadge),
+		);
+		expect(fixture.rasterize).toHaveBeenCalledTimes(3);
+
+		const fillText = vi.fn();
+		const strokeText = vi.fn();
+		const fill = vi.fn();
+		const stroke = vi.fn();
+		const strokeStyles: string[] = [];
+		let currentStrokeStyle = "";
+		const context = {
+			beginPath: vi.fn(),
+			moveTo: vi.fn(),
+			lineTo: vi.fn(),
+			arcTo: vi.fn(),
+			closePath: vi.fn(),
+			fill,
+			stroke: () => {
+				strokeStyles.push(currentStrokeStyle);
+				stroke();
+			},
+			fillStyle: "",
+			get strokeStyle() {
+				return currentStrokeStyle;
+			},
+			set strokeStyle(value: string) {
+				currentStrokeStyle = value;
+			},
+			fillText,
+			font: "",
+			lineJoin: "miter",
+			lineWidth: 0,
+			measureText: (text: string) => ({ width: text.length * 10 }),
+			scale: vi.fn(),
+			strokeText,
+			textAlign: "start",
+			textBaseline: "alphabetic",
+		} as unknown as CanvasRenderingContext2D;
+		vi.stubGlobal("document", {
+			createElement: () => ({
+				getContext: () => context,
+				height: 0,
+				width: 0,
+			}),
+		});
+		try {
+			const raster = new Canvas2DNameplateRasterizer({
+				read: () => ({ kind: "loading" }),
+			}).rasterize(redBadge, APPEARANCE, 1);
+			const padY = Math.round(APPEARANCE.level.fontSizePixels * 0.22);
+			const borderWidth = Math.max(
+				1.5,
+				Math.round(APPEARANCE.level.fontSizePixels * 0.08),
+			);
+			const pillHeight =
+				APPEARANCE.level.fontSizePixels + padY * 2 + borderWidth * 2;
+			expect(raster.height).toBe(
+				Math.ceil(
+					APPEARANCE.verticalPaddingPixels * 2 +
+						pillHeight +
+						APPEARANCE.name.fontSizePixels +
+						APPEARANCE.level.fontSizePixels +
+						APPEARANCE.lineGapPixels * 2,
+				),
+			);
+			expect(fill).toHaveBeenCalledTimes(1);
+			expect(stroke).toHaveBeenCalledTimes(1);
+			expect(strokeStyles[0]).toBe("rgba(255, 51, 51, 0.95)");
+			expect(fillText.mock.calls.map(([text]) => text)).toEqual([
+				"Kill 1st",
+				PLATE.content.name,
+				`Level ${PLATE.content.level}`,
+			]);
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
 });

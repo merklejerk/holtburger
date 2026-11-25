@@ -24,9 +24,9 @@ export type EntityOverlayPriority = "focus" | "alert" | "ambient";
 export type EntityOverlayOcclusion = "overlay" | "scene";
 
 /** In-scene entity beacon marker; always depth-tested and portal-scoped. */
-interface EntityBeaconPresentation {
-	readonly kind: "alert";
-}
+export type EntityBeaconPresentation =
+	| { readonly kind: "alert" }
+	| { readonly kind: "custom"; readonly color: NameplateColor };
 
 /** One entity's independently admitted label, health bar, and in-scene beacon. */
 export interface EntityOverlayPresentation {

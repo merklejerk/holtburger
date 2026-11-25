@@ -1,3 +1,7 @@
+import {
+	rgbaColorsEqual,
+	type NormalizedRgbaColor,
+} from "../../frontend-color";
 import type { DatAssetId } from "../game-types";
 import type { AABB3, Vec3 } from "../math/types";
 import type { ResolvedObjectBehavior } from "../resolution/landblock-layer";
@@ -29,6 +33,12 @@ interface NameplateIndicator {
 /** Prominent app-local badge painted centered above the name row. */
 type NameplateCrest = "alert";
 
+/** Short tinted text tag rendered above the entity name row (e.g., Live API entity callouts). */
+interface NameplateBadge {
+	readonly text: string;
+	readonly color: NormalizedRgbaColor;
+}
+
 /** Complete visual value currently painted into one entity nameplate. */
 export interface NameplateContent {
 	readonly name: string;
@@ -39,6 +49,8 @@ export interface NameplateContent {
 	readonly strikeThrough: boolean;
 	/** Optional prominent crest painted above the name row. */
 	readonly crest?: NameplateCrest;
+	/** Optional short tinted callout tag painted above the name row. */
+	readonly badge?: NameplateBadge;
 	/** Ordered app-local indicators painted on a dedicated final row. */
 	readonly indicators: readonly NameplateIndicator[];
 }
@@ -46,8 +58,52 @@ export interface NameplateContent {
 /** Mutable app-owned decorations overlaid onto authoritative entity name and level. */
 export type NameplateDecoration = Pick<
 	NameplateContent,
-	"indicators" | "strikeThrough" | "nameColor" | "crest"
+	"indicators" | "strikeThrough" | "nameColor" | "crest" | "badge"
 >;
+
+/** Returns true when a decoration carries no visual overrides and can be pruned. */
+export function isEmptyNameplateDecoration(
+	decoration: NameplateDecoration,
+): boolean {
+	return (
+		decoration.indicators.length === 0 &&
+		!decoration.strikeThrough &&
+		decoration.nameColor === undefined &&
+		decoration.crest === undefined &&
+		decoration.badge === undefined
+	);
+}
+
+/** Structural equality for immutable `NameplateContent` snapshots. */
+export function nameplateContentEqual(
+	left: NameplateContent | null | undefined,
+	right: NameplateContent,
+): boolean {
+	if (left === null || left === undefined) return false;
+	return (
+		left.name === right.name &&
+		left.level === right.level &&
+		left.nameColor === right.nameColor &&
+		left.strikeThrough === right.strikeThrough &&
+		left.crest === right.crest &&
+		nameplateBadgeEqual(left.badge, right.badge) &&
+		left.indicators.length === right.indicators.length &&
+		left.indicators.every(
+			(value, index) =>
+				value.kind === right.indicators[index]?.kind &&
+				value.iconId === right.indicators[index]?.iconId,
+		)
+	);
+}
+
+function nameplateBadgeEqual(
+	left: NameplateBadge | undefined,
+	right: NameplateBadge | undefined,
+): boolean {
+	if (left === right) return true;
+	if (left === undefined || right === undefined) return false;
+	return left.text === right.text && rgbaColorsEqual(left.color, right.color);
+}
 
 /** Immutable visual and setup-default behavior facts shared by every dynamic producer. */
 export interface DynamicPresentationSource {

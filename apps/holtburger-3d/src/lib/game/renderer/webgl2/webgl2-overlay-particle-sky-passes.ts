@@ -31,6 +31,7 @@ import {
 	type WebGL2EntitySelectionMask,
 } from "../overlays/webgl2-entity-selection-pass";
 import { WebGL2EntityOverlayPass } from "../overlays/webgl2-entity-overlay-pass";
+import type { EntityBeaconPresentation } from "../overlays/entity-overlay-policy";
 import { WebGL2EntityBeaconPass } from "../overlays/webgl2-entity-beacon-pass";
 import {
 	resolveEntityBeaconGeometry,
@@ -667,6 +668,7 @@ export class SkyParticleOverlayAndSelectionPasses {
 	/** Resolve one visible entity's depth-tested beacon base, scenario height, and portal scopes. */
 	prepareEntityBeacon(
 		nodeId: SceneNodeId,
+		beacon: EntityBeaconPresentation,
 		renderTarget: VisibleDynamicPresentation,
 		contribution: Extract<RenderContribution, { kind: "dynamic" }>,
 		prepared: PreparedViewGeometry,
@@ -696,6 +698,7 @@ export class SkyParticleOverlayAndSelectionPasses {
 			base,
 			height,
 			radius,
+			color: beacon.kind === "custom" ? beacon.color : null,
 			distanceSquared,
 			identity: facts.identity,
 			renderScopeKeys: selectedDynamicRenderScopeKeys(
@@ -738,12 +741,14 @@ export class SkyParticleOverlayAndSelectionPasses {
 							base: beacon.base,
 							height: beacon.height,
 							radius: beacon.radius,
+							color: beacon.color,
 							renderScopeKey,
 						});
 					} else {
 						slot.base = beacon.base;
 						slot.height = beacon.height;
 						slot.radius = beacon.radius;
+						slot.color = beacon.color;
 						slot.renderScopeKey = renderScopeKey;
 					}
 					instanceCount += 1;
@@ -765,11 +770,13 @@ export class SkyParticleOverlayAndSelectionPasses {
 					base: beacon.base,
 					height: beacon.height,
 					radius: beacon.radius,
+					color: beacon.color,
 				});
 			} else {
 				slot.base = beacon.base;
 				slot.height = beacon.height;
 				slot.radius = beacon.radius;
+				slot.color = beacon.color;
 			}
 			instanceCount += 1;
 		}

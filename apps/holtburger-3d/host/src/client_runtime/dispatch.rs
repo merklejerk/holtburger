@@ -433,6 +433,10 @@ pub async fn dispatch_client(
             runtime.report_selected_entity(guid).await;
             Ok(HostResponse::Unit)
         }
+        ReportClientNavigationWaypoint { waypoint } => {
+            runtime.report_navigation_waypoint(waypoint).await;
+            Ok(HostResponse::Unit)
+        }
         SetClientAutomationPaused { paused } => {
             unit_result(runtime.set_automation_paused(paused).await).await
         }

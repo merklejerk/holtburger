@@ -77,9 +77,10 @@ import {
 	selectionSphereFromBounds,
 	usesSelectionSphereProxy,
 } from "../selection/entity-interaction-shape";
-import type {
-	DynamicPresentationSource,
-	NameplateDecoration,
+import {
+	isEmptyNameplateDecoration,
+	type DynamicPresentationSource,
+	type NameplateDecoration,
 } from "../systems/dynamic-presentation-source";
 import type { DynamicEntitySystem } from "../systems/dynamic-entity-system";
 import {
@@ -461,12 +462,7 @@ export class FramePresentationCoordinator {
 		guid: number,
 		decoration: NameplateDecoration,
 	): void {
-		if (
-			decoration.indicators.length === 0 &&
-			!decoration.strikeThrough &&
-			decoration.nameColor === undefined &&
-			decoration.crest === undefined
-		)
+		if (isEmptyNameplateDecoration(decoration))
 			this.#spawnedNameplateDecoration.delete(guid);
 		else this.#spawnedNameplateDecoration.set(guid, decoration);
 		const installed = this.#context.getInstalledPresentation(guid);

@@ -204,6 +204,13 @@ impl LiveApiEngine {
         );
     }
 
+    /// Emits a local `user-message` event on `automation` for `/api say` and `/bot`.
+    pub fn emit_user_message(&self, text: String) -> ApiEventEnvelope {
+        self.inner
+            .event_log
+            .push(ApiEventTopic::Automation, ApiEvent::UserMessage { text })
+    }
+
     /// Computes capabilities directly from mounted hooks and catalogs (impossible to drift).
     pub fn capabilities(&self) -> Vec<String> {
         let mut caps = vec![

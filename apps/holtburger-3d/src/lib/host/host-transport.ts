@@ -239,6 +239,7 @@ const CLIENT_HOST_COMMAND_NAMES = [
 	"stop_client_camera",
 	"report_client_selected_entity",
 	"set_client_automation_paused",
+	"send_client_api_message",
 	"submit_client_api_screenshot",
 	"logout_client",
 	"disconnect_client",

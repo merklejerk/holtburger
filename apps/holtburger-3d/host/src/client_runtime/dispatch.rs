@@ -436,6 +436,7 @@ pub async fn dispatch_client(
         SetClientAutomationPaused { paused } => {
             unit_result(runtime.set_automation_paused(paused).await).await
         }
+        SendClientApiMessage { text } => unit_result(runtime.send_api_message(text).await).await,
         SubmitClientApiScreenshot {
             request_id,
             content_type,

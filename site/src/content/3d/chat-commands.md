@@ -89,15 +89,16 @@ Death may drop items and cause vitae. For recovery and location limitations, see
 
 ## Local utilities
 
-| Command                                | Action                                                                                                                   |
-| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `/version`                             | Show client version and build revision                                                                                   |
-| `/fps`                                 | Toggle the FPS display                                                                                                   |
-| `/ui-showcase`                         | Toggle conditional HUD previews without layout editing controls                                                          |
-| `/assets`                              | Show the active content location                                                                                         |
-| `/assets retry`                        | Retry failed content loading                                                                                             |
-| `/loc`                                 | Print and copy character/camera location details for diagnostics                                                         |
-| `/api [status\|pause\|resume\|prompt]` | Inspect localhost [Live API](/holtburger/live-api/) status, pause/resume automation, or copy the AI agent starter prompt |
-| `/logopolis`                           | Open Logopolis                                                                                                           |
+| Command                                             | Action                                                                                                                                       |
+| --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/version`                                          | Show client version and build revision                                                                                                       |
+| `/fps`                                              | Toggle the FPS display                                                                                                                       |
+| `/ui-showcase`                                      | Toggle conditional HUD previews without layout editing controls                                                                              |
+| `/assets`                                           | Show the active content location                                                                                                             |
+| `/assets retry`                                     | Retry failed content loading                                                                                                                 |
+| `/loc`                                              | Print and copy character/camera location details for diagnostics                                                                             |
+| `/api [status\|pause\|resume\|prompt\|say MESSAGE]` | Inspect localhost [Live API](/holtburger/live-api/) status, pause/resume automation, copy the agent prompt, or message connected API clients |
+| `/bot MESSAGE`                                      | Shorthand alias for `/api say MESSAGE` (local only; never sent to the game server)                                                           |
+| `/logopolis`                                        | Open Logopolis                                                                                                                               |
 
 Replacing the game-data files while the client is running still requires restarting with the repaired folder; `/assets retry` only retries loading.

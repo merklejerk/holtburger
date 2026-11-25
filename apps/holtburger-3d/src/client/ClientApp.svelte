@@ -1919,6 +1919,7 @@
 				message,
 				() => apiState,
 				setAutomationPaused,
+				(text) => currentSession.sendApiMessage(text),
 				appendChatLine,
 			)) ||
 			runClientScanCommand(

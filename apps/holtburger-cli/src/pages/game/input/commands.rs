@@ -308,7 +308,7 @@ impl GameState {
         );
         self.chat.log(
             ChatMessageTags::system(),
-            "Live API: /api [status|pause|resume|prompt] inspects, pauses/resumes, or prints an agent prompt"
+            "Live API: /api [status|pause|resume|prompt|say MESSAGE] (alias: /bot MESSAGE)"
                 .to_string(),
         );
         self.chat.log(
@@ -487,8 +487,13 @@ impl GameState {
                     .to_string(),
             ],
             "api" => vec![
-                "Usage: /api [status|pause|resume|prompt]".to_string(),
-                "Show the localhost Live API status and endpoint, pause/resume automation, or print a concise starter prompt for AI agents."
+                "Usage: /api [status|pause|resume|prompt|say MESSAGE]".to_string(),
+                "Show the localhost Live API status and endpoint, pause/resume automation, print an AI agent starter prompt, or send a local message (/api say or /bot) to connected Live API clients."
+                    .to_string(),
+            ],
+            "bot" => vec![
+                "Usage: /bot MESSAGE".to_string(),
+                "Alias for /api say MESSAGE. Sends a local user-message event to connected Live API clients without transmitting to the game server."
                     .to_string(),
             ],
             _ => return None,
@@ -514,16 +519,46 @@ impl GameState {
         }
     }
 
+    fn emit_api_user_message(&mut self, raw_text: &str, usage: &str) {
+        let text = raw_text.trim();
+        if text.is_empty() {
+            self.chat
+                .log(ChatMessageTags::system(), format!("Usage: {usage}"));
+            return;
+        }
+        if self.script.live_api_endpoint.is_none() {
+            self.chat.log(
+                ChatMessageTags::error(),
+                "Live API is not active for this launch (launch with --api).".to_string(),
+            );
+            return;
+        }
+        if let Some(engine) = &self.script.live_api {
+            engine.emit_user_message(text.to_string());
+        }
+        self.chat
+            .log(ChatMessageTags::system(), format!("[API] You: {text}"));
+    }
+
     fn handle_api_command(&mut self, command: &str, submitted_command: &str) -> UpdateResult {
         let mut result = UpdateResult::new();
+        if let Some(rest) = command.strip_prefix("/bot") {
+            self.emit_api_user_message(rest, "/bot MESSAGE");
+            result.merge(self.finish_input_command_submission(submitted_command));
+            return result.with_redraw(true);
+        }
         let arg = command.strip_prefix("/api").unwrap_or("").trim();
+        let (subcommand, rest) = match arg.split_once(char::is_whitespace) {
+            Some((head, tail)) => (head.to_ascii_lowercase(), tail),
+            None => (arg.to_ascii_lowercase(), ""),
+        };
         let paused = self
             .script
             .live_api
             .as_ref()
             .is_some_and(|engine| engine.runtime_handle().is_automation_paused());
-        match arg.to_ascii_lowercase().as_str() {
-            "" | "status" => {
+        match subcommand.as_str() {
+            "" | "status" if rest.trim().is_empty() => {
                 let server = match &self.script.live_api_endpoint {
                     Some(endpoint) => format!(
                         "Live API: {} ({endpoint})",
@@ -536,7 +571,7 @@ impl GameState {
                 };
                 self.chat.log(ChatMessageTags::system(), server);
             }
-            "pause" => {
+            "pause" if rest.trim().is_empty() => {
                 if paused {
                     self.chat.log(
                         ChatMessageTags::system(),
@@ -552,7 +587,7 @@ impl GameState {
                     );
                 }
             }
-            "resume" => {
+            "resume" if rest.trim().is_empty() => {
                 if !paused {
                     self.chat.log(
                         ChatMessageTags::system(),
@@ -568,7 +603,7 @@ impl GameState {
                     );
                 }
             }
-            "prompt" => {
+            "prompt" if rest.trim().is_empty() => {
                 if let Some(endpoint) = &self.script.live_api_endpoint {
                     self.chat.log(
                         ChatMessageTags::system(),
@@ -583,10 +618,13 @@ impl GameState {
                     );
                 }
             }
+            "say" => {
+                self.emit_api_user_message(rest, "/api say MESSAGE");
+            }
             _ => {
                 self.chat.log(
                     ChatMessageTags::system(),
-                    "Usage: /api [status|pause|resume|prompt]".to_string(),
+                    "Usage: /api [status|pause|resume|prompt|say MESSAGE]".to_string(),
                 );
             }
         }
@@ -1045,7 +1083,11 @@ impl GameState {
             _ if command.starts_with("/option") => {
                 self.handle_options_command(command, submitted_command)
             }
-            _ if command == "/api" || command.starts_with("/api ") => {
+            _ if command == "/api"
+                || command.starts_with("/api ")
+                || command == "/bot"
+                || command.starts_with("/bot ") =>
+            {
                 self.handle_api_command(command, submitted_command)
             }
             _ => {
@@ -1122,7 +1164,37 @@ mod tests {
                 .chat
                 .messages
                 .iter()
-                .any(|m| { m.text == "Usage: /api [status|pause|resume|prompt]" })
+                .any(|m| { m.text == "Usage: /api [status|pause|resume|prompt|say MESSAGE]" })
+        );
+
+        let say = state.handle_prefixed_command("/api say Switch to Fire Wand");
+        assert!(say.commands.is_empty());
+        assert!(
+            state
+                .chat
+                .messages
+                .iter()
+                .any(|m| m.text == "[API] You: Switch to Fire Wand")
+        );
+
+        let bot = state.handle_prefixed_command("/bot Hold at Lifestone");
+        assert!(bot.commands.is_empty());
+        assert!(
+            state
+                .chat
+                .messages
+                .iter()
+                .any(|m| m.text == "[API] You: Hold at Lifestone")
+        );
+
+        let empty_bot = state.handle_prefixed_command("/bot");
+        assert!(empty_bot.commands.is_empty());
+        assert!(
+            state
+                .chat
+                .messages
+                .iter()
+                .any(|m| m.text == "Usage: /bot MESSAGE")
         );
     }
 

@@ -3,18 +3,23 @@ import { runClientApiCommand } from "./api-command";
 import type { ClientApiState, ClientChatMessage } from "./host-contract";
 
 describe("runClientApiCommand", () => {
+	const noopSend = async () => {};
+
 	it("ignores unrelated messages", async () => {
 		const messages: ClientChatMessage[] = [];
 		const setPaused = vi.fn(async () => {});
+		const sendMessage = vi.fn(async () => {});
 		const handled = await runClientApiCommand(
 			"/scan drudge",
 			() => null,
 			setPaused,
+			sendMessage,
 			(m) => messages.push(m),
 		);
 		expect(handled).toBe(false);
 		expect(messages).toEqual([]);
 		expect(setPaused).not.toHaveBeenCalled();
+		expect(sendMessage).not.toHaveBeenCalled();
 	});
 
 	it("reports inactive, active, and paused status", async () => {
@@ -25,6 +30,7 @@ describe("runClientApiCommand", () => {
 			"/api",
 			() => null,
 			setPaused,
+			noopSend,
 			(m) => messages.push(m),
 		);
 		expect(messages.at(-1)?.message).toContain("Inactive");
@@ -38,6 +44,7 @@ describe("runClientApiCommand", () => {
 			"@api status",
 			() => active,
 			setPaused,
+			noopSend,
 			(m) => messages.push(m),
 		);
 		expect(messages.at(-1)).toEqual({
@@ -61,6 +68,7 @@ describe("runClientApiCommand", () => {
 			"/api pause",
 			() => state,
 			setPaused,
+			noopSend,
 			(m) => messages.push(m),
 		);
 		expect(setPaused).toHaveBeenCalledWith(true);
@@ -70,6 +78,7 @@ describe("runClientApiCommand", () => {
 			"/api resume",
 			() => state,
 			setPaused,
+			noopSend,
 			(m) => messages.push(m),
 		);
 		expect(setPaused).toHaveBeenCalledWith(false);
@@ -79,10 +88,11 @@ describe("runClientApiCommand", () => {
 			"/api bogus",
 			() => state,
 			setPaused,
+			noopSend,
 			(m) => messages.push(m),
 		);
 		expect(messages.at(-1)?.message).toBe(
-			"Usage: /api [status|pause|resume|prompt]",
+			"Usage: /api [status|pause|resume|prompt|say MESSAGE]",
 		);
 	});
 
@@ -99,6 +109,7 @@ describe("runClientApiCommand", () => {
 			"/api prompt",
 			() => active,
 			async () => {},
+			noopSend,
 			(m) => messages.push(m),
 			async (text) => {
 				copied.push(text);
@@ -115,11 +126,72 @@ describe("runClientApiCommand", () => {
 			"/api prompt",
 			() => active,
 			async () => {},
+			noopSend,
 			(m) => messages.push(m),
 			async () => {
 				throw new Error("clipboard unavailable");
 			},
 		);
 		expect(messages.at(-1)?.message).toBe(copied[0]);
+	});
+
+	it("sends local user messages via /api say and /bot preserving case", async () => {
+		const messages: ClientChatMessage[] = [];
+		const sent: string[] = [];
+		const active: ClientApiState = {
+			active: true,
+			paused: true,
+			endpoint: "http://127.0.0.1:42000",
+		};
+		const sendMessage = vi.fn(async (text: string) => {
+			sent.push(text);
+		});
+
+		await runClientApiCommand(
+			"/api say Switch to Fire Wand",
+			() => active,
+			async () => {},
+			sendMessage,
+			(m) => messages.push(m),
+		);
+		expect(sent).toEqual(["Switch to Fire Wand"]);
+		expect(messages.at(-1)).toEqual({
+			kind: "system",
+			message: "[API] You: Switch to Fire Wand",
+		});
+
+		await runClientApiCommand(
+			"@bot Wait at Holtburg Lifestone",
+			() => active,
+			async () => {},
+			sendMessage,
+			(m) => messages.push(m),
+		);
+		expect(sent).toEqual(["Switch to Fire Wand", "Wait at Holtburg Lifestone"]);
+		expect(messages.at(-1)).toEqual({
+			kind: "system",
+			message: "[API] You: Wait at Holtburg Lifestone",
+		});
+
+		await runClientApiCommand(
+			"/bot   ",
+			() => active,
+			async () => {},
+			sendMessage,
+			(m) => messages.push(m),
+		);
+		expect(messages.at(-1)?.message).toBe("Usage: /bot MESSAGE");
+
+		await runClientApiCommand(
+			"/bot hello",
+			() => null,
+			async () => {},
+			sendMessage,
+			(m) => messages.push(m),
+		);
+		expect(messages.at(-1)).toEqual({
+			kind: "error",
+			message: "Live API is not active for this launch.",
+		});
 	});
 });

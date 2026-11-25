@@ -44,12 +44,14 @@ The Live API is **disabled by default**. When enabled, it binds strictly to `127
 
 Use `/api` in chat (in either the 3D or terminal client) to check status or pause automation at any time:
 
-| Command       | Action                                                                        |
-| ------------- | ----------------------------------------------------------------------------- |
-| `/api`        | Show whether the Live API is active, its localhost URL, and pause state       |
-| `/api prompt` | Copy the one-line AI agent starter prompt for this running instance           |
-| `/api pause`  | Stop active automation steering/combat and reject further automation commands |
-| `/api resume` | Allow automation commands again                                               |
+| Command            | Action                                                                                                                          |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
+| `/api`             | Show whether the Live API is active, its localhost URL, and pause state                                                         |
+| `/api prompt`      | Copy the one-line AI agent starter prompt for this running instance                                                             |
+| `/api say MESSAGE` | Send a local message (`user-message` event on `automation`) directly to connected Live API clients without transmitting in-game |
+| `/bot MESSAGE`     | Shorthand alias for `/api say MESSAGE`                                                                                          |
+| `/api pause`       | Stop active automation steering/combat and reject further automation commands                                                   |
+| `/api resume`      | Allow automation commands again                                                                                                 |
 
 In the 3D client, a compact HUD badge also appears while the Live API is active so you can see its state and pause or resume automation with a click.
 

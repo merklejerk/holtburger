@@ -665,6 +665,10 @@ pub enum ClientHostCommand {
     SetClientAutomationPaused {
         paused: bool,
     },
+    /// Emits a local user message into the Live API `automation` event stream.
+    SendClientApiMessage {
+        text: String,
+    },
     /// Delivers a HUD-free WebGL2 viewport screenshot back to a pending Live API request.
     SubmitClientApiScreenshot {
         #[serde(rename = "requestId")]
@@ -757,6 +761,7 @@ pub const CLIENT_COMMAND_NAMES: &[&str] = &[
     "stop_client_camera",
     "report_client_selected_entity",
     "set_client_automation_paused",
+    "send_client_api_message",
     "submit_client_api_screenshot",
     "logout_client",
     "disconnect_client",

@@ -1634,6 +1634,11 @@ pub enum ApiEvent {
     AutomationPausedChanged {
         paused: bool,
     },
+    /// Local message sent by the user to Live API clients via `/api say` or `/bot`.
+    #[serde(rename_all = "camelCase")]
+    UserMessage {
+        text: String,
+    },
 }
 
 /// Ordered event envelope returned by `GET /v1/events` and pushed on `WS /v1/ws`.

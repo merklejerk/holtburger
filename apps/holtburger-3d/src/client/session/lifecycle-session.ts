@@ -374,6 +374,7 @@ type ClientCommandName = Extract<
 	| "stop_client_camera"
 	| "report_client_selected_entity"
 	| "set_client_automation_paused"
+	| "send_client_api_message"
 	| "submit_client_api_screenshot"
 	| "logout_client"
 	| "disconnect_client"
@@ -1601,6 +1602,11 @@ export class ClientLifecycleSession {
 	/** Pauses or resumes Live API automation via the client host safety gate. */
 	async setAutomationPaused(paused: boolean): Promise<void> {
 		await this.#transport.invoke("set_client_automation_paused", { paused });
+	}
+
+	/** Sends a local user message to connected Live API clients without forwarding to the server. */
+	async sendApiMessage(text: string): Promise<void> {
+		await this.#transport.invoke("send_client_api_message", { text });
 	}
 
 	/** Submits a HUD-free WebGL2 viewport screenshot back to a pending Live API request. */

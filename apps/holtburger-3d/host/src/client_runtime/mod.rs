@@ -381,6 +381,24 @@ impl ClientHostRuntime {
         Ok(())
     }
 
+    /// Emits a local user message into the Live API `automation` event stream.
+    pub async fn send_api_message(&self, text: String) -> Result<()> {
+        let trimmed = text.trim();
+        if trimmed.is_empty() {
+            bail!("message text must not be empty");
+        }
+        let state = self.state.lock().await;
+        if !state.accepting {
+            bail!("client host is shutting down");
+        }
+        let live_api = state.live_api.lock().expect("live_api mutex poisoned");
+        let server = live_api
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Live API is not active for this launch"))?;
+        server.engine().emit_user_message(trimmed.to_string());
+        Ok(())
+    }
+
     pub async fn select_character(&self, guid: holtburger_common::Guid) -> Result<()> {
         self.send_command(ClientCommand::SelectCharacter(guid))
             .await

@@ -1075,3 +1075,60 @@ async fn start_server_does_not_deadlock_before_client_task_is_spawned() {
     let _ = shutdown_tx.send(());
     task.abort();
 }
+
+#[tokio::test]
+async fn emit_user_message_delivers_on_automation_topic_even_when_paused() {
+    let mut client = ClientRuntime::synthetic_in_world("acct", Some("TestWorld".into()));
+    let handle = client.create_handle();
+    let (shutdown_tx, shutdown_rx) = oneshot::channel();
+    let task = tokio::spawn(client.run_synthetic(shutdown_rx));
+
+    let server = start_server(
+        handle.clone(),
+        LiveApiServerConfig {
+            client_kind: "h3d",
+            port: 0,
+            catalogs: None,
+            ui: None,
+            hud: None,
+            discovery_dir: None,
+            write_discovery: false,
+        },
+    )
+    .await
+    .unwrap();
+
+    handle.set_automation_paused(true).unwrap();
+    let envelope = server
+        .engine()
+        .emit_user_message("Switch to fire wand".to_string());
+    assert_eq!(envelope.topic, ApiEventTopic::Automation);
+    assert_eq!(
+        envelope.event,
+        ApiEvent::UserMessage {
+            text: "Switch to fire wand".to_string(),
+        }
+    );
+
+    let http = reqwest::Client::new();
+    let res = http
+        .get(format!("{}/v1/events?topics=automation", server.base_url()))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+    let page: Value = res.json().await.unwrap();
+    let events = page["events"].as_array().unwrap();
+    assert!(
+        events.iter().any(|ev| {
+            ev["topic"] == "automation"
+                && ev["event"]["kind"] == "user-message"
+                && ev["event"]["text"] == "Switch to fire wand"
+        }),
+        "expected user-message event in automation topic; got {events:?}"
+    );
+
+    drop(server);
+    let _ = shutdown_tx.send(());
+    task.abort();
+}

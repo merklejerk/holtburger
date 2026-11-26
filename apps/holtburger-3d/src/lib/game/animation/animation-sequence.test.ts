@@ -141,6 +141,9 @@ function preparedAnimation(): PreparedAnimation {
 			rotation: Quat.identity(),
 			translation: new Vec3(position, 0, 0),
 		})),
+		partTranslationBounds: [
+			{ minX: 0, minY: 0, minZ: 0, maxX: 3, maxY: 0, maxZ: 0 },
+		],
 		positionFrames: [],
 	};
 }

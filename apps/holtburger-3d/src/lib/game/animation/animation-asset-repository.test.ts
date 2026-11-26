@@ -16,6 +16,54 @@ describe("AnimationAssetRepository", () => {
 		expect(prepared.framesPerSecond).toBe(40);
 	});
 
+	it("precomputes per-part translation envelopes across all authored frames", () => {
+		const frame = (x: number, y: number, z: number): Mat4 => {
+			const pose = Mat4.identity();
+			pose.m41 = x;
+			pose.m42 = y;
+			pose.m43 = z;
+			return pose;
+		};
+		const prepared = prepareAnimation(
+			{
+				frameCount: 3,
+				hooks: [],
+				id: "0x03000001",
+				partCount: 2,
+				partFrames: [
+					frame(1, -2, 3),
+					frame(10, 0, -5),
+					frame(-4, 5, 1),
+					frame(8, 2, -1),
+					frame(2, 0, 9),
+					frame(12, -3, -2),
+				],
+				positionFrames: [],
+			},
+			"0x03000001",
+			30,
+		);
+
+		expect(prepared.partTranslationBounds).toEqual([
+			{ minX: -4, minY: -2, minZ: 1, maxX: 2, maxY: 5, maxZ: 9 },
+			{ minX: 8, minY: -3, minZ: -5, maxX: 12, maxY: 2, maxZ: -1 },
+		]);
+
+		const empty = prepareAnimation(
+			{
+				frameCount: 0,
+				hooks: [],
+				id: "0x03000002",
+				partCount: 2,
+				partFrames: [],
+				positionFrames: [],
+			},
+			"0x03000002",
+			30,
+		);
+		expect(empty.partTranslationBounds).toEqual([]);
+	});
+
 	it("shares one in-flight load and releases the prepared value exactly", async () => {
 		const source = new DeferredAnimationSource();
 		const repository = new AnimationAssetRepository(source);

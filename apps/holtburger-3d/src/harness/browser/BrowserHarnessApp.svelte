@@ -46,6 +46,7 @@
 	} from "../../lib/assets/http-landblock-content-source";
 	import { CachedLandblockProfileSource } from "../../lib/assets/landblock-profile-source";
 	import { StandardCommitPipeline } from "../../lib/game/commit/pipeline";
+	import { webGL2UploadErrorChecksEnabled } from "../../lib/game/webgl/diagnostics";
 	import { SyntheticBlendedBuildingPipeline } from "./synthetic-blended-building-pipeline";
 	import { SyntheticInstancedObjectPipeline } from "./synthetic-instanced-object-pipeline";
 	import {
@@ -4451,6 +4452,11 @@
 				device = await WebGL2Device.build(
 					canvasElement!,
 					EXPLORER_TUNING.portalTransition.visual,
+					{
+						checkUploadErrors:
+							fixture !== null ||
+							webGL2UploadErrorChecksEnabled(window.location.search),
+					},
 				);
 				textureFilteringCapabilities = device.getTextureFilteringCapabilities();
 				if (fixture === "portal-scope-atlas") {

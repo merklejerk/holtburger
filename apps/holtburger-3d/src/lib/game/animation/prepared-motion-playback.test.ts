@@ -96,6 +96,18 @@ describe("prepareMotionPlayback", () => {
 		expect(playback.localBounds.max.x).toBeCloseTo(6);
 	});
 
+	it("orders scaled translation bounds correctly under negative entity scale", () => {
+		const playback = prepareMotionPlayback(
+			motionAssets([animation("0x03000001", [-1, 4])]),
+			template(),
+			new Vec3(-2, 1, 1),
+			staticBounds,
+		);
+
+		expect(playback.localBounds.min.x).toBeCloseTo(-8);
+		expect(playback.localBounds.max.x).toBeCloseTo(2);
+	});
+
 	/// A content defect skips its clip and complains; the entity still animates from the rest of
 	/// its table, because refusing to spawn over one bad clip is worse than playing the others.
 	it("skips a clip whose hooks would misrender the object and keeps the rest", () => {

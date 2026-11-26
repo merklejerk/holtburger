@@ -1,8 +1,20 @@
 /** Context-wide diagnostic observer; scene state and persistence belong to its caller. */
 export interface WebGL2DiagnosticSink {
+	/**
+	 * Whether synchronous per-upload `gl.getError()` checks are enabled for this context.
+	 *
+	 * Disabled during normal play because each `gl.getError()` forces a synchronous GPU-process
+	 * round-trip; enabled explicitly via `--gl-error-checks` or WebGL diagnostic fixtures.
+	 */
+	readonly checkUploadErrors: boolean;
 	record(label: string): void;
 	fail(reason: string): void;
 	changeBytes(delta: number, label: string): void;
+}
+
+/** Whether synchronous per-upload WebGL2 error checks were requested via `--gl-error-checks`. */
+export function webGL2UploadErrorChecksEnabled(search: string): boolean {
+	return new URLSearchParams(search).get("gl-error-checks") === "true";
 }
 
 const observers = new WeakMap<WebGL2RenderingContext, WebGL2DiagnosticSink>();
@@ -39,17 +51,20 @@ export function reportWebGL2Failure(
 }
 
 /**
- * Check at cold publication boundaries, not every draw. Pending errors remain distinct
- * from upload errors: never silently drain them or blame them on the next upload.
+ * Check at upload boundaries when synchronous upload error checks are enabled (or on unregistered
+ * mock test contexts). Pending errors remain distinct from upload errors: never silently drain
+ * them or blame them on the next upload.
  */
 export function requireWebGL2NoError(
 	gl: WebGL2RenderingContext,
 	boundary: string,
 ): void {
+	const observer = observers.get(gl);
+	if (observer !== undefined && !observer.checkUploadErrors) return;
 	const error = gl.getError();
 	if (error === gl.NO_ERROR) return;
 	const reason = `${boundary}: WebGL error 0x${error.toString(16)}.`;
-	reportWebGL2Failure(gl, reason);
+	observer?.fail(reason);
 	throw new Error(reason);
 }
 

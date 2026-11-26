@@ -39,8 +39,11 @@ export async function probeWebGL2ContextLossPolicy(
 ): Promise<WebGL2ContextLossPolicyProbe> {
 	const canvas = document.createElement("canvas");
 	let failureCaptured = false;
-	const device = await WebGL2Device.build(canvas, portalWarpDriveTuning, () => {
-		failureCaptured = true;
+	const device = await WebGL2Device.build(canvas, portalWarpDriveTuning, {
+		checkUploadErrors: true,
+		onFailure: () => {
+			failureCaptured = true;
+		},
 	});
 	const renderer = await device.buildRenderer({} as RenderWorld);
 	try {

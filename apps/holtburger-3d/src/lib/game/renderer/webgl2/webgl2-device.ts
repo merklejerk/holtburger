@@ -91,7 +91,10 @@ export class WebGL2Device {
 	static async build(
 		canvas: HTMLCanvasElement,
 		portalWarpDriveTuning: PortalWarpDriveTuning,
-		onFailure?: (report: WebGL2FailureReport) => void,
+		options: {
+			readonly checkUploadErrors: boolean;
+			readonly onFailure?: (report: WebGL2FailureReport) => void;
+		},
 	): Promise<WebGL2Device> {
 		const gl = canvas.getContext("webgl2", {
 			alpha: false,
@@ -104,10 +107,14 @@ export class WebGL2Device {
 		});
 		if (!gl) throw new Error("WebGL2 is not available in this browser.");
 
-		const failureDiagnostics = new WebGL2FailureDiagnostics(gl, (report) => {
-			if (onFailure) onFailure(report);
-			else console.error("WebGL2 failure", JSON.stringify(report));
-		});
+		const failureDiagnostics = new WebGL2FailureDiagnostics(
+			gl,
+			(report) => {
+				if (options.onFailure) options.onFailure(report);
+				else console.error("WebGL2 failure", JSON.stringify(report));
+			},
+			options.checkUploadErrors,
+		);
 		const resources = new WebGL2ResourceManager(gl);
 		const textureFilteringSupport = probeWebGL2TextureFilteringSupport(gl);
 		return new WebGL2Device(

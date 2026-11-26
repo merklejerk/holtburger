@@ -54,6 +54,7 @@ const MAXIMUM_OPERATIONS = 64;
 
 /** Context-lifetime recorder; the application owns persistence and export of failures. */
 export class WebGL2FailureDiagnostics {
+	readonly checkUploadErrors: boolean;
 	readonly #device: WebGL2FailureDevice;
 	readonly #report: (report: WebGL2FailureReport) => void;
 	readonly #operations: WebGL2Operation[] = [];
@@ -66,7 +67,9 @@ export class WebGL2FailureDiagnostics {
 	constructor(
 		gl: WebGL2RenderingContext,
 		report: (report: WebGL2FailureReport) => void,
+		checkUploadErrors: boolean,
 	) {
+		this.checkUploadErrors = checkUploadErrors;
 		this.#device = {
 			identity: readWebGL2DiagnosticIdentity(gl),
 			maximumTextureSize: gl.getParameter(gl.MAX_TEXTURE_SIZE) as number,

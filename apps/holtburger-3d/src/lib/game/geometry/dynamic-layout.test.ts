@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { compileDynamicLayout } from "./dynamic-layout";
+import { compileDynamicLayout, dynamicLayoutKey } from "./dynamic-layout";
 import type { ResolvedObjectPart } from "../resolution/presentation";
 import { AABB3, Vec3 } from "../math/types";
 
@@ -77,6 +77,40 @@ describe("dynamic layout compilation", () => {
 		expect(compileDynamicLayout([original]).key).not.toBe(
 			compileDynamicLayout([part(3)]).key,
 		);
+	});
+	it("grows merged vertex buffers cleanly when material splits exceed initial capacity", () => {
+		const base = part(0);
+		// 12 triangles reusing the same 3 vertices across 12 distinct slots yields 36 split vertices,
+		// exceeding both source vertex count (3) and the initial 16-vertex floor.
+		const triangleCount = 12;
+		const expanded: ResolvedObjectPart = {
+			...base,
+			geometry: {
+				...base.geometry,
+				indices: new Uint32Array(
+					Array.from({ length: triangleCount }, () => [0, 1, 2]).flat(),
+				),
+				materialSlotIndices: new Uint16Array(
+					Array.from({ length: triangleCount }, (_, slot) => slot),
+				),
+				materialWrapModes: new Uint8Array(triangleCount),
+				materialSideKinds: new Uint8Array(triangleCount),
+				materialSideTypes: new Uint8Array(triangleCount),
+				materialStippling: new Uint8Array(triangleCount),
+			},
+		};
+		const layout = compileDynamicLayout([expanded]);
+		expect(layout.key).toBe(dynamicLayoutKey([expanded]));
+		expect(layout.geometry.materialCount).toBe(triangleCount);
+		expect(layout.geometry.positions.length).toBe(triangleCount * 3 * 3);
+		expect(layout.geometry.normals.length).toBe(triangleCount * 3 * 3);
+		expect(layout.geometry.textureCoordinates.length).toBe(
+			triangleCount * 3 * 2,
+		);
+		expect(layout.geometry.partSelectors.length).toBe(triangleCount * 3);
+		expect(layout.geometry.materialSelectors.length).toBe(triangleCount * 3);
+		expect(layout.geometry.indices.length).toBe(triangleCount * 3);
+		expect(layout.geometry.materialSelectors[35]).toBe(triangleCount - 1);
 	});
 	it("rejects duplicate parts and invalid vertex references", () => {
 		expect(() => compileDynamicLayout([part(1), part(1)])).toThrow(

@@ -22,6 +22,7 @@
 		handleRestPostureKeydown,
 	} from "./combat/rest-posture-controller";
 	import { formatError } from "../lib/format-error";
+	import { webGL2UploadErrorChecksEnabled } from "../lib/game/webgl/diagnostics";
 	import { clientMinimapLandmark } from "./hud/minimap-policy";
 	import { returnToLauncher as navigateToLauncher } from "../app/desktop/launcher-navigation";
 	import type {
@@ -2406,6 +2407,9 @@
 				try {
 					return await GamePresentationOwner.build({
 						onRendererFailure: retainRendererFailure,
+						checkWebGLUploadErrors: webGL2UploadErrorChecksEnabled(
+							window.location.search,
+						),
 						canvas,
 						hostTransport: currentTransport,
 						presentationResources: await currentAssets.resources(),

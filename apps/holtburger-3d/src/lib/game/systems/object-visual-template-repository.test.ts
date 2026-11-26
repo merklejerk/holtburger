@@ -252,6 +252,40 @@ describe("ObjectVisualTemplateRepository", () => {
 		await repository.destroy();
 	});
 
+	it("passes a ready shared layout to subsequent wardrobe variants without recompiling", async () => {
+		const observedSharedLayouts: Array<string | null> = [];
+		const inline = new InlineObjectVisualTemplatePreparer();
+		const preparer: ObjectVisualTemplatePreparer = {
+			prepare(input, sharedLayout) {
+				observedSharedLayouts.push(sharedLayout?.key ?? null);
+				return inline.prepare(input, sharedLayout);
+			},
+			destroy: () => inline.destroy(),
+		};
+		const repository = createRepository(new FixtureGeometry(), preparer);
+		const first = repository.stageOwner([source("first", "appearance:first")]);
+		const second = repository.stageOwner([
+			source("second", "appearance:second"),
+		]);
+		const [firstOutcome, secondOutcome] = await Promise.all([
+			first.completion,
+			second.completion,
+		]);
+		const firstTemplate = firstOutcome.get(
+			objectVisualTemplateKey(source("first", "appearance:first")),
+		);
+		const secondTemplate = secondOutcome.get(
+			objectVisualTemplateKey(source("second", "appearance:second")),
+		);
+		expect(firstTemplate).toBeDefined();
+		expect(secondTemplate).toBeDefined();
+		expect(observedSharedLayouts).toEqual([null, firstTemplate?.layout.key]);
+		expect(secondTemplate?.layout).toBe(firstTemplate?.layout);
+		first.release();
+		second.release();
+		await repository.destroy();
+	});
+
 	it("keeps effective cull changes as material-independent depth boundaries", async () => {
 		const preparer = new InlineObjectVisualTemplatePreparer();
 		const base = source("mixed-cull", "appearance:mixed-cull");
@@ -651,9 +685,12 @@ class CountingPreparer implements ObjectVisualTemplatePreparer {
 	readonly #inline = new InlineObjectVisualTemplatePreparer();
 	count = 0;
 
-	prepare(source: DynamicPresentationSource): Promise<ObjectVisualTemplate> {
+	prepare(
+		source: DynamicPresentationSource,
+		sharedLayout?: ObjectVisualTemplate["layout"],
+	): ObjectVisualTemplate {
 		this.count += 1;
-		return this.#inline.prepare(source);
+		return this.#inline.prepare(source, sharedLayout);
 	}
 
 	async destroy(): Promise<void> {}

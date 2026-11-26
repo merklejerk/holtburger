@@ -6,6 +6,7 @@ import {
 } from "./dynamic-appearance";
 import {
 	compileDynamicLayout,
+	dynamicLayoutKey,
 	type DynamicLayout,
 } from "../geometry/dynamic-layout";
 import {
@@ -70,16 +71,25 @@ export interface PartVisualTemplate {
 
 /** CPU-heavy visual preparation boundary injected into the sharing/lifetime manager. */
 export interface ObjectVisualTemplatePreparer {
-	prepare(source: DynamicPresentationSource): Promise<ObjectVisualTemplate>;
+	/**
+	 * Prepare one immutable template. When the repository already retains a ready geometry layout
+	 * for the same ordered parts, it supplies `sharedLayout` so wardrobe variants skip recompiling
+	 * identical vertex buffers.
+	 */
+	prepare(
+		source: DynamicPresentationSource,
+		sharedLayout?: DynamicLayout,
+	): ObjectVisualTemplate | Promise<ObjectVisualTemplate>;
 	destroy(): Promise<void>;
 }
 
 /** Main-thread preparer used until visual-template work moves behind a worker boundary. */
 export class InlineObjectVisualTemplatePreparer implements ObjectVisualTemplatePreparer {
-	async prepare(
+	prepare(
 		source: DynamicPresentationSource,
-	): Promise<ObjectVisualTemplate> {
-		return prepareObjectVisualTemplate(source);
+		sharedLayout?: DynamicLayout,
+	): ObjectVisualTemplate {
+		return prepareObjectVisualTemplate(source, sharedLayout);
 	}
 
 	async destroy(): Promise<void> {}
@@ -192,25 +202,69 @@ export class ObjectVisualTemplateAssetRepository {
 				kind: "failed",
 			},
 		};
-		const completion = this.#preparer
-			.prepare(source)
-			.then((asset) => {
-				if (asset.key !== key)
-					throw new Error(
-						`Visual preparer returned ${asset.key} for requested ${key}.`,
-					);
-				if (this.#entries.get(key) === entry)
-					entry.state = { asset, kind: "ready" };
-				return asset;
-			})
-			.catch((cause: unknown) => {
-				if (this.#entries.get(key) === entry)
-					entry.state = { cause, kind: "failed" };
-				throw cause;
-			});
-		entry.state = { completion, kind: "preparing" };
+		const sharedLayout = this.#findReadyLayout(
+			dynamicLayoutKey(source.presentation.parts),
+		);
 		this.#entries.set(key, entry);
+		let outcome: ObjectVisualTemplate | Promise<ObjectVisualTemplate>;
+		try {
+			outcome = this.#preparer.prepare(source, sharedLayout);
+		} catch (cause: unknown) {
+			entry.state = { cause, kind: "failed" };
+			return entry;
+		}
+		if (isPromiseLike(outcome)) {
+			const completion = outcome
+				.then((asset) => {
+					const finalized = this.#finalizeAsset(key, asset, sharedLayout);
+					if (this.#entries.get(key) === entry)
+						entry.state = { asset: finalized, kind: "ready" };
+					return finalized;
+				})
+				.catch((cause: unknown) => {
+					if (this.#entries.get(key) === entry)
+						entry.state = { cause, kind: "failed" };
+					throw cause;
+				});
+			entry.state = { completion, kind: "preparing" };
+			return entry;
+		}
+		try {
+			const finalized = this.#finalizeAsset(key, outcome, sharedLayout);
+			entry.state = { asset: finalized, kind: "ready" };
+		} catch (cause: unknown) {
+			entry.state = { cause, kind: "failed" };
+		}
 		return entry;
+	}
+
+	#findReadyLayout(layoutKey: ObjectGeometryKey): DynamicLayout | undefined {
+		for (const existing of this.#entries.values()) {
+			if (existing.state.kind !== "ready") continue;
+			if (existing.state.asset.layout.key === layoutKey)
+				return existing.state.asset.layout;
+		}
+		return undefined;
+	}
+
+	#finalizeAsset(
+		key: ObjectVisualTemplateKey,
+		asset: ObjectVisualTemplate,
+		sharedLayout: DynamicLayout | undefined,
+	): ObjectVisualTemplate {
+		if (asset.key !== key)
+			throw new Error(
+				`Visual preparer returned ${asset.key} for requested ${key}.`,
+			);
+		if (sharedLayout !== undefined && asset.layout === sharedLayout)
+			return asset;
+		// Ready entries already own their lifetime. Reuse their CPU layout without keeping an
+		// independent cache of retired wardrobe variants, even if an async/custom preparer built its
+		// own layout concurrently.
+		const existingLayout = this.#findReadyLayout(asset.layout.key);
+		return existingLayout !== undefined && existingLayout !== asset.layout
+			? { ...asset, layout: existingLayout }
+			: asset;
 	}
 
 	#release(entry: ObjectVisualTemplateAssetEntry): void {
@@ -517,7 +571,7 @@ export class ObjectVisualTemplateRepository<
 		const resourceOwner = objectVisualTemplateResourceOwnerId(entry.key);
 		try {
 			assetHandle = await this.#assets.acquire(source);
-			let template = assetHandle.asset;
+			const template = assetHandle.asset;
 			if (!this.#entryIsRetained(entry)) {
 				assetHandle.release();
 				assetHandle = null;
@@ -582,15 +636,6 @@ export class ObjectVisualTemplateRepository<
 				assetHandle.release();
 				assetHandle = null;
 				return template;
-			}
-			// Ready entries already own their lifetime. Reuse their CPU layout as well as the keyed
-			// GPU allocation, without keeping an independent cache of retired wardrobe variants.
-			for (const existing of this.#entries.values()) {
-				if (existing.state.kind !== "ready") continue;
-				const layout = existing.state.template.layout;
-				if (layout.key !== template.layout.key) continue;
-				template = { ...template, layout };
-				break;
 			}
 			const releaseAppearance = this.#retainAppearance(template);
 			entry.state = {
@@ -804,8 +849,18 @@ function partVisualTemplateKey(
 	return `part-visual-template:${templateKey}/part:${part.partIndex}/${part.geometry.id}` as PartVisualTemplateKey;
 }
 
+function isPromiseLike<T>(value: T | Promise<T>): value is Promise<T> {
+	return (
+		typeof value === "object" &&
+		value !== null &&
+		"then" in value &&
+		typeof value.then === "function"
+	);
+}
+
 function prepareObjectVisualTemplate(
 	source: DynamicPresentationSource,
+	sharedLayout?: DynamicLayout,
 ): ObjectVisualTemplate {
 	const key = objectVisualTemplateKey(source);
 	const textureRequirements = new Map<AssetTextureKey, AssetTextureFact>();
@@ -853,7 +908,17 @@ function prepareObjectVisualTemplate(
 	);
 	const selectionCarrier =
 		selectionCarriers.length === 1 ? selectionCarriers[0] : undefined;
-	const layout = compileDynamicLayout(source.presentation.parts);
+	let layout: DynamicLayout;
+	if (sharedLayout !== undefined) {
+		const expectedKey = dynamicLayoutKey(source.presentation.parts);
+		if (sharedLayout.key !== expectedKey)
+			throw new Error(
+				`Shared layout ${sharedLayout.key} does not match expected ${expectedKey}.`,
+			);
+		layout = sharedLayout;
+	} else {
+		layout = compileDynamicLayout(source.presentation.parts);
+	}
 	return {
 		layout,
 		appearance: compileDynamicAppearance(layout, parts),

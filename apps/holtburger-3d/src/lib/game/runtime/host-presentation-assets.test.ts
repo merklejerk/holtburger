@@ -31,6 +31,7 @@ describe("HostPresentationAssets", () => {
 			GamePresentationOwner.build({
 				// Content fails before this test's canvas can be used to create a device.
 				canvas: {} as HTMLCanvasElement,
+				checkWebGLUploadErrors: false,
 				hostTransport: host,
 				presentationResources: resources,
 				frameSettings: EXPLORER_TUNING.frameSettings,

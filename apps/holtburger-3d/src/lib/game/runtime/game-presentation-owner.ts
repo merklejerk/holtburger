@@ -32,6 +32,8 @@ export interface GamePresentationOwnerDependencies {
 	readonly canvas: HTMLCanvasElement;
 	/** App-owned persistence receives first-failure evidence before runtime teardown. */
 	readonly onRendererFailure?: (report: WebGL2FailureReport) => void;
+	/** Explicit opt-in for synchronous per-upload `gl.getError()` checks (`--gl-error-checks`). */
+	readonly checkWebGLUploadErrors: boolean;
 	readonly hostTransport: HostTransport;
 	/** Borrowed app-owned content assets; world construction and rollback never destroy them. */
 	readonly presentationResources: HostPresentationResources;
@@ -142,11 +144,10 @@ export class GamePresentationOwner {
 			staticDetailOwner = new ActiveRegionStaticDetailOwner(texturePixelSource);
 			const staticDetailBinding = await staticDetailOwner.install(activeRegion);
 			signal?.throwIfAborted();
-			device = await WebGL2Device.build(
-				canvas,
-				portalWarpDriveTuning,
-				dependencies.onRendererFailure,
-			);
+			device = await WebGL2Device.build(canvas, portalWarpDriveTuning, {
+				checkUploadErrors: dependencies.checkWebGLUploadErrors,
+				onFailure: dependencies.onRendererFailure,
+			});
 			signal?.throwIfAborted();
 			const textureFilteringCapabilities =
 				device.getTextureFilteringCapabilities();

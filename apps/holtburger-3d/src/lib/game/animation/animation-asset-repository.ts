@@ -23,6 +23,16 @@ export interface PreparedAnimationFrame {
 	readonly translation: Readonly<Vec3>;
 }
 
+/** Unscaled translation envelope for one rigid part across all authored frames of a clip. */
+export interface PartTranslationBounds {
+	readonly minX: number;
+	readonly minY: number;
+	readonly minZ: number;
+	readonly maxX: number;
+	readonly maxY: number;
+	readonly maxZ: number;
+}
+
 /** Immutable prepared animation shared independently from entity playback state. */
 export interface PreparedAnimation {
 	readonly id: DatAssetId;
@@ -31,6 +41,13 @@ export interface PreparedAnimation {
 	readonly framesPerSecond: number;
 	/** Frame-major rigid-part transforms indexed by `frame * partCount + part`. */
 	readonly partFrames: readonly PreparedAnimationFrame[];
+	/**
+	 * Per-part unscaled translation envelopes indexed by `partIndex` (`[]` when `frameCount === 0`).
+	 *
+	 * Precomputed once per immutable clip so entity-level bound sweeps scale and expand one box per
+	 * part instead of rescanning every authored frame on each spawn.
+	 */
+	readonly partTranslationBounds: readonly PartTranslationBounds[];
 	/** Optional frame-major authored root offsets. */
 	readonly positionFrames: readonly PreparedAnimationFrame[];
 	/**
@@ -147,6 +164,7 @@ export function prepareAnimation(
 			`Animation ${decoded.id} playback rate must be finite and non-zero.`,
 		);
 	}
+	const partFrames = decoded.partFrames.map(prepareAnimationFrame);
 	return {
 		authoredRootTranslates: decoded.positionFrames.some(
 			(frame) => frame.m41 !== 0 || frame.m42 !== 0 || frame.m43 !== 0,
@@ -157,9 +175,45 @@ export function prepareAnimation(
 		emitterInfoIds: collectEmitterInfoIds(decoded.hooks),
 		id: decoded.id,
 		partCount: decoded.partCount,
-		partFrames: decoded.partFrames.map(prepareAnimationFrame),
+		partFrames,
+		partTranslationBounds: computePartTranslationBounds(
+			partFrames,
+			decoded.frameCount,
+			decoded.partCount,
+		),
 		positionFrames: decoded.positionFrames.map(prepareAnimationFrame),
 	};
+}
+
+/** Compute each part's unscaled min/max translation across all frames without heap churn. */
+function computePartTranslationBounds(
+	partFrames: readonly PreparedAnimationFrame[],
+	frameCount: number,
+	partCount: number,
+): readonly PartTranslationBounds[] {
+	if (frameCount === 0 || partCount === 0) return [];
+	const bounds: PartTranslationBounds[] = [];
+	for (let partIndex = 0; partIndex < partCount; partIndex += 1) {
+		let minX = Number.POSITIVE_INFINITY;
+		let minY = Number.POSITIVE_INFINITY;
+		let minZ = Number.POSITIVE_INFINITY;
+		let maxX = Number.NEGATIVE_INFINITY;
+		let maxY = Number.NEGATIVE_INFINITY;
+		let maxZ = Number.NEGATIVE_INFINITY;
+		for (let frameIndex = 0; frameIndex < frameCount; frameIndex += 1) {
+			const pose = partFrames[frameIndex * partCount + partIndex];
+			if (pose === undefined) continue;
+			const { x, y, z } = pose.translation;
+			if (x < minX) minX = x;
+			if (x > maxX) maxX = x;
+			if (y < minY) minY = y;
+			if (y > maxY) maxY = y;
+			if (z < minZ) minZ = z;
+			if (z > maxZ) maxZ = z;
+		}
+		bounds.push({ minX, minY, minZ, maxX, maxY, maxZ });
+	}
+	return bounds;
 }
 
 /** Preserve the decoder's coordinate conversion and the sampler's existing rotation extraction. */

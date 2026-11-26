@@ -4,6 +4,7 @@
 		retainRendererFailure,
 		retainStartupFailure,
 	} from "../app/desktop/app-failure-report";
+	import { webGL2UploadErrorChecksEnabled } from "../lib/game/webgl/diagnostics";
 	import { APP_PERSISTENCE_TUNING } from "../app/desktop/app-tuning";
 	import { bindClientAudioForeground } from "../app/desktop/audio-foreground";
 	import HudCornerControls from "../app/hud/HudCornerControls.svelte";
@@ -1239,6 +1240,9 @@
 				if (destroyed) return;
 				const presentation = await GamePresentationOwner.build({
 					onRendererFailure: retainRendererFailure,
+					checkWebGLUploadErrors: webGL2UploadErrorChecksEnabled(
+						window.location.search,
+					),
 					canvas,
 					hostTransport,
 					presentationResources: await presentationAssets.resources(),

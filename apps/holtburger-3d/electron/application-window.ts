@@ -41,6 +41,11 @@ export class ApplicationWindow extends EventEmitter {
 	}
 	/** Native DIP bounds can differ from the page viewport after fractional scaling. */
 	async getViewportSize(): Promise<WindowContentSize> {
+		// Before any document loads, executeJavaScript has no renderer frame and would stall.
+		if (this.webContents.getURL() === "") {
+			const [width, height] = this.#native.getContentSize();
+			return { width, height };
+		}
 		// A stalled page must not hold queued native controls or their retirement open.
 		let deadline: ReturnType<typeof setTimeout> | undefined;
 		try {

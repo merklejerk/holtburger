@@ -33,7 +33,7 @@ const userContext = {
 };
 
 const initialWindow = {
-	normalBounds: { width: 1440, height: 900 },
+	contentSize: { width: 1440, height: 900 },
 	maximized: false,
 	borderless: false,
 	fullscreen: false,
@@ -41,7 +41,7 @@ const initialWindow = {
 } as const;
 
 const defaultUser = createDefaultClientUserSettings(
-	initialWindow.normalBounds,
+	initialWindow.contentSize,
 	8,
 	"windows",
 );

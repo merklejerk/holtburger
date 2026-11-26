@@ -27,7 +27,7 @@ afterEach(async () => {
 });
 
 const initialWindow = {
-	normalBounds: { width: 1280, height: 720 },
+	contentSize: { width: 1280, height: 720 },
 	maximized: false,
 	fullscreen: false,
 	borderless: false,

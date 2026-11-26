@@ -8,14 +8,15 @@ import {
 } from "../src/app/desktop/window-display-contract.js";
 import type { ClientWindowSettings } from "../src/app/desktop/window-settings-contract.js";
 
+/** Bound viewport convergence steps when a compositor clamps or oscillates. */
+const MAX_VIEWPORT_RESIZE_ATTEMPTS = 4;
+
 /** Native operations needed by the app-local display owner, also usable by focused probes. */
 type DisplayWindow = Pick<
 	BaseWindow,
 	| "getBounds"
-	| "setSize"
 	| "getContentSize"
-	| "getContentBounds"
-	| "setContentBounds"
+	| "setContentSize"
 	| "isFullScreen"
 	| "isMaximized"
 	| "setFullScreen"
@@ -110,42 +111,46 @@ function nativeTransition(
 	});
 }
 
-/** Correct native scaling roundoff without repeatedly converting the window's position. */
+/** Request the target viewport via content size, correcting native scaling roundoff. */
 async function resizeWindowContent(
 	surface: DisplaySurface,
 	target: WindowContentSize,
-): Promise<void> {
+): Promise<WindowContentSize> {
 	const window = surface.native;
-	const { x, y } = window.getContentBounds();
 	let request = target;
 	let best: {
 		readonly request: WindowContentSize;
+		readonly measured: WindowContentSize;
 		readonly error: number;
 	} | null = null;
-	for (;;) {
+	for (let attempt = 0; attempt < MAX_VIEWPORT_RESIZE_ATTEMPTS; attempt += 1) {
 		await nativeTransition(window, null, () =>
-			window.setContentBounds({ x, y, ...request }),
+			window.setContentSize(request.width, request.height),
 		);
-		const { width, height } = await surface.getViewportSize();
+		const measured = await surface.getViewportSize();
 		const error =
-			Math.abs(target.width - width) + Math.abs(target.height - height);
-		if (error === 0) return;
+			Math.abs(target.width - measured.width) +
+			Math.abs(target.height - measured.height);
+		if (error === 0) return measured;
 		// Clamping and unrepresentable logical sizes can prevent an exact result.
 		// Retain the closest achieved viewport; the snapshot reports its actual dimensions.
 		if (best !== null && error >= best.error) {
-			const closest = best.request;
-			await nativeTransition(window, null, () =>
-				window.setContentBounds({ x, y, ...closest }),
-			);
-			return;
+			if (error > best.error) {
+				const closest = best.request;
+				await nativeTransition(window, null, () =>
+					window.setContentSize(closest.width, closest.height),
+				);
+				return await surface.getViewportSize();
+			}
+			return measured;
 		}
-		best = { request, error };
-		// Each continuing step must reduce the integer error, so this search is finite.
+		best = { request, measured, error };
 		request = {
-			width: Math.max(1, request.width + target.width - width),
-			height: Math.max(1, request.height + target.height - height),
+			width: Math.max(1, request.width + target.width - measured.width),
+			height: Math.max(1, request.height + target.height - measured.height),
 		};
 	}
+	return best?.measured ?? (await surface.getViewportSize());
 }
 
 /** Resize locking is windowed policy; fullscreen needs an unconstrained native surface. */
@@ -158,46 +163,57 @@ function applyNativeResizePolicy(
 	window.setMaximizable(enabled);
 }
 
+/** Unlock fixed-size hints during programmatic resizes so compositors accept the new size. */
+async function withUnlockedResize<T>(
+	surface: DisplaySurface,
+	freeResize: boolean,
+	operation: () => Promise<T>,
+): Promise<T> {
+	surface.native.setResizable(true);
+	surface.native.setMaximizable(true);
+	try {
+		return await operation();
+	} finally {
+		applyNativeResizePolicy(surface.native, freeResize);
+	}
+}
+
 /** Retained windowed geometry is independent of native fullscreen configure events. */
-type WindowedGeometry = Pick<
-	ClientWindowSettings,
-	"normalBounds" | "maximized"
->;
+type WindowedGeometry = Pick<ClientWindowSettings, "contentSize" | "maximized">;
 
 function readWindowedGeometry(
 	window: DisplayWindow,
 	previous: WindowedGeometry,
+	measured?: WindowContentSize,
 ): WindowedGeometry {
 	const maximized = window.isMaximized();
-	// Native normal-bounds metadata can lag programmatic sizing while resize is locked.
-	// Read actual windowed bounds; maximizing retains the last observed normal size.
-	const { width, height } = maximized
-		? previous.normalBounds
-		: window.getBounds();
-	return { normalBounds: { width, height }, maximized };
+	if (maximized) return { contentSize: previous.contentSize, maximized: true };
+	if (measured !== undefined)
+		return { contentSize: measured, maximized: false };
+	const [width, height] = window.getContentSize();
+	return { contentSize: { width, height }, maximized: false };
 }
 
-/** Wait for native sizing before locking; leave-full-screen can precede the windowed resize. */
+/** Restore windowed viewport size and maximize state before reinstating resize locks. */
 async function restoreWindowedGeometry(
-	window: DisplayWindow,
+	surface: DisplaySurface,
 	geometry: WindowedGeometry,
 ): Promise<WindowedGeometry> {
+	const window = surface.native;
 	// A compositor may already have restored maximization on fullscreen exit.
 	// Do not unmaximize and remaximize it; those configure events can outlive the next request.
 	if (geometry.maximized && window.isMaximized()) return geometry;
 	if (window.isMaximized())
 		await nativeTransition(window, "unmaximize", () => window.unmaximize());
-	const bounds = window.getBounds();
-	const { width, height } = geometry.normalBounds;
-	if (bounds.width !== width || bounds.height !== height) {
-		await nativeTransition(window, "resize", () =>
-			window.setSize(width, height),
-		);
-	}
-	const accepted = readWindowedGeometry(window, geometry);
+	const current = await surface.getViewportSize();
+	const accepted =
+		current.width === geometry.contentSize.width &&
+		current.height === geometry.contentSize.height
+			? current
+			: await resizeWindowContent(surface, geometry.contentSize);
 	if (geometry.maximized && !window.isMaximized())
 		await nativeTransition(window, "maximize", () => window.maximize());
-	return { ...accepted, maximized: window.isMaximized() };
+	return { contentSize: accepted, maximized: window.isMaximized() };
 }
 
 /** A preview retains persistence-safe settings throughout apply, confirmation, and rollback. */
@@ -239,7 +255,7 @@ export class WindowDisplay {
 		const [width, height] = surface.native.getContentSize();
 		this.#contentSize = { width, height };
 		this.#windowed = {
-			normalBounds: saved.normalBounds,
+			contentSize: saved.contentSize,
 			maximized: saved.maximized,
 		};
 		this.#report = report;
@@ -292,7 +308,15 @@ export class WindowDisplay {
 		if (!this.#busy && !this.#closed)
 			void this.#measureViewport()
 				.then(() => {
-					if (!this.#closed) this.#publish(this.snapshot());
+					if (!this.#closed) {
+						if (!this.#busy && !this.#window.isFullScreen())
+							this.#windowed = readWindowedGeometry(
+								this.#window,
+								this.#windowed,
+								this.#contentSize,
+							);
+						this.#publish(this.snapshot());
+					}
 				})
 				.catch((error: unknown) => {
 					// Navigation may reject a pending measurement after this attempt retires.
@@ -380,7 +404,7 @@ export class WindowDisplay {
 		// An OS mode event can be followed by resize events before this queued operation runs.
 		// Its captured windowed geometry remains the authority for fullscreen restoration.
 		this.#windowed = {
-			normalBounds: previous.normalBounds,
+			contentSize: previous.contentSize,
 			maximized: previous.maximized,
 		};
 		try {
@@ -417,26 +441,21 @@ export class WindowDisplay {
 		preview.confirmation = { kind: "recovery", id: preview.confirmation.id };
 		const previous = preview.previous;
 		this.#windowed = {
-			normalBounds: previous.normalBounds,
+			contentSize: previous.contentSize,
 			maximized: previous.maximized,
 		};
 		this.#freeResize = previous.freeResize;
-		// Release native locks while restoring arbitrary custom bounds and maximization.
-		this.#window.setResizable(true);
-		this.#window.setMaximizable(true);
-		try {
+		await withUnlockedResize(this.#surface, this.#freeResize, async () => {
 			await changeNativeFullscreen(this.#window, false);
 			this.#surface.setBorderless(previous.borderless);
 			setGameMinimumContentSize(this.#window);
 			this.#windowed = await restoreWindowedGeometry(
-				this.#window,
+				this.#surface,
 				this.#windowed,
 			);
 			await changeNativeFullscreen(this.#window, previous.fullscreen);
 			this.#preview = null;
-		} finally {
-			applyNativeResizePolicy(this.#window, this.#freeResize);
-		}
+		});
 	}
 	#enqueue(apply: () => Promise<void>): Promise<void> {
 		if (this.#closed)
@@ -461,21 +480,18 @@ export class WindowDisplay {
 	): Promise<void> {
 		const window = this.#window;
 		if (request.kind === "fullscreen") {
-			if (request.enabled && !window.isFullScreen())
-				this.#windowed = readWindowedGeometry(window, this.#windowed);
-			// Release fixed-size hints before the window manager configures the fullscreen surface.
-			window.setResizable(true);
-			window.setMaximizable(true);
-			try {
+			if (request.enabled && !window.isFullScreen()) {
+				const measured = await this.#surface.getViewportSize();
+				this.#windowed = readWindowedGeometry(window, this.#windowed, measured);
+			}
+			await withUnlockedResize(this.#surface, this.#freeResize, async () => {
 				await changeNativeFullscreen(window, request.enabled);
 				if (!request.enabled)
 					this.#windowed = await restoreWindowedGeometry(
-						window,
+						this.#surface,
 						this.#windowed,
 					);
-			} finally {
-				applyNativeResizePolicy(window, this.#freeResize);
-			}
+			});
 			return;
 		}
 		if (window.isFullScreen())
@@ -483,31 +499,29 @@ export class WindowDisplay {
 				"Leave fullscreen before changing window borders, size, or free resize.",
 			);
 		if (request.kind === "borderless") {
-			const maximized = window.isMaximized();
-			if (maximized)
-				await nativeTransition(window, "unmaximize", () => window.unmaximize());
-			const { width, height } = await this.#surface.getViewportSize();
-			this.#surface.setBorderless(request.enabled);
-			setGameMinimumContentSize(this.#window);
-			applyNativeResizePolicy(this.#window, this.#freeResize);
-			await nativeTransition(this.#window, null, () => {});
-			await resizeWindowContent(this.#surface, { width, height });
-			this.#windowed = readWindowedGeometry(this.#window, this.#windowed);
-			if (maximized)
-				await nativeTransition(this.#window, "maximize", () =>
-					this.#window.maximize(),
-				);
+			await withUnlockedResize(this.#surface, this.#freeResize, async () => {
+				const maximized = this.#window.isMaximized();
+				if (maximized)
+					await nativeTransition(this.#window, "unmaximize", () =>
+						this.#window.unmaximize(),
+					);
+				const target = await this.#surface.getViewportSize();
+				this.#surface.setBorderless(request.enabled);
+				setGameMinimumContentSize(this.#window);
+				await nativeTransition(this.#window, null, () => {});
+				const accepted = await resizeWindowContent(this.#surface, target);
+				this.#windowed = { contentSize: accepted, maximized };
+				if (maximized)
+					await nativeTransition(this.#window, "maximize", () =>
+						this.#window.maximize(),
+					);
+			});
 			return;
 		}
 		if (request.kind === "free-resize") {
 			if (!request.enabled && window.isMaximized())
 				await nativeTransition(window, "unmaximize", () => window.unmaximize());
-			const { width, height } = await this.#surface.getViewportSize();
 			applyNativeResizePolicy(window, request.enabled);
-			if (!window.isMaximized()) {
-				await nativeTransition(window, null, () => {});
-				await resizeWindowContent(this.#surface, { width, height });
-			}
 			this.#freeResize = request.enabled;
 			return;
 		}
@@ -519,11 +533,12 @@ export class WindowDisplay {
 			)
 		)
 			throw new Error("Window size is not a supported preset.");
-		if (window.isMaximized())
-			await nativeTransition(window, "unmaximize", () => window.unmaximize());
-		const { width, height } = await this.#surface.getViewportSize();
-		if (width === request.size.width && height === request.size.height) return;
-		await resizeWindowContent(this.#surface, request.size);
+		await withUnlockedResize(this.#surface, this.#freeResize, async () => {
+			this.#windowed = await restoreWindowedGeometry(this.#surface, {
+				contentSize: request.size,
+				maximized: false,
+			});
+		});
 	}
 	/** Drain requests before another document restores its own native geometry. */
 	async close(): Promise<void> {
@@ -557,8 +572,8 @@ export function setGameMinimumContentSize(
 	const [width, height] = window.getContentSize();
 	const minimum = APP_WINDOW_TUNING.game.minimumContentSize;
 	window.setMinimumSize(
-		minimum.width + outer.width - width,
-		minimum.height + outer.height - height,
+		minimum.width + Math.max(0, outer.width - width),
+		minimum.height + Math.max(0, outer.height - height),
 	);
 }
 
@@ -570,25 +585,26 @@ export async function restoreWindowGeometry(
 ): Promise<ClientWindowSettings> {
 	await changeNativeFullscreen(surface.native, false);
 	surface.setBorderless(role === "client" && value.borderless);
-	const window = surface.native;
-	window.setResizable(true);
-	window.setMaximizable(true);
-	if (window.isMaximized())
-		await nativeTransition(window, "unmaximize", () => window.unmaximize());
-	if (role === "picker") {
-		const minimum = APP_WINDOW_TUNING.launcher.minimumSize;
-		window.setMinimumSize(minimum.width, minimum.height);
-	} else setGameMinimumContentSize(window);
-	const accepted = await restoreWindowedGeometry(window, {
-		normalBounds: value.normalBounds,
-		maximized: value.maximized && value.freeResize,
-	});
-	if (role === "client") await changeNativeFullscreen(window, value.fullscreen);
 	const freeResize = role === "picker" || value.freeResize;
-	applyNativeResizePolicy(window, freeResize);
+	const accepted = await withUnlockedResize(surface, freeResize, async () => {
+		const window = surface.native;
+		if (window.isMaximized())
+			await nativeTransition(window, "unmaximize", () => window.unmaximize());
+		if (role === "picker") {
+			const minimum = APP_WINDOW_TUNING.launcher.minimumSize;
+			window.setMinimumSize(minimum.width, minimum.height);
+		} else setGameMinimumContentSize(window);
+		const restored = await restoreWindowedGeometry(surface, {
+			contentSize: value.contentSize,
+			maximized: value.maximized && freeResize,
+		});
+		if (role === "client")
+			await changeNativeFullscreen(window, value.fullscreen);
+		return restored;
+	});
 	return {
 		...accepted,
-		fullscreen: window.isFullScreen(),
+		fullscreen: surface.native.isFullScreen(),
 		freeResize,
 		borderless: surface.isBorderless(),
 	};

@@ -8,7 +8,7 @@ import { encryptCredentials, decryptCredentials } from "./launcher-credentials";
 
 const directories: string[] = [];
 const geometry = {
-	normalBounds: { width: 900, height: 650 },
+	contentSize: { width: 900, height: 650 },
 	maximized: false,
 	borderless: false,
 	fullscreen: false,

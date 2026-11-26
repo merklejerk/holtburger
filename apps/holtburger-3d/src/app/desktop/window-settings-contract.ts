@@ -1,17 +1,11 @@
 import { z } from "zod";
+import { windowContentSizeSchema } from "./window-display-contract.js";
 
 /** Native window state is available before renderer settings bootstrap. */
 export const clientWindowSettingsSchema = z
 	.object({
-		/** Native outer window dimensions; retained separately from content-size presets. */
-		normalBounds: z
-			.object({
-				width: z.number().int().positive().safe(),
-				height: z.number().int().positive().safe(),
-			})
-			// Discard retired position fields when reading existing settings.
-			.strip()
-			.readonly(),
+		/** Windowed viewport dimensions in CSS pixels, excluding native window decorations. */
+		contentSize: windowContentSizeSchema,
 		maximized: z.boolean(),
 		/** Client-only native chrome preference; the launcher always has its title bar. */
 		borderless: z.boolean().default(false),

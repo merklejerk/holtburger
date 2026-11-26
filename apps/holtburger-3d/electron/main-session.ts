@@ -346,7 +346,12 @@ export async function installClientSession(
 		pickerFailure = diagnostic;
 		pickerView = view;
 		context.setDocumentRetirement(undefined);
-		await restoreGeometry(window, launcher.window, "picker");
+		const restoredLauncher = await restoreGeometry(
+			window,
+			launcher.window,
+			"picker",
+		);
+		let launcherContentSize = restoredLauncher.contentSize;
 		geometrySlot.stopGeometry = observeWindowGeometry(
 			window,
 			(value) => launcher.updateWindow(value),
@@ -355,10 +360,14 @@ export async function installClientSession(
 				reportWindowSettingsFailure(window, error);
 			},
 			() => {
-				const { width, height } = window.native.getNormalBounds();
+				const maximized = window.native.isMaximized();
+				if (!maximized) {
+					const [width, height] = window.native.getContentSize();
+					launcherContentSize = { width, height };
+				}
 				return {
-					normalBounds: { width, height },
-					maximized: window.native.isMaximized(),
+					contentSize: launcherContentSize,
+					maximized,
 					fullscreen: false,
 					freeResize: true,
 					borderless: false,

@@ -16,7 +16,7 @@ vi.mock("node:fs/promises", async (importOriginal) => {
 });
 
 const window = {
-	normalBounds: { width: 900, height: 650 },
+	contentSize: { width: 900, height: 650 },
 	maximized: false,
 	borderless: false,
 	fullscreen: false,
@@ -89,7 +89,7 @@ describe("bounded launcher settings repair", () => {
 				retired: true,
 			})),
 			window: {
-				normalBounds: { width: -1, height: window.normalBounds.height },
+				contentSize: { width: -1, height: window.contentSize.height },
 				maximized: true,
 			},
 		};

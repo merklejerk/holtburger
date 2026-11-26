@@ -55,7 +55,7 @@ app.whenReady().then(async () => {
 			}
 		})(join(directory, "themes"), console.error);
 		const store = new ClientSettingsStore(join(directory, "settings.json"), {
-			normalBounds: { width: 1200, height: 900 },
+			contentSize: { width: 1200, height: 900 },
 			maximized: false,
 			borderless: false,
 			fullscreen: false,

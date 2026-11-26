@@ -32,14 +32,14 @@ const userContext = {
 };
 
 const initialWindow = {
-	normalBounds: { width: 1440, height: 900 },
+	contentSize: { width: 1440, height: 900 },
 	maximized: false,
 	borderless: false,
 	fullscreen: false,
 	freeResize: true,
 };
 const user = createDefaultClientUserSettings(
-	initialWindow.normalBounds,
+	initialWindow.contentSize,
 	8,
 	"windows",
 );
@@ -121,13 +121,13 @@ describe("persisted settings repair", () => {
 				version: 1,
 				obsolete: true,
 				value: {
-					normalBounds: { ...initialWindow.normalBounds, x: 250, width: -1 },
+					contentSize: { ...initialWindow.contentSize, width: -1 },
 					maximized: true,
 				},
 			},
 		});
 		expect(store.readWindow()).toEqual({
-			normalBounds: initialWindow.normalBounds,
+			contentSize: initialWindow.contentSize,
 			maximized: true,
 			borderless: false,
 			fullscreen: false,

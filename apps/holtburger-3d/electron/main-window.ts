@@ -226,7 +226,7 @@ export function initialGeometry(
 	height: number,
 ): ClientWindowSettings {
 	return {
-		normalBounds: {
+		contentSize: {
 			width,
 			height,
 		},

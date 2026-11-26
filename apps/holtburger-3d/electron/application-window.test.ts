@@ -38,6 +38,7 @@ vi.mock("electron", () => ({
 	},
 	WebContentsView: class {
 		readonly webContents = {
+			getURL: vi.fn(() => "http://127.0.0.1:1421/client/index.html"),
 			executeJavaScript: vi.fn(
 				async () => APP_WINDOW_TUNING.game.initialContentSize,
 			),
@@ -83,6 +84,16 @@ describe("application window ownership", () => {
 			APP_WINDOW_TUNING.game.initialContentSize,
 		);
 		expect(vi.getTimerCount()).toBe(0);
+		window.native.destroy();
+	});
+
+	it("reads native content size directly before any document has loaded", async () => {
+		const window = createWindow();
+		vi.spyOn(window.webContents, "getURL").mockReturnValueOnce("");
+		await expect(window.getViewportSize()).resolves.toEqual(
+			APP_WINDOW_TUNING.game.initialContentSize,
+		);
+		expect(window.webContents.executeJavaScript).not.toHaveBeenCalled();
 		window.native.destroy();
 	});
 

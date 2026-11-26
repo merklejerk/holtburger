@@ -257,6 +257,9 @@ pub struct PoseReconciliationState {
     mode: ReconciliationMode,
     /// Accepted-progress history belongs to the correction lifetime, not its replaceable target.
     recovery: Option<recovery::RecoveryObservation>,
+    /// Stationary non-contact stall history for remote grounded bodies whose server contact flag
+    /// was dropped (e.g. ACE non-PK wall-clipping clearing OnWalkable without StepDown recovery).
+    observed_stall: Option<recovery::ObservedStall>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
@@ -283,6 +286,7 @@ impl PoseReconciliationState {
         self.mode =
             ReconciliationMode::LocalConfirmation(confirmed_travel_constraint(confirmed, current));
         self.recovery = None;
+        self.observed_stall = None;
     }
 
     /// Replaces pose-only steering without renewing an active correction's progress history.
@@ -297,6 +301,7 @@ impl PoseReconciliationState {
         {
             self.recovery = None;
         }
+        self.observed_stall = None;
         let mut state = RemotePoseReconciliationState::default();
         state.interpolate(target, current, keep_heading, adjusted_max_speed_mps);
         self.mode = ReconciliationMode::RemotePose(state);
@@ -316,6 +321,7 @@ impl PoseReconciliationState {
         if !matches!(self.mode, ReconciliationMode::Physical(_)) {
             self.recovery = None;
         }
+        self.observed_stall = None;
         self.mode = ReconciliationMode::Physical(PhysicalCorrection {
             activity,
             reference,
@@ -331,7 +337,13 @@ impl PoseReconciliationState {
     /// interpolation must be classified by the caller instead of being silently overwritten.
     pub(crate) fn begin_contact_return(&mut self, current: WorldPosition) -> anyhow::Result<()> {
         match self.mode {
-            ReconciliationMode::Empty => self.correct(current, current, true),
+            ReconciliationMode::Empty => {
+                // Contact-return capture is not fresh contact authority; preserve any pending
+                // settled-Observe stall history on the first tick after an Observe packet.
+                let observed_stall = self.observed_stall;
+                self.correct(current, current, true);
+                self.observed_stall = observed_stall;
+            }
             ReconciliationMode::Physical(_) => {}
             ReconciliationMode::LocalConfirmation(_) | ReconciliationMode::RemotePose(_) => {
                 anyhow::bail!(
@@ -362,6 +374,9 @@ impl PoseReconciliationState {
                 }
                 // A role change must not resurrect a heading already consumed by physics.
                 self.interpolate(reference, current, target.pending_heading.is_none(), None);
+            }
+            _ if !mobile => {
+                self.observed_stall = None;
             }
             _ => {}
         }
@@ -500,6 +515,7 @@ impl PoseReconciliationState {
         state.schedule_snap(target);
         self.mode = ReconciliationMode::RemotePose(state);
         self.recovery = None;
+        self.observed_stall = None;
     }
 
     /// Takes a pose-only placement once at the tick boundary.
@@ -512,24 +528,26 @@ impl PoseReconciliationState {
 
     /// Pending movement work keeps a blocked correction eligible for a later tick.
     pub fn has_projection_work(&self) -> bool {
-        match self.mode {
-            ReconciliationMode::Empty | ReconciliationMode::LocalConfirmation(_) => false,
-            ReconciliationMode::RemotePose(state) => state.has_projection_work(),
-            ReconciliationMode::Physical(target) => {
-                target.activity != PhysicalReturnActivity::Watching
-                    || target.pending_heading.is_some()
-                    || self.recovery.is_some()
+        self.observed_stall.is_some()
+            || match self.mode {
+                ReconciliationMode::Empty | ReconciliationMode::LocalConfirmation(_) => false,
+                ReconciliationMode::RemotePose(state) => state.has_projection_work(),
+                ReconciliationMode::Physical(target) => {
+                    target.activity != PhysicalReturnActivity::Watching
+                        || target.pending_heading.is_some()
+                        || self.recovery.is_some()
+                }
             }
-        }
     }
 
     /// Whether the owner can release its reconciliation allocation.
     pub fn is_empty(&self) -> bool {
-        match self.mode {
-            ReconciliationMode::Empty => true,
-            ReconciliationMode::RemotePose(state) => state.is_empty(),
-            ReconciliationMode::Physical(_) | ReconciliationMode::LocalConfirmation(_) => false,
-        }
+        self.observed_stall.is_none()
+            && match self.mode {
+                ReconciliationMode::Empty => true,
+                ReconciliationMode::RemotePose(state) => state.is_empty(),
+                ReconciliationMode::Physical(_) | ReconciliationMode::LocalConfirmation(_) => false,
+            }
     }
 
     /// Applies confirmation damping; physical correction is composed after ordinary prediction.

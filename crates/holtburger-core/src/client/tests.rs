@@ -3830,3 +3830,192 @@ fn direct_projection_discovery_sees_grounded_authored_motion() {
             .any(|body| body.body_id == SpatialBodyId::Entity(remote_guid))
     );
 }
+
+#[test]
+fn remote_non_contact_recovery_parks_tracks_and_unparks_cleanly_in_tick_batch() {
+    use holtburger_protocol::messages::{
+        GameMessage, PositionPack, UpdatePositionData, UpdatePositionFlag,
+    };
+    use holtburger_world::{ContactState, SpatialSampleMode};
+
+    let mut client = builder::build_test_client(ClientState::InWorld);
+    let player_guid = Guid(0x0102_3304);
+    let remote_guid = Guid(0x0102_3305);
+    let player_pose = outdoor_pose(40.0, 48.0, 0.0);
+    let remote_start = outdoor_pose(48.0, 48.0, 0.0);
+    client
+        .world
+        .seed_local_player_entity(player_guid, "Player", player_pose);
+    let mut remote = Entity::new(remote_guid, "Remote".to_owned(), remote_start);
+    remote.wcid = Some(42);
+    remote.set_did_prop(PropertyDataId::Setup, Guid(0x0200_0001));
+    client.world.add_entity(remote);
+
+    let remote_body_id = SpatialBodyId::Entity(remote_guid);
+    client
+        .world
+        .scene
+        .set_dynamic_physical_body(
+            remote_body_id,
+            Some(stable_dynamic_body_definition()),
+            PhysicalCollisionFilter::ALL,
+            None,
+        )
+        .unwrap();
+
+    let interest =
+        SimulationSceneInterest::prefetch_neighborhood(player_pose, CLIENT_COLLISION_OWNER_RADIUS)
+            .unwrap();
+    let collision = collision_snapshot(
+        interest.clone(),
+        flat_collision_scene_for_interest(&interest),
+    );
+    let dt = physics_dt();
+    let mut now = Instant::now() + dt;
+    let mut host_secs = 0.0_f64;
+
+    // Settle remote body on flat terrain first.
+    step_ticks(&mut client, &mut now, dt, &collision, 15);
+    let grounded_pose = client.world.scene.body(remote_body_id).unwrap().pose;
+    assert_eq!(
+        client.world.scene.body(remote_body_id).unwrap().contact,
+        holtburger_world::ContactState::Grounded
+    );
+
+    // Deliver a settled non-contact floating pose (simulating reduced-collision client elevation).
+    let floating = outdoor_pose(52.0, 48.0, grounded_pose.coords.z + 4.5);
+    client
+        .world
+        .handle_message(&GameMessage::UpdatePosition(Box::new(UpdatePositionData {
+            guid: remote_guid,
+            pos: PositionPack {
+                pos: floating,
+                position_sequence: 1,
+                flags: UpdatePositionFlag::NONE,
+                ..Default::default()
+            },
+        })));
+
+    let mut parked_snap_seen = false;
+    for _ in 0..100 {
+        let before = client.capture_dynamic_entity_tick_cursor();
+        now += dt;
+        host_secs += dt.as_secs_f64();
+        let tick = simulation::tick(
+            now,
+            dt,
+            &mut client.world,
+            &mut client.movement,
+            Some(&collision),
+        )
+        .unwrap();
+        let batch = client
+            .dynamic_entity_tick_batch(
+                before,
+                || DynamicEntityHostTime::new(host_secs).unwrap(),
+                dt.as_secs_f64() * 1_000.0,
+                &tick.body_motions,
+            )
+            .expect("dynamic_entity_tick_batch must succeed across parking ticks");
+        if let Some(batch) = batch
+            && batch.advances.iter().any(|advance| {
+                advance.entity.identity.guid == remote_guid
+                    && advance.kind == crate::DynamicEntityPlacementAdvanceKind::CorrectionSnap
+            })
+        {
+            parked_snap_seen = true;
+            break;
+        }
+    }
+    assert!(parked_snap_seen, "floating remote must park with a CorrectionSnap");
+    let body = client.world.scene.body(remote_body_id).unwrap();
+    assert_eq!(body.sampling.mode, SpatialSampleMode::AuthoritativeOnly);
+    assert_eq!(body.contact, ContactState::Unknown);
+    assert!(body.pose.distance_to(&floating) < 0.01);
+
+    // Track another non-contact update while parked and verify subsequent tick batches stay valid.
+    let floating_next = outdoor_pose(54.0, 48.0, grounded_pose.coords.z + 4.5);
+    let events =
+        client
+            .world
+            .handle_message(&GameMessage::UpdatePosition(Box::new(UpdatePositionData {
+                guid: remote_guid,
+                pos: PositionPack {
+                    pos: floating_next,
+                    position_sequence: 2,
+                    flags: UpdatePositionFlag::NONE,
+                    ..Default::default()
+                },
+            })));
+    assert!(events.iter().any(|event| matches!(
+        event,
+        WorldEvent::RuntimeBodyChanged { body_id } if *body_id == remote_body_id
+    )));
+    for _ in 0..5 {
+        let before = client.capture_dynamic_entity_tick_cursor();
+        now += dt;
+        host_secs += dt.as_secs_f64();
+        let tick = simulation::tick(
+            now,
+            dt,
+            &mut client.world,
+            &mut client.movement,
+            Some(&collision),
+        )
+        .unwrap();
+        client
+            .dynamic_entity_tick_batch(
+                before,
+                || DynamicEntityHostTime::new(host_secs).unwrap(),
+                dt.as_secs_f64() * 1_000.0,
+                &tick.body_motions,
+            )
+            .expect("parked ticks and placement refresh must not fail tick batch invariants");
+    }
+    assert!(
+        client
+            .world
+            .scene
+            .body(remote_body_id)
+            .unwrap()
+            .pose
+            .distance_to(&floating_next)
+            < 0.01
+    );
+
+    // Move remote onto clear supported ground -> must unpark cleanly on the next tick.
+    let clear_ground = outdoor_pose(56.0, 48.0, grounded_pose.coords.z);
+    client
+        .world
+        .handle_message(&GameMessage::UpdatePosition(Box::new(UpdatePositionData {
+            guid: remote_guid,
+            pos: PositionPack {
+                pos: clear_ground,
+                position_sequence: 3,
+                flags: UpdatePositionFlag::NONE,
+                ..Default::default()
+            },
+        })));
+    let before = client.capture_dynamic_entity_tick_cursor();
+    now += dt;
+    host_secs += dt.as_secs_f64();
+    let tick = simulation::tick(
+        now,
+        dt,
+        &mut client.world,
+        &mut client.movement,
+        Some(&collision),
+    )
+    .unwrap();
+    let _ = client
+        .dynamic_entity_tick_batch(
+            before,
+            || DynamicEntityHostTime::new(host_secs).unwrap(),
+            dt.as_secs_f64() * 1_000.0,
+            &tick.body_motions,
+        )
+        .expect("unpark tick batch must succeed");
+    let unparked = client.world.scene.body(remote_body_id).unwrap();
+    assert_eq!(unparked.sampling.mode, SpatialSampleMode::SimulatingVelocity);
+    assert!(unparked.pose.distance_to(&clear_ground) < 0.01);
+}

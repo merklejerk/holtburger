@@ -532,6 +532,23 @@ pub(crate) enum DynamicBodyActivity {
     /// The pose and authored EnvCell remain authoritative, but the body cannot be solved or
     /// offered as a dynamic-contact target until its collision product is resident again.
     Suspended,
+    /// Collision topology is resident, but a stalled remote recovery target overlapped static/hard
+    /// geometry or lacked walkable support (e.g. a reduced-collision remote client inside a wall
+    /// or floating under a balcony).
+    ///
+    /// The body tracks server-authoritative poses directly while paused from physics, gravity,
+    /// and dynamic-contact indexing so it cannot bounce-loop or shove peers, and automatically
+    /// returns to `Active` simulation once a pose or scene revision passes clear placement.
+    AuthoritativeParked,
+}
+
+impl DynamicBodyActivity {
+    /// Whether this body currently participates in mobile-contact solving and dynamic collision
+    /// indexing. Both `Suspended` (evicted topology) and `AuthoritativeParked` (overlapping
+    /// authoritative fallback) stay out of solver and peer-contact paths.
+    pub(crate) const fn participates_in_collision(self) -> bool {
+        matches!(self, Self::Active | Self::Settled)
+    }
 }
 
 /// Dynamic-only physical state kept as one invariant-bearing optional unit.
@@ -554,9 +571,9 @@ pub(crate) struct DynamicBodyRuntimeState {
 }
 
 impl DynamicBodyRuntimeState {
-    /// Wakes integration work without overriding a topology suspension.
+    /// Wakes integration work without overriding topology suspension or authoritative parking.
     pub(crate) fn wake(&mut self) {
-        if self.activity == DynamicBodyActivity::Suspended {
+        if !self.activity.participates_in_collision() {
             return;
         }
         self.activity = if self.demand.integration == LocalIntegrationDemand::Eligible {

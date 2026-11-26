@@ -66,6 +66,7 @@ interface EntitySummary {
 	isDead: boolean;
 	isVendor: boolean;
 	position: WorldPosition;
+	bodyPosition: WorldPosition | null;
 	distanceToSelf: number | null;
 	healthFraction: number | null;
 	stackCount: number | null;
@@ -131,6 +132,7 @@ interface SelfView {
 	guid: Guid;
 	name: string | null;
 	position: WorldPosition | null;
+	authoritativePosition: WorldPosition | null;
 	outdoorCoords: OutdoorCoordsView | null;
 	heading: number | null;
 	health: number;

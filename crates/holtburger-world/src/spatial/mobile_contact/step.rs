@@ -17,7 +17,9 @@ pub use angular::MOBILE_CONTACT_ANGULAR_CHORDS;
 mod recovery;
 mod stairs;
 mod terrain;
-pub(crate) use recovery::{checked_recovery_destination, settle_arrival_destination};
+pub(crate) use recovery::{
+    RecoveryDestinationCheck, evaluate_recovery_destination, settle_arrival_destination,
+};
 
 use anyhow::{Context, Result, ensure};
 use holtburger_common::position::WorldPosition;

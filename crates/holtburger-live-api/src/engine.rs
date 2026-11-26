@@ -361,6 +361,7 @@ impl LiveApiEngine {
                 let guid = world.player.guid;
                 let entity = world.player_entity();
                 let position = local_player_pose(world);
+                let authoritative_position = entity.map(|e| e.position);
                 let heading = position.map(|p| p.rotation.to_heading());
                 let summary = world.player_entity_summary();
                 let vital = |ty: VitalType| -> (u32, u32) {
@@ -377,6 +378,7 @@ impl LiveApiEngine {
                     guid,
                     name: entity.map(|e| e.name().to_string()),
                     position,
+                    authoritative_position,
                     outdoor_coords: position.and_then(project_outdoor_coords),
                     heading,
                     health,
@@ -490,7 +492,9 @@ impl LiveApiEngine {
                 let mut out = Vec::new();
                 for entity in world.entities.iter() {
                     let facts = world.client_entity_facts(entity.guid).ok().flatten();
-                    let summary = build_entity_summary(entity, facts.as_ref(), self_pos);
+                    let body_position = entity_body_pose(world, entity.guid);
+                    let summary =
+                        build_entity_summary(entity, facts.as_ref(), self_pos, body_position);
                     if let Some(max_dist) = filter.max_distance
                         && summary.distance_to_self.is_none_or(|d| d > max_dist)
                     {
@@ -549,8 +553,13 @@ impl LiveApiEngine {
                     .client_entity_facts_with_host_origin(guid, host_origin)
                     .ok()
                     .flatten();
-                let summary =
-                    build_entity_summary(entity, facts.as_ref(), world.local_player_runtime_pose());
+                let body_position = entity_body_pose(world, guid);
+                let summary = build_entity_summary(
+                    entity,
+                    facts.as_ref(),
+                    world.local_player_runtime_pose(),
+                    body_position,
+                );
                 Some(EntityDetail {
                     summary,
                     facts: facts.as_ref().map(|f| project_entity_facts(entity, f)),
@@ -2371,10 +2380,21 @@ fn into_vendor_draft(trade: VendorTradeSpec) -> VendorDraft {
     }
 }
 
+fn entity_body_pose(
+    world: &holtburger_world::WorldState,
+    guid: Guid,
+) -> Option<holtburger_common::position::WorldPosition> {
+    world
+        .runtime_body_id_for_guid(guid)
+        .and_then(|body_id| world.scene.body(body_id))
+        .map(|body| body.pose)
+}
+
 fn build_entity_summary(
     entity: &Entity,
     facts: Option<&ClientEntityFacts>,
     self_pos: Option<holtburger_common::position::WorldPosition>,
+    body_position: Option<holtburger_common::position::WorldPosition>,
 ) -> EntitySummary {
     let class = holtburger_world::entity_classification::classify_entity(entity);
     let category = serde_json::to_value(class)
@@ -2400,10 +2420,10 @@ fn build_entity_summary(
         Some(EntityStorageLocation::Equipped { wearer_guid, .. }) => (None, Some(wearer_guid)),
         _ => (None, None),
     };
-    let distance_to_self =
-        (container.is_none() && wielder.is_none() && !entity.position.landblock_id.is_null())
-            .then(|| self_pos.map(|p| p.distance_to(&entity.position)))
-            .flatten();
+    let is_world_placed = container.is_none() && wielder.is_none();
+    let distance_to_self = (is_world_placed && !entity.position.landblock_id.is_null())
+        .then(|| self_pos.map(|p| p.distance_to(&entity.position)))
+        .flatten();
     EntitySummary {
         guid: entity.guid,
         name: entity.name().to_string(),
@@ -2413,6 +2433,7 @@ fn build_entity_summary(
         is_dead,
         is_vendor,
         position: entity.position,
+        body_position: is_world_placed.then_some(body_position).flatten(),
         distance_to_self,
         health_fraction: entity.health.map(|h| h.fraction),
         stack_count,

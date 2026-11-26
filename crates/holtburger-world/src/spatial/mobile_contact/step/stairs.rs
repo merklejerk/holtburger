@@ -294,6 +294,40 @@ fn standing_support_candidate(
     .max_by(|a, b| a.height_delta.total_cmp(&b.height_delta)))
 }
 
+/// Checks whether a walkable surface exists directly beneath the body within `maximum_drop`.
+/// Used by recovery validation so poses a few centimeters above clear ground unpark into active
+/// physics instead of being misclassified as unsupported floating poses.
+pub(super) fn has_walkable_support_within_drop(
+    collision: &CollisionScene,
+    hard: &HardTargets,
+    anchor: Guid,
+    mobile: MobileContactBody,
+    contact: &ContactParticipant,
+    config: GroundedConfig,
+    maximum_drop: f32,
+) -> std::result::Result<bool, CollisionQueryError> {
+    let primary = mobile.spheres.primary();
+    Ok(support_candidates(
+        collision,
+        hard,
+        contact,
+        SupportQuery {
+            sphere: PlacementRequest {
+                anchor,
+                center: primary.center,
+                radius: primary.radius,
+                placement: &contact.membership,
+            },
+            probe: SupportProbe::Column {
+                maximum_drop,
+                maximum_rise: 0.0,
+            },
+        },
+    )?
+    .into_iter()
+    .any(|support| support.normal.z >= config.walkable_normal_z))
+}
+
 /// Attempt terrain repair, then acquire bounded standing height before motor selection.
 /// Object support recovery is swept; terrain reinsertion validates only the endpoint. Neither
 /// consumes physical time or a landing/restitution event. RETAIL DIVERGENCE: terrain

@@ -1634,3 +1634,90 @@ async fn jump_to_preview_command_settlement_and_self_airborne() {
 
     drop(server);
 }
+
+#[tokio::test]
+async fn entity_and_self_views_expose_runtime_body_and_authoritative_positions() {
+    let mut client = ClientRuntime::synthetic_in_world("test_account", Some("Coldeve".into()));
+    let player_guid = Guid(0x5000_0001);
+    let remote_guid = Guid(0x8000_0099);
+    let bag_item_guid = Guid(0x9000_0007);
+
+    let player_auth = WorldPosition::from_outdoor_frame(
+        Guid(0xda55_0001),
+        Vector3::new(10.0, 20.0, 1.0),
+        Default::default(),
+    );
+    let player_runtime = WorldPosition::from_outdoor_frame(
+        Guid(0xda55_0001),
+        Vector3::new(12.5, 20.0, 1.0),
+        Default::default(),
+    );
+    let remote_auth = WorldPosition::from_outdoor_frame(
+        Guid(0xda55_0001),
+        Vector3::new(30.0, 40.0, 2.0),
+        Default::default(),
+    );
+    let remote_body = WorldPosition::from_outdoor_frame(
+        Guid(0xda55_0001),
+        Vector3::new(22.0, 40.0, 1.0),
+        Default::default(),
+    );
+
+    {
+        let world = client.world_mut();
+        world.seed_local_player_entity(player_guid, "TestBot", player_auth);
+        world.set_local_player_runtime_pose(player_runtime);
+
+        let mut remote = Entity::new(remote_guid, "RemoteWalker".into(), remote_auth);
+        remote.flags = ObjectDescriptionFlag::PLAYER;
+        world.add_entity(remote);
+        assert!(world.scene.apply_runtime_body_pose(
+            holtburger_world::SpatialBodyId::Entity(remote_guid),
+            remote_body,
+            holtburger_world::SpatialSampleMode::SimulatingVelocity,
+        ));
+
+        let mut bag_item = Entity::new(bag_item_guid, "Pyreal".into(), WorldPosition::default());
+        bag_item.properties.iids.insert(
+            holtburger_common::properties::PropertyInstanceId::Container,
+            player_guid,
+        );
+        world.add_entity(bag_item);
+    }
+
+    let handle = client.create_handle();
+    let (shutdown_tx, shutdown_rx) = oneshot::channel();
+    let task = tokio::spawn(client.run_synthetic(shutdown_rx));
+    let engine = LiveApiEngine::start(
+        handle,
+        LiveApiEngineConfig {
+            client_kind: "h3d",
+            catalogs: None,
+            ui: None,
+            hud: None,
+        },
+    );
+
+    let self_view = engine.self_state().await.unwrap();
+    assert_eq!(self_view.position, Some(player_runtime));
+    assert_eq!(self_view.authoritative_position, Some(player_auth));
+
+    let remote_detail = engine.entity_detail(remote_guid, false).await.unwrap();
+    assert_eq!(remote_detail.summary.position, remote_auth);
+    assert_eq!(remote_detail.summary.body_position, Some(remote_body));
+
+    let entities = engine.entities(Default::default()).await.unwrap();
+    let remote_summary = entities.iter().find(|e| e.guid == remote_guid).unwrap();
+    assert_eq!(remote_summary.position, remote_auth);
+    assert_eq!(remote_summary.body_position, Some(remote_body));
+
+    let player_summary = entities.iter().find(|e| e.guid == player_guid).unwrap();
+    assert_eq!(player_summary.position, player_auth);
+    assert_eq!(player_summary.body_position, Some(player_runtime));
+
+    let item_summary = entities.iter().find(|e| e.guid == bag_item_guid).unwrap();
+    assert_eq!(item_summary.body_position, None);
+
+    let _ = shutdown_tx.send(());
+    let _ = task.await;
+}

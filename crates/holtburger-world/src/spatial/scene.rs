@@ -159,7 +159,7 @@ fn is_hard_target_body(body: &SpatialBody) -> bool {
     let Some(dynamic) = physical.dynamic.as_ref() else {
         return false;
     };
-    dynamic.activity != DynamicBodyActivity::Suspended
+    dynamic.activity.participates_in_collision()
         && super::dynamic_index::is_hard_target_dynamic(physical, dynamic)
 }
 
@@ -489,17 +489,17 @@ impl SpatialBodyStore {
                 .physical
                 .as_ref()
                 .and_then(|physical| physical.response.cell());
-        let same_suspended = existing
+        let same_activity_participation = existing
             .body
             .physical
             .as_ref()
             .and_then(|p| p.dynamic.as_ref())
-            .is_some_and(|d| d.activity == DynamicBodyActivity::Suspended)
+            .map(|d| d.activity.participates_in_collision())
             == body
                 .physical
                 .as_ref()
                 .and_then(|p| p.dynamic.as_ref())
-                .is_some_and(|d| d.activity == DynamicBodyActivity::Suspended);
+                .map(|d| d.activity.participates_in_collision());
         let next_stamp = (!same_geometry).then(|| self.allocate_geometry_stamp());
         let slot = self.bodies.get_mut(&body_id)?;
         let previous = std::mem::replace(&mut slot.body, body);
@@ -507,7 +507,7 @@ impl SpatialBodyStore {
             slot.geometry_stamp = stamp;
             slot.placed_shapes = OnceLock::new();
             slot.verified_placement = verified_revision.map(|rev| (slot.body.pose, rev));
-        } else if !same_definition || !same_cell || !same_suspended {
+        } else if !same_definition || !same_cell || !same_activity_participation {
             slot.verified_placement = verified_revision.map(|rev| (slot.body.pose, rev));
         } else if let Some(rev) = verified_revision {
             slot.verified_placement = Some((slot.body.pose, rev));
@@ -1358,6 +1358,10 @@ impl SpatialScene {
                     && previous_demand.integration == next_dynamic.demand.integration;
                 next_dynamic.activity = if previous_activity == DynamicBodyActivity::Suspended {
                     DynamicBodyActivity::Suspended
+                } else if previous_activity == DynamicBodyActivity::AuthoritativeParked
+                    && next_dynamic.demand.integration == LocalIntegrationDemand::Eligible
+                {
+                    DynamicBodyActivity::AuthoritativeParked
                 } else if next_dynamic.demand.integration == LocalIntegrationDemand::Excluded {
                     DynamicBodyActivity::Settled
                 } else if integration_facts_unchanged {
@@ -2075,6 +2079,35 @@ impl SpatialScene {
                 PhysicalBodyDefinition::FixedPosition { .. }
             )
         });
+        let was_authoritative_parked = body
+            .physical
+            .as_ref()
+            .and_then(|physical| physical.dynamic.as_ref())
+            .is_some_and(|dynamic| dynamic.activity == DynamicBodyActivity::AuthoritativeParked);
+        if was_authoritative_parked
+            && matches!(
+                effect,
+                AuthoritativePoseEffect::Observe { .. }
+                    | AuthoritativePoseEffect::Interpolate { .. }
+                    | AuthoritativePoseEffect::Snap { .. }
+            )
+        {
+            // While parked on an overlapping/unsupported authoritative pose, track server pose
+            // updates directly without waking local gravity/crowd physics; the next collection
+            // tick refreshes membership and promotes back to `Active` once clear placement holds.
+            body.pose = pose;
+            body.reconciliation = None;
+            body.retained = super::RetainedBodyKinematics::default();
+            body.nominal = AuthoritativeBodyVectors::default();
+            body.accepted_motion = super::AcceptedBodyMotion::default();
+            body.contact = ContactState::Unknown;
+            body.sampling.mode = SpatialSampleMode::AuthoritativeOnly;
+            if let Some(physical) = body.physical.as_mut() {
+                physical.reset_placement(pose.is_indoors().then_some(pose.landblock_id));
+            }
+            self.register_body(body);
+            return true;
+        }
         // Routine mobile pose samples retarget the reference without erasing contact/motor
         // continuation. Explicit vector messages and discontinuous initialization remain replacements.
         let preserves_continuation = matches!(effect, AuthoritativePoseEffect::Observe { .. })
@@ -2090,7 +2123,11 @@ impl SpatialScene {
         }
         match effect {
             AuthoritativePoseEffect::Observe { .. } => {
-                if let Some(state) = body.reconciliation.as_mut() {
+                if mobile_physical {
+                    body.reconciliation
+                        .get_or_insert_with(|| Box::new(PoseReconciliationState::default()))
+                        .record_observed_pose(pose, body.pose);
+                } else if let Some(state) = body.reconciliation.as_mut() {
                     state.invalidate_recovery();
                 }
             }

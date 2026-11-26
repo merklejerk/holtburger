@@ -29,10 +29,30 @@ pub(super) struct RecoveryObservation {
     elapsed: f32,
 }
 
+/// Stationary non-contact stall history for a remote grounded character.
+///
+/// RETAIL DIVERGENCE: Retail behavior is to ignore non-contact `UpdatePosition` packets for
+/// interpolation and recovery indefinitely. On ACE, non-PK players whose server transition slides
+/// against a wall/obstacle (e.g. a reduced-collision client) lose `OnWalkable` and skip `StepDown`
+/// on subsequent flat-ground movement, emitting `HAS_CONTACT = false` indefinitely even after
+/// settling on clear ground. Allowing recovery once the remote body is locally grounded,
+/// stationary, zero-velocity, and persistently diverged for `RECOVERY_WINDOW_SECONDS` resolves
+/// the stranded actor without disturbing mid-air jump arcs or active locomotion. Evidence is the
+/// 2026-11-26 Hebian-to West Wind Tower live census (Scenarios 1–6b) and synthetic settled vs.
+/// airborne/moving fixtures.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct ObservedStall {
+    /// Observed authoritative pose tracked for stationarity; larger updates rebase the window.
+    anchor: WorldPosition,
+    /// Admitted simulation time elapsed while grounded, stationary, and diverged from `anchor`.
+    elapsed: f32,
+}
+
 impl PoseReconciliationState {
     /// Observation-only authority revokes recovery evidence until a new eligible sample arrives.
     pub(crate) fn invalidate_recovery(&mut self) {
         self.recovery = None;
+        self.observed_stall = None;
         match &mut self.mode {
             ReconciliationMode::Physical(correction) => {
                 correction.height_disagreement_origin = None
@@ -40,6 +60,60 @@ impl PoseReconciliationState {
             ReconciliationMode::RemotePose(state) => state.received_contact = false,
             ReconciliationMode::Empty | ReconciliationMode::LocalConfirmation(_) => {}
         }
+    }
+
+    /// Revokes active contact-return recovery and arms stationary-divergence observation for a
+    /// mobile physical body when the observed server pose disagrees with its simulated pose.
+    pub(crate) fn record_observed_pose(&mut self, observed: WorldPosition, current: WorldPosition) {
+        let previous = self.observed_stall;
+        self.invalidate_recovery();
+        if current.distance_to(&observed) <= PHYSICAL_RETURN_START_THRESHOLD_M {
+            return;
+        }
+        self.observed_stall = Some(match previous {
+            Some(stall) if stall.anchor.distance_to(&observed) <= PHYSICAL_RETURN_START_THRESHOLD_M => {
+                stall
+            }
+            _ => ObservedStall {
+                anchor: observed,
+                elapsed: 0.0,
+            },
+        });
+    }
+
+    /// Advances stationary non-contact stall tracking for a remote grounded character.
+    /// Moving, airborne, or nonzero-velocity ticks reset elapsed time without disarming the
+    /// tracked divergence, so recovery fires once the actor has settled for a full window.
+    pub(crate) fn finish_observed_recovery_tick(
+        &mut self,
+        current: WorldPosition,
+        destination: WorldPosition,
+        seconds: f32,
+        permitted: bool,
+    ) -> bool {
+        if current.distance_to(&destination) <= PHYSICAL_RETURN_START_THRESHOLD_M {
+            self.observed_stall = None;
+            return false;
+        }
+        let Some(stall) = self.observed_stall.as_mut() else {
+            return false;
+        };
+        if stall.anchor.distance_to(&destination) > PHYSICAL_RETURN_START_THRESHOLD_M {
+            *stall = ObservedStall {
+                anchor: destination,
+                elapsed: 0.0,
+            };
+        }
+        if !permitted {
+            stall.elapsed = 0.0;
+            return false;
+        }
+        stall.elapsed += seconds;
+        if stall.elapsed < RECOVERY_WINDOW_SECONDS {
+            return false;
+        }
+        stall.elapsed = 0.0;
+        true
     }
 
     /// Observe the fully composed pose, including damping and retained physical travel. Recovery

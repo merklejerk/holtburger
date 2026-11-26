@@ -1,7 +1,7 @@
 //! Intent-owned interpolation; only a containing endpoint may become a canonical world pose.
 
 use anyhow::{Result, ensure};
-use holtburger_common::{Quaternion, RigidTransform, Vector3, position::WorldPosition};
+use holtburger_common::{Guid, Quaternion, RigidTransform, Vector3, position::WorldPosition};
 use holtburger_world::motion::DirectedMotionTravel;
 use holtburger_world::{CollisionScene, PointPlacement};
 
@@ -151,30 +151,104 @@ impl NavigationProgress {
             ),
         };
         next.coords = next.coords + delta;
-        let accepted = match scene.point_placement(next)? {
-            PointPlacement::Unique(pose) => Some(pose),
-            PointPlacement::Overlapping { candidates } => candidates
-                .iter()
-                .find(|pose| pose.landblock_id == committed.landblock_id)
-                .or_else(|| {
-                    target_hint.and_then(|target| {
-                        candidates
-                            .iter()
-                            .find(|pose| pose.landblock_id == target.landblock_id)
-                    })
-                })
-                .copied(),
-            PointPlacement::Outside => {
+        let accepted = match resolve_navigation_placement(scene, committed, next, target_hint)? {
+            NavigationPlacementResolution::Accepted(pose) => {
+                interval.committed = pose;
+                interval.candidate = pose;
+                Some(pose)
+            }
+            NavigationPlacementResolution::Outside => {
                 interval.candidate = next;
                 None
             }
-            PointPlacement::Unavailable { .. } => None,
+            NavigationPlacementResolution::Unavailable => None,
         };
-        if let Some(pose) = accepted {
-            interval.committed = pose;
-            interval.candidate = pose;
-        }
         Ok(accepted)
+    }
+}
+
+enum NavigationPlacementResolution {
+    Accepted(WorldPosition),
+    Outside,
+    Unavailable,
+}
+
+/// True for an actual interior EnvCell ID (excludes both outdoor cells and `0xFFFF` owner frames).
+fn is_indoor_cell(landblock_id: Guid) -> bool {
+    let low = landblock_id.0 & 0xffff;
+    low >= 0x0100 && low != 0xffff
+}
+
+/// Resolves a navigation step against resident cell volumes:
+/// - Prefers `target_hint` over `committed` on overlapping cell boundaries.
+/// - Enters an indoor target cell once XY enters its horizontal footprint even if linear 3D
+///   interpolation is still slightly below the indoor floor plane.
+fn resolve_navigation_placement(
+    scene: &CollisionScene,
+    committed: WorldPosition,
+    next: WorldPosition,
+    target_hint: Option<WorldPosition>,
+) -> Result<NavigationPlacementResolution> {
+    let initial = scene.point_placement(next)?;
+    let (resolved, was_outside) = match initial {
+        PointPlacement::Unique(pose) => (Some(pose), false),
+        PointPlacement::Overlapping { candidates } => (
+            target_hint
+                .and_then(|target| {
+                    candidates
+                        .iter()
+                        .find(|pose| pose.landblock_id == target.landblock_id)
+                })
+                .or_else(|| {
+                    candidates
+                        .iter()
+                        .find(|pose| pose.landblock_id == committed.landblock_id)
+                })
+                .copied(),
+            false,
+        ),
+        PointPlacement::Outside => (None, true),
+        PointPlacement::Unavailable { .. } => (None, false),
+    };
+
+    // When approaching an indoor cell from outdoors (or across an elevation step), linear 3D
+    // interpolation often stops below the room's floor plane and falls back to an outdoor cell
+    // inside the building foundation. Once XY enters the target cell's volume at target Z, step
+    // cleanly onto the indoor cell elevation.
+    let resolved = if let Some(target) = target_hint.filter(|t| is_indoor_cell(t.landblock_id))
+        && !resolved.is_some_and(|pose| pose.landblock_id == target.landblock_id)
+        && resolved.is_none_or(|pose| !is_indoor_cell(pose.landblock_id))
+        && let Some(indoor) = probe_indoor_target_entry(scene, next, target)?
+    {
+        Some(indoor)
+    } else {
+        resolved
+    };
+
+    Ok(match resolved {
+        Some(pose) => NavigationPlacementResolution::Accepted(pose),
+        None if was_outside => NavigationPlacementResolution::Outside,
+        None => NavigationPlacementResolution::Unavailable,
+    })
+}
+
+fn probe_indoor_target_entry(
+    scene: &CollisionScene,
+    next: WorldPosition,
+    target: WorldPosition,
+) -> Result<Option<WorldPosition>> {
+    let target_owner = Guid((target.landblock_id.0 & 0xffff_0000) | 0xffff);
+    let Ok(mut probe) = next.reanchor_to_landblock_owner(target_owner) else {
+        return Ok(None);
+    };
+    probe.coords.z = target.coords.z;
+    probe.rotation = next.rotation;
+    match scene.point_placement(probe)? {
+        PointPlacement::Unique(pose) if pose.landblock_id == target.landblock_id => Ok(Some(pose)),
+        PointPlacement::Overlapping { candidates } => Ok(candidates
+            .into_iter()
+            .find(|pose| pose.landblock_id == target.landblock_id)),
+        _ => Ok(None),
     }
 }
 

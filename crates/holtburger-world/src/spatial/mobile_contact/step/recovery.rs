@@ -68,14 +68,6 @@ pub(super) fn recover_stationary_fall(
     Ok(())
 }
 
-/// Contact-driven correction work allowed after ordinary terrain/support preparation.
-/// Reference recovery validates its exact authority endpoint; arrivals may separate nearby.
-#[derive(Clone, Copy)]
-enum DestinationPlacement {
-    Arrival,
-    ReferenceRecovery,
-}
-
 /// Full-body clearance with one correction computed from the observed contacts.
 #[derive(Debug)]
 pub(super) enum PlacementClearance {
@@ -89,65 +81,43 @@ pub(super) enum PlacementClearance {
         correction: Vector3,
         /// First observed blocker retained for a rejected-candidate diagnostic.
         diagnostic: String,
+        /// Whether at least one blocking mobile peer overlapped the candidate.
+        has_mobile_overlap: bool,
     },
 }
 
-/// Validate an exact remote recovery endpoint without searching for a different authority pose.
-pub(crate) fn checked_recovery_destination(
-    collision: &CollisionScene,
-    candidate: &SpatialBody,
-    peers: &[SpatialBody],
-) -> Result<Option<(WorldPosition, SpatialMembership)>> {
-    checked_destination(
-        collision,
-        candidate,
-        peers,
-        DestinationPlacement::ReferenceRecovery,
-    )
+/// Complete remote recovery destination classification, distinguishing mobile-peer occupancy
+/// from static/hard/unsupported blockage so callers never park on top of a live peer.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum RecoveryDestinationCheck {
+    /// Exact endpoint is clear of all blockers and (for gravity-bearing grounded bodies) supported.
+    Clear {
+        pose: WorldPosition,
+        membership: SpatialMembership,
+    },
+    /// At least one blocking mobile peer overlaps the destination; never park here.
+    BlockedByMobilePeer,
+    /// Clear of all blocking mobile peers, but blocked by static geometry, domain restriction,
+    /// hard obstacle, or missing walkable support; eligible for `AuthoritativeParked`.
+    BlockedByStaticOrUnsupported,
 }
 
-/// Resolve a discontinuous arrival with bounded whole-body contact separation.
-/// RETAIL DIVERGENCE: retail sliding placement can search radial candidates up to four meters
-/// away. Contact-driven correction instead follows observed overlaps within a body-scaled travel
-/// budget. It may select a different clear endpoint or reject a position retail's search finds;
-/// it never accepts an overlapping endpoint. The checked census is one captured building-base
-/// arrival and synthetic slope, upper-body, peer, obstruction, budget and coverage cases, not a
-/// full-content survey. Arrival safety and bounded correction are preserved without duplicating
-/// retail's candidate ordering.
-pub(crate) fn settle_arrival_destination(
-    collision: &CollisionScene,
-    candidate: &SpatialBody,
-    peers: &[SpatialBody],
-) -> Result<Option<(WorldPosition, SpatialMembership)>> {
-    checked_destination(collision, candidate, peers, DestinationPlacement::Arrival)
+/// Prepared single-body destination validation context shared by exact recovery evaluation and
+/// bounded arrival contact separation.
+struct PreparedDestination<'a> {
+    anchor: Guid,
+    hard: super::HardTargets,
+    mobiles: Vec<(ContactParticipant, MobileContactBody)>,
+    working: WorkingBody<'a>,
 }
 
-/// Candidate membership is resolved by the scene owner before preparation. All corrections
-/// remain private; callers publish only a fully clear endpoint and own kinematic resets.
-fn checked_destination(
-    collision: &CollisionScene,
-    candidate: &SpatialBody,
-    peers: &[SpatialBody],
-    placement: DestinationPlacement,
-) -> Result<Option<(WorldPosition, SpatialMembership)>> {
+fn prepare_destination<'a>(
+    candidate: &'a SpatialBody,
+    peers: &'a [SpatialBody],
+) -> Result<std::result::Result<PreparedDestination<'a>, &'static str>> {
     let anchor = Guid(candidate.pose.landblock_id.0 | 0xffff);
-    // Emit once when a local arrival ultimately fails; successful correction passes and
-    // ordinary remote recovery rejection remain silent.
-    let reject = |reason: String| {
-        if matches!(placement, DestinationPlacement::Arrival)
-            && matches!(candidate.id, SpatialBodyId::LocalPlayer(_))
-        {
-            log::warn!(
-                "body arrival rejected: body={:?} destination={:#010X} position={:?}: {reason}",
-                candidate.id,
-                candidate.pose.landblock_id.0,
-                candidate.pose.coords,
-            );
-        }
-        Ok(None)
-    };
     let Some(actor) = PreparedBodyContact::from_body(candidate, anchor)? else {
-        return reject("body has no prepared collision participant".to_owned());
+        return Ok(Err("body has no prepared collision participant"));
     };
     let PreparedContactRole::Mover {
         body: mobile,
@@ -155,7 +125,7 @@ fn checked_destination(
         policy,
     } = actor.role
     else {
-        return reject("prepared collision participant is not a mover".to_owned());
+        return Ok(Err("prepared collision participant is not a mover"));
     };
     let mut hard = Vec::new();
     let mut mobiles = Vec::new();
@@ -180,7 +150,7 @@ fn checked_destination(
         }
     }
     let hard = super::HardTargets::new(hard)?;
-    let mut working = WorkingBody::new(
+    let working = WorkingBody::new(
         actor.source,
         actor.participant,
         mobile,
@@ -188,30 +158,145 @@ fn checked_destination(
         policy,
         anchor,
     )?;
-    if let Some(grounded) = grounded {
-        // Arrival placement separates geometry without borrowing walking slope or step policy.
-        // Ordinary reference recovery still acquires supported footing before validation.
-        match placement {
-            DestinationPlacement::Arrival => {
-                terrain::reinsert_arrival(collision, anchor, &mut working)
-            }
-            DestinationPlacement::ReferenceRecovery => {
-                stairs::prepare_support(collision, &hard, anchor, &mut working, grounded.config)
-                    .map(|_| ())
-            }
-        }?;
-    }
-    let maximum_passes = match placement {
-        DestinationPlacement::Arrival => BODY_ARRIVAL_MAXIMUM_CONTACT_PASSES,
-        DestinationPlacement::ReferenceRecovery => 0,
+    Ok(Ok(PreparedDestination {
+        anchor,
+        hard,
+        mobiles,
+        working,
+    }))
+}
+
+/// Evaluate an exact remote recovery endpoint, separating mobile-peer occupancy from static/hard
+/// or unsupported blockage without searching for a displaced position.
+pub(crate) fn evaluate_recovery_destination(
+    collision: &CollisionScene,
+    candidate: &SpatialBody,
+    peers: &[SpatialBody],
+) -> Result<RecoveryDestinationCheck> {
+    let Ok(PreparedDestination {
+        anchor,
+        hard,
+        mobiles,
+        mut working,
+    }) = prepare_destination(candidate, peers)?
+    else {
+        return Ok(RecoveryDestinationCheck::BlockedByStaticOrUnsupported);
     };
+    let grounded_config = working.grounded.map(|grounded| grounded.config);
+    let prepared_ground = if let Some(config) = grounded_config {
+        Some(stairs::prepare_support(
+            collision,
+            &hard,
+            anchor,
+            &mut working,
+            config,
+        )?)
+    } else {
+        None
+    };
+    match placement_clearance(
+        collision,
+        &hard,
+        &mobiles,
+        anchor,
+        &working.contact,
+        working.mobile.spheres,
+        &working.contact.membership,
+    )? {
+        PlacementClearance::Clear => {
+            if let Some(config) = grounded_config
+                && config.gravity < 0.0
+                && prepared_ground.is_some_and(|g| g.walkable_support().is_none())
+                && !stairs::has_walkable_support_within_drop(
+                    collision,
+                    &hard,
+                    anchor,
+                    working.mobile,
+                    &working.contact,
+                    config,
+                    crate::spatial::pose_reconciliation::PHYSICAL_RETURN_START_THRESHOLD_M,
+                )?
+            {
+                return Ok(RecoveryDestinationCheck::BlockedByStaticOrUnsupported);
+            }
+            let mut pose = candidate.pose;
+            pose.coords = working.root;
+            let pose = crate::spatial::physical_body::place_body_pose(
+                pose,
+                working.contact.membership.committed_cell(),
+            )?;
+            Ok(RecoveryDestinationCheck::Clear {
+                pose,
+                membership: working.contact.membership,
+            })
+        }
+        PlacementClearance::Overlapping {
+            has_mobile_overlap: true,
+            ..
+        } => Ok(RecoveryDestinationCheck::BlockedByMobilePeer),
+        PlacementClearance::Overlapping {
+            has_mobile_overlap: false,
+            ..
+        } => Ok(RecoveryDestinationCheck::BlockedByStaticOrUnsupported),
+        PlacementClearance::Blocked(_) => {
+            if has_blocking_mobile_overlap(
+                &mobiles,
+                working.mobile.spheres,
+                &working.contact.membership,
+            ) {
+                Ok(RecoveryDestinationCheck::BlockedByMobilePeer)
+            } else {
+                Ok(RecoveryDestinationCheck::BlockedByStaticOrUnsupported)
+            }
+        }
+    }
+}
+
+/// Resolve a discontinuous arrival with bounded whole-body contact separation.
+/// RETAIL DIVERGENCE: retail sliding placement can search radial candidates up to four meters
+/// away. Contact-driven correction instead follows observed overlaps within a body-scaled travel
+/// budget. It may select a different clear endpoint or reject a position retail's search finds;
+/// it never accepts an overlapping endpoint. The checked census is one captured building-base
+/// arrival and synthetic slope, upper-body, peer, obstruction, budget and coverage cases, not a
+/// full-content survey. Arrival safety and bounded correction are preserved without duplicating
+/// retail's candidate ordering.
+pub(crate) fn settle_arrival_destination(
+    collision: &CollisionScene,
+    candidate: &SpatialBody,
+    peers: &[SpatialBody],
+) -> Result<Option<(WorldPosition, SpatialMembership)>> {
+    // Emit once when a local arrival ultimately fails; successful correction passes remain silent.
+    let reject = |reason: String| {
+        if matches!(candidate.id, SpatialBodyId::LocalPlayer(_)) {
+            log::warn!(
+                "body arrival rejected: body={:?} destination={:#010X} position={:?}: {reason}",
+                candidate.id,
+                candidate.pose.landblock_id.0,
+                candidate.pose.coords,
+            );
+        }
+        Ok(None)
+    };
+    let PreparedDestination {
+        anchor,
+        hard,
+        mobiles,
+        mut working,
+    } = match prepare_destination(candidate, peers)? {
+        Ok(prepared) => prepared,
+        Err(reason) => return reject(reason.to_owned()),
+    };
+    if working.grounded.is_some() {
+        // Arrival placement separates geometry without borrowing walking slope or step policy.
+        terrain::reinsert_arrival(collision, anchor, &mut working)?;
+    }
     if let Some(reason) = separate_destination_contacts(
         collision,
         &hard,
         &mobiles,
         anchor,
         &mut working,
-        maximum_passes,
+        BODY_ARRIVAL_MAXIMUM_CONTACT_PASSES,
     )? {
         return reject(reason);
     }
@@ -252,6 +337,7 @@ fn separate_destination_contacts(
             PlacementClearance::Overlapping {
                 correction,
                 diagnostic,
+                ..
             } => {
                 if pass == maximum_passes {
                     return Ok(Some(format!(
@@ -329,6 +415,7 @@ pub(super) fn placement_clearance(
     }
     // All contacts constrain separation; only the first blocker needs diagnostic provenance.
     let mut overlaps: Option<(Vec<StaticContact>, String)> = None;
+    let mut has_mobile_overlap = false;
     let mut record = |contact: StaticContact, diagnostic: fmt::Arguments<'_>| match &mut overlaps {
         Some((contacts, _)) => contacts.push(contact),
         None => overlaps = Some((vec![contact], diagnostic.to_string())),
@@ -386,6 +473,7 @@ pub(super) fn placement_clearance(
                 if depth <= CONTACT_EPSILON {
                     continue;
                 }
+                has_mobile_overlap = true;
                 let normal = if distance > f32::EPSILON {
                     separation / distance
                 } else {
@@ -409,5 +497,27 @@ pub(super) fn placement_clearance(
     Ok(PlacementClearance::Overlapping {
         correction: separating_displacement(&contacts, CONTACT_EPSILON),
         diagnostic,
+        has_mobile_overlap,
     })
+}
+
+fn has_blocking_mobile_overlap(
+    mobiles: &[(ContactParticipant, MobileContactBody)],
+    spheres: PhysicalSphereSet,
+    membership: &SpatialMembership,
+) -> bool {
+    for sphere in spheres.iter() {
+        for (participant, mobile) in mobiles {
+            if !membership.intersects_reached(&participant.membership) {
+                continue;
+            }
+            for other in mobile.spheres.iter() {
+                let distance = (sphere.center - other.center).length();
+                if sphere.radius + other.radius - distance > CONTACT_EPSILON {
+                    return true;
+                }
+            }
+        }
+    }
+    false
 }

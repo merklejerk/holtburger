@@ -172,12 +172,17 @@ impl WorldState {
                 .get(guid)
                 .map(|entity| (entity.velocity, entity.omega))
                 .expect("admitted entity");
+            let previous_pose = self.scene.body(body_id).map(|body| body.pose);
             self.apply_authoritative_pose_effect(
                 guid,
                 velocity,
                 omega,
                 AuthoritativePoseEffect::Observe { pose: pos },
             );
+            if self.scene.body(body_id).map(|body| body.pose) != previous_pose {
+                Self::emit_runtime_body_changed(events, body_id);
+                events.push(WorldEvent::EntityMoved { guid, pos });
+            }
             return true;
         }
         if missing_runtime_cell {

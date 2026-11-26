@@ -26,10 +26,10 @@ pub use step::{
     advance_body_contact_collection, advance_body_contacts,
 };
 pub(crate) use step::{
-    ContactStepScratch, SceneContactPreparation, SceneContactReportOverride,
-    advance_body_contact_collection_prepared, advance_body_contact_collection_without_reports,
-    checked_recovery_destination, settle_arrival_destination, step_sweep_target,
-    targets::HardTargets,
+    ContactStepScratch, RecoveryDestinationCheck, SceneContactPreparation,
+    SceneContactReportOverride, advance_body_contact_collection_prepared,
+    advance_body_contact_collection_without_reports, evaluate_recovery_destination,
+    settle_arrival_destination, step_sweep_target, targets::HardTargets,
 };
 
 use anyhow::{Result, ensure};
@@ -327,7 +327,7 @@ impl<'a> PreparedBodyContact<'a> {
         super::physics_work::record_body_preparation();
         let participant = match &physical.dynamic {
             Some(dynamic) => {
-                if dynamic.activity == DynamicBodyActivity::Suspended {
+                if !dynamic.activity.participates_in_collision() {
                     return Ok(None);
                 }
                 ContactParticipant::from_dynamic(body, dynamic, physical.collision_filter)

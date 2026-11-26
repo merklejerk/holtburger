@@ -6455,6 +6455,7 @@ fn stalled_remote_return_recovers_across_wall_but_rejects_occupied_destination()
         let expects_recovery = matches!(
             case,
             Case::Clear
+                | Case::Occupied
                 | Case::PredictedInsideWall
                 | Case::Sticky
                 | Case::UnpreparedSticky
@@ -6667,7 +6668,15 @@ fn stalled_remote_return_recovers_across_wall_but_rejects_occupied_destination()
         }
         assert_eq!(recovered, expects_recovery, "{case:?}");
         if occupied {
-            assert!(world.scene.body(id).unwrap().pose.coords.x < 92.0);
+            // Static wall occupancy escalates to AuthoritativeParked at the exact server pose
+            // without falling or participating in crowd collision.
+            let body = world.scene.body(id).unwrap();
+            assert!((body.pose.coords - target.coords).length() < CONTACT_EPSILON);
+            assert_eq!(
+                dynamic_activity(&world.scene, id),
+                DynamicBodyActivity::AuthoritativeParked
+            );
+            assert_eq!(body.sampling.mode, SpatialSampleMode::AuthoritativeOnly);
         }
     }
 }
@@ -6852,7 +6861,7 @@ fn vertical_recovery_distinguishes_wrong_floor_from_nominal_flight() {
             Case::Stranded | Case::StickyStranded | Case::ObservedStranded | Case::ResumedStranded
         );
         let observed = matches!(case, Case::ObservedStranded | Case::ResumedStranded);
-        let expects_recovery = stranded && !matches!(case, Case::ObservedStranded);
+        let expects_recovery = stranded;
         let jumping = matches!(case, Case::Jumping);
         let now = Instant::now();
         let id = SpatialBodyId::Entity(Guid(1));
@@ -6919,7 +6928,7 @@ fn vertical_recovery_distinguishes_wrong_floor_from_nominal_flight() {
         let mut recovered = false;
         for tick in 0..ticks {
             if matches!(case, Case::ResumedStranded)
-                && tick == (RECOVERY_WINDOW_SECONDS / MOBILE_CONTACT_TICK_SECONDS).ceil() as usize
+                && tick == (RECOVERY_WINDOW_SECONDS * 0.5 / MOBILE_CONTACT_TICK_SECONDS).ceil() as usize
             {
                 scene.apply_authoritative_body_effect(
                     id,
@@ -6976,10 +6985,16 @@ fn vertical_recovery_distinguishes_wrong_floor_from_nominal_flight() {
                     expects_recovery,
                     "{case:?}: only correction-eligible authority permits recovery"
                 );
+                if matches!(case, Case::ObservedStranded) {
+                    assert!(
+                        (tick + 1) as f32 * MOBILE_CONTACT_TICK_SECONDS >= RECOVERY_WINDOW_SECONDS,
+                        "Observe must discard pre-armed contact history and require a full settled window"
+                    );
+                }
                 if matches!(case, Case::ResumedStranded) {
                     assert!(
                         (tick + 1) as f32 * MOBILE_CONTACT_TICK_SECONDS
-                            >= RECOVERY_WINDOW_SECONDS * 2.0,
+                            >= RECOVERY_WINDOW_SECONDS * 1.5,
                         "a new correction must receive a full recovery window"
                     );
                 }
@@ -6995,7 +7010,7 @@ fn vertical_recovery_distinguishes_wrong_floor_from_nominal_flight() {
 
 #[test]
 fn recovery_placement_checks_hard_entities_and_accommodates_support() {
-    use crate::spatial::mobile_contact::checked_recovery_destination;
+    use crate::spatial::mobile_contact::{RecoveryDestinationCheck, evaluate_recovery_destination};
     let collision = flat_collision_scene();
     let now = Instant::now();
     let id = SpatialBodyId::Entity(Guid(1));
@@ -7032,10 +7047,10 @@ fn recovery_placement_checks_hard_entities_and_accommodates_support() {
         .demand
         .integration = LocalIntegrationDemand::Excluded;
     let candidate = scene.body(id).unwrap().clone();
-    assert!(
-        checked_recovery_destination(&collision, &candidate, &[scene.body(hard).unwrap().clone()])
-            .unwrap()
-            .is_none()
+    assert_eq!(
+        evaluate_recovery_destination(&collision, &candidate, &[scene.body(hard).unwrap().clone()])
+            .unwrap(),
+        RecoveryDestinationCheck::BlockedByStaticOrUnsupported
     );
     let mut below_floor = standing;
     below_floor.coords.z -= 0.05;
@@ -7049,10 +7064,14 @@ fn recovery_placement_checks_hard_entities_and_accommodates_support() {
         .as_mut()
         .unwrap()
         .placement = membership;
-    let recovered = checked_recovery_destination(&collision, &candidate, &[])
-        .unwrap()
-        .unwrap();
-    assert!((recovered.0.coords.z - standing.coords.z).abs() < 0.001);
+    let RecoveryDestinationCheck::Clear {
+        pose: recovered_pose,
+        ..
+    } = evaluate_recovery_destination(&collision, &candidate, &[]).unwrap()
+    else {
+        panic!("unobstructed below-floor recovery must clear after support lift");
+    };
+    assert!((recovered_pose.coords.z - standing.coords.z).abs() < 0.001);
 }
 
 /// Server arrivals can rest the vertical sphere bottom on terrain while the full sphere
@@ -7301,7 +7320,7 @@ fn ordinary_terrain_recovery_precedes_motor_selection_and_keeps_upward_velocity(
 #[test]
 fn obstructed_terrain_recovery_allows_escape_and_retries_after_clearance() {
     use crate::spatial::grounded_types::STATIONARY_FALL_SUPPORT_FRAMES;
-    use crate::spatial::mobile_contact::checked_recovery_destination;
+    use crate::spatial::mobile_contact::{RecoveryDestinationCheck, evaluate_recovery_destination};
 
     let collision = flat_collision_scene();
     let now = Instant::now();
@@ -7362,14 +7381,14 @@ fn obstructed_terrain_recovery_allows_escape_and_retries_after_clearance() {
 
     // Exact reference recovery must still reject a terrain-penetrating endpoint when its
     // lift is obstructed, even though ordinary simulation can work free over later ticks.
-    assert!(
-        checked_recovery_destination(
+    assert_eq!(
+        evaluate_recovery_destination(
             &collision,
             scene.body(mover).unwrap(),
             &[scene.body(hard).unwrap().clone()],
         )
-        .unwrap()
-        .is_none()
+        .unwrap(),
+        RecoveryDestinationCheck::BlockedByStaticOrUnsupported
     );
     for _ in 0..STATIONARY_FALL_SUPPORT_FRAMES {
         scene
@@ -8184,5 +8203,470 @@ fn moving_grounded_remote_recovers_wrong_height() {
     assert!(
         recovery_interruption_scenario(true),
         "height disagreement must recover while ordinary movement continues"
+    );
+}
+
+#[test]
+fn settled_non_contact_observation_recovers_across_wall_while_moving_does_not() {
+    use crate::spatial::pose_reconciliation::recovery::RECOVERY_WINDOW_SECONDS;
+    use holtburger_protocol::messages::{
+        GameMessage, PositionPack, UpdatePositionData, UpdatePositionFlag,
+    };
+
+    let now = Instant::now();
+    let mut collision = flat_collision_scene();
+    let mut asset = flat_collision_asset(0);
+    asset.static_geometry = LandblockColliders::new(
+        vec![
+            PlacedCollider::new(
+                polygon_wall_shape(),
+                LandblockPlacement {
+                    origin: Vector3::new(92.0, 96.0, 1.0),
+                    orientation: Quaternion::identity(),
+                },
+                ColliderScale::uniform(1.0).unwrap(),
+                StaticColliderPlacement::OutdoorExplicit { source_index: 0 },
+            )
+            .unwrap(),
+        ],
+        Vec::new(),
+    );
+    collision.insert(asset).unwrap();
+
+    let guid = Guid(1);
+    let id = SpatialBodyId::Entity(guid);
+    let definition = grounded_definition();
+    let primary = definition.spheres().primary();
+    let start = pose(Vector3::new(90.0, 96.0, primary.radius - primary.center.z));
+    let mut authority = pose(Vector3::new(96.0, 96.0, start.coords.z));
+
+    let mut world = crate::WorldState::synthetic();
+    world.add_entity(crate::entity::Entity::new(
+        guid,
+        "Non-contact remote player".to_owned(),
+        start,
+    ));
+    world
+        .scene
+        .set_dynamic_physical_body(
+            id,
+            Some(dynamic_definition(definition, false)),
+            PhysicalCollisionFilter::ALL,
+            None,
+        )
+        .unwrap();
+    acquire_support(&mut world.scene, &collision, id, now);
+
+    // Phase 1: While remote non-contact observations keep moving every 0.5s, recovery must not fire.
+    let packet_ticks =
+        (RECOVERY_WINDOW_SECONDS * 0.25 / MOBILE_CONTACT_TICK_SECONDS).round() as usize;
+    let moving_ticks = packet_ticks * 8;
+    let mut seq = 1u16;
+    for tick in 0..moving_ticks {
+        if tick % packet_ticks == 0 {
+            authority.coords.x += 1.0;
+            world.handle_message(&GameMessage::UpdatePosition(Box::new(UpdatePositionData {
+                guid,
+                pos: PositionPack {
+                    pos: authority,
+                    position_sequence: seq,
+                    flags: UpdatePositionFlag::NONE,
+                    ..Default::default()
+                },
+            })));
+            seq += 1;
+        }
+        let result = world
+            .scene
+            .advance_dynamic_entity_collection(
+                &collision,
+                MOBILE_CONTACT_TICK_SECONDS,
+                now + Duration::from_secs_f32(tick as f32 * MOBILE_CONTACT_TICK_SECONDS),
+                |_| {
+                    Ok(PhysicalBodyInput::referenced(
+                        PhysicalBodyActuation::Grounded(GroundedBodyActuation::coast()),
+                        PhysicalReferenceInput::remote(None, start.rotation),
+                        true,
+                    ))
+                },
+            )
+            .unwrap();
+        assert!(
+            result.outcomes.iter().all(|o| !matches!(
+                o,
+                DynamicEntityBodyOutcome::RecoveredPlacement(body) if *body == id
+            )),
+            "moving non-contact observations must not trigger settled recovery at tick {tick}"
+        );
+    }
+
+    // Phase 2: Once non-contact authority settles at a fixed clear spot, recovery fires after one window.
+    let settle_ticks =
+        (RECOVERY_WINDOW_SECONDS * 2.0 / MOBILE_CONTACT_TICK_SECONDS).ceil() as usize;
+    let mut recovered_at = None;
+    for tick in 0..settle_ticks {
+        let elapsed = (moving_ticks + tick) as f32 * MOBILE_CONTACT_TICK_SECONDS;
+        let result = world
+            .scene
+            .advance_dynamic_entity_collection(
+                &collision,
+                MOBILE_CONTACT_TICK_SECONDS,
+                now + Duration::from_secs_f32(elapsed),
+                |_| {
+                    Ok(PhysicalBodyInput::referenced(
+                        PhysicalBodyActuation::Grounded(GroundedBodyActuation::coast()),
+                        PhysicalReferenceInput::remote(None, start.rotation),
+                        true,
+                    ))
+                },
+            )
+            .unwrap();
+        if result.outcomes.iter().any(|o| {
+            matches!(
+                o,
+                DynamicEntityBodyOutcome::RecoveredPlacement(body) if *body == id
+            )
+        }) {
+            recovered_at = Some((tick + 1) as f32 * MOBILE_CONTACT_TICK_SECONDS);
+            break;
+        }
+    }
+    let recovered_at = recovered_at.expect("settled non-contact observation must recover");
+    assert!(
+        recovered_at <= RECOVERY_WINDOW_SECONDS + MOBILE_CONTACT_TICK_SECONDS * 2.0,
+        "settled non-contact recovery took {recovered_at}s"
+    );
+    assert!(
+        world.scene.body(id).unwrap().pose.distance_to(&authority) < CONTACT_EPSILON,
+        "recovered body must match settled non-contact authority"
+    );
+}
+
+#[test]
+fn authoritative_parked_tracks_floating_and_wall_poses_without_gravity_loop_and_unparks_when_clear() {
+    use crate::spatial::pose_reconciliation::recovery::RECOVERY_WINDOW_SECONDS;
+    use holtburger_protocol::messages::{
+        GameMessage, PositionPack, UpdatePositionData, UpdatePositionFlag,
+    };
+
+    let now = Instant::now();
+    let collision = flat_collision_scene();
+    let guid = Guid(7);
+    let id = SpatialBodyId::Entity(guid);
+    let definition = grounded_definition();
+    let primary = definition.spheres().primary();
+    let ground_z = primary.radius - primary.center.z;
+    let start = pose(Vector3::new(90.0, 96.0, ground_z));
+    // Floating 4.4m above flat terrain (reproduces Scenario 5 balcony hover).
+    let floating = pose(Vector3::new(94.0, 96.0, ground_z + 4.4));
+
+    let mut world = crate::WorldState::synthetic();
+    world.add_entity(crate::entity::Entity::new(
+        guid,
+        "Floating TUI player".to_owned(),
+        start,
+    ));
+    world
+        .scene
+        .set_dynamic_physical_body(
+            id,
+            Some(dynamic_definition(definition, false)),
+            PhysicalCollisionFilter::ALL,
+            None,
+        )
+        .unwrap();
+    acquire_support(&mut world.scene, &collision, id, now);
+
+    // Deliver settled non-contact floating pose.
+    world.handle_message(&GameMessage::UpdatePosition(Box::new(UpdatePositionData {
+        guid,
+        pos: PositionPack {
+            pos: floating,
+            position_sequence: 1,
+            flags: UpdatePositionFlag::NONE,
+            ..Default::default()
+        },
+    })));
+
+    let ticks = (RECOVERY_WINDOW_SECONDS * 3.0 / MOBILE_CONTACT_TICK_SECONDS).ceil() as usize;
+    let mut parked_tick = None;
+    for tick in 0..ticks {
+        let elapsed = tick as f32 * MOBILE_CONTACT_TICK_SECONDS;
+        let result = world
+            .scene
+            .advance_dynamic_entity_collection(
+                &collision,
+                MOBILE_CONTACT_TICK_SECONDS,
+                now + Duration::from_secs_f32(elapsed),
+                |_| {
+                    Ok(PhysicalBodyInput::referenced(
+                        PhysicalBodyActuation::Grounded(GroundedBodyActuation::coast()),
+                        PhysicalReferenceInput::remote(None, start.rotation),
+                        true,
+                    ))
+                },
+            )
+            .unwrap();
+        if result.outcomes.iter().any(|o| {
+            matches!(o, DynamicEntityBodyOutcome::RecoveredPlacement(body) if *body == id)
+        }) {
+            assert!(
+                parked_tick.is_none(),
+                "floating parked body must not bounce-loop and recover repeatedly"
+            );
+            parked_tick = Some(tick);
+        }
+        if parked_tick.is_some() {
+            let body = world.scene.body(id).unwrap();
+            assert_eq!(
+                dynamic_activity(&world.scene, id),
+                DynamicBodyActivity::AuthoritativeParked
+            );
+            assert!(
+                body.pose.distance_to(&floating) < CONTACT_EPSILON,
+                "floating parked body must stay pinned at authoritative elevation without falling"
+            );
+        }
+    }
+    assert!(parked_tick.is_some(), "floating settled pose must park");
+
+    // Subsequent non-contact observation while parked tracks pose directly and emits events.
+    let floating_shifted = pose(Vector3::new(96.0, 96.0, ground_z + 4.4));
+    let events = world.handle_message(&GameMessage::UpdatePosition(Box::new(UpdatePositionData {
+        guid,
+        pos: PositionPack {
+            pos: floating_shifted,
+            position_sequence: 2,
+            flags: UpdatePositionFlag::NONE,
+            ..Default::default()
+        },
+    })));
+    assert!(events.iter().any(|e| matches!(
+        e,
+        crate::WorldEvent::RuntimeBodyChanged { body_id } if *body_id == id
+    )));
+    assert!(world.scene.body(id).unwrap().pose.distance_to(&floating_shifted) < CONTACT_EPSILON);
+    assert_eq!(
+        dynamic_activity(&world.scene, id),
+        DynamicBodyActivity::AuthoritativeParked
+    );
+
+    // Moving onto clear ground slightly above terrain (within PHYSICAL_RETURN_START_THRESHOLD_M,
+    // matching typical quantized/linear server arrival) automatically unparks back to Active.
+    let clear_ground = pose(Vector3::new(98.0, 96.0, ground_z + 0.05));
+    world.handle_message(&GameMessage::UpdatePosition(Box::new(UpdatePositionData {
+        guid,
+        pos: PositionPack {
+            pos: clear_ground,
+            position_sequence: 3,
+            flags: UpdatePositionFlag::NONE,
+            ..Default::default()
+        },
+    })));
+    let unpark_tick = world
+        .scene
+        .advance_dynamic_entity_collection(
+            &collision,
+            MOBILE_CONTACT_TICK_SECONDS,
+            now + Duration::from_secs_f32((ticks + 1) as f32 * MOBILE_CONTACT_TICK_SECONDS),
+            |_| {
+                Ok(PhysicalBodyInput::referenced(
+                    PhysicalBodyActuation::Grounded(GroundedBodyActuation::coast()),
+                    PhysicalReferenceInput::remote(None, start.rotation),
+                    true,
+                ))
+            },
+        )
+        .unwrap();
+    assert!(unpark_tick.outcomes.iter().any(|o| {
+        matches!(o, DynamicEntityBodyOutcome::RecoveredPlacement(body) if *body == id)
+    }));
+    assert_eq!(
+        dynamic_activity(&world.scene, id),
+        DynamicBodyActivity::Active
+    );
+    assert_eq!(
+        world.scene.body(id).unwrap().sampling.mode,
+        SpatialSampleMode::SimulatingVelocity
+    );
+    assert!(world.scene.body(id).unwrap().pose.distance_to(&clear_ground) < CONTACT_EPSILON);
+}
+
+#[test]
+fn authoritative_parked_unparks_on_collision_revision_change_and_peer_departure() {
+    use crate::spatial::pose_reconciliation::recovery::RECOVERY_WINDOW_SECONDS;
+    use holtburger_protocol::messages::{
+        GameMessage, PositionPack, UpdatePositionData, UpdatePositionFlag,
+    };
+
+    let now = Instant::now();
+    let definition = grounded_definition();
+    let primary = definition.spheres().primary();
+    let ground_z = primary.radius - primary.center.z;
+    let start = pose(Vector3::new(90.0, 96.0, ground_z));
+    let obstacle_spot = pose(Vector3::new(94.0, 96.0, ground_z));
+
+    // Scene with a static obstacle occupying `obstacle_spot`.
+    let mut collision = flat_collision_scene();
+    let mut blocked_asset = flat_collision_asset(0);
+    blocked_asset.static_geometry = LandblockColliders::new(
+        vec![
+            PlacedCollider::new(
+                polygon_wall_shape(),
+                LandblockPlacement {
+                    origin: Vector3::new(94.0, 96.0, 1.0),
+                    orientation: Quaternion::identity(),
+                },
+                ColliderScale::uniform(1.0).unwrap(),
+                StaticColliderPlacement::OutdoorExplicit { source_index: 0 },
+            )
+            .unwrap(),
+        ],
+        Vec::new(),
+    );
+    collision.insert(blocked_asset).unwrap();
+    let blocked_revision = collision.revision();
+
+    let remote_guid = Guid(11);
+    let remote_id = SpatialBodyId::Entity(remote_guid);
+    let peer_guid = Guid(12);
+    let peer_id = SpatialBodyId::LocalPlayer(peer_guid);
+
+    let mut world = crate::WorldState::synthetic();
+    world.add_entity(crate::entity::Entity::new(
+        remote_guid,
+        "Blocked Remote".to_owned(),
+        start,
+    ));
+    world
+        .scene
+        .set_dynamic_physical_body(
+            remote_id,
+            Some(dynamic_definition(definition, false)),
+            PhysicalCollisionFilter::ALL,
+            None,
+        )
+        .unwrap();
+    acquire_support(&mut world.scene, &collision, remote_id, now);
+
+    // Park the remote inside the static obstacle.
+    world.handle_message(&GameMessage::UpdatePosition(Box::new(UpdatePositionData {
+        guid: remote_guid,
+        pos: PositionPack {
+            pos: obstacle_spot,
+            position_sequence: 1,
+            flags: UpdatePositionFlag::NONE,
+            ..Default::default()
+        },
+    })));
+    let ticks = (RECOVERY_WINDOW_SECONDS * 2.0 / MOBILE_CONTACT_TICK_SECONDS).ceil() as usize;
+    for tick in 0..ticks {
+        let _ = world
+            .scene
+            .advance_dynamic_entity_collection(
+                &collision,
+                MOBILE_CONTACT_TICK_SECONDS,
+                now + Duration::from_secs_f32((tick + 1) as f32 * MOBILE_CONTACT_TICK_SECONDS),
+                |_| {
+                    Ok(PhysicalBodyInput::referenced(
+                        PhysicalBodyActuation::Grounded(GroundedBodyActuation::coast()),
+                        PhysicalReferenceInput::remote(None, start.rotation),
+                        true,
+                    ))
+                },
+            )
+            .unwrap();
+        if dynamic_activity(&world.scene, remote_id) == DynamicBodyActivity::AuthoritativeParked {
+            break;
+        }
+    }
+    assert_eq!(
+        dynamic_activity(&world.scene, remote_id),
+        DynamicBodyActivity::AuthoritativeParked
+    );
+
+    // Place a blocking peer right on top of the parked spot, then remove the static obstacle
+    // (collision revision change). Remote must stay parked while the peer overlaps it.
+    collision.insert(flat_collision_asset(0)).unwrap();
+    assert_ne!(collision.revision(), blocked_revision);
+    world.seed_local_player_entity(peer_guid, "Peer", obstacle_spot);
+    world
+        .scene
+        .set_dynamic_physical_body(
+            peer_id,
+            Some(dynamic_definition(definition, false)),
+            PhysicalCollisionFilter::ALL,
+            None,
+        )
+        .unwrap();
+    let tick_with_peer = world
+        .scene
+        .advance_dynamic_entity_collection(
+            &collision,
+            MOBILE_CONTACT_TICK_SECONDS,
+            now + Duration::from_secs_f32((ticks + 2) as f32 * MOBILE_CONTACT_TICK_SECONDS),
+            |body| {
+                Ok(PhysicalBodyInput::referenced(
+                    PhysicalBodyActuation::Grounded(GroundedBodyActuation::coast()),
+                    if body.id == peer_id {
+                        PhysicalReferenceInput::body(None)
+                    } else {
+                        PhysicalReferenceInput::remote(None, start.rotation)
+                    },
+                    true,
+                ))
+            },
+        )
+        .unwrap();
+    assert!(
+        !tick_with_peer.outcomes.iter().any(|o| {
+            matches!(o, DynamicEntityBodyOutcome::RecoveredPlacement(body) if *body == remote_id)
+        }),
+        "parked remote must not unpark into an overlapping blocking peer"
+    );
+    assert_eq!(
+        dynamic_activity(&world.scene, remote_id),
+        DynamicBodyActivity::AuthoritativeParked
+    );
+
+    // Now move the peer away via normal physical travel -> peer movement triggers unpark recheck!
+    let mut moved_away = false;
+    for step in 0..20 {
+        let tick = world
+            .scene
+            .advance_dynamic_entity_collection(
+                &collision,
+                MOBILE_CONTACT_TICK_SECONDS,
+                now + Duration::from_secs_f32(
+                    (ticks + 3 + step) as f32 * MOBILE_CONTACT_TICK_SECONDS,
+                ),
+                |body| {
+                    let offset = (body.id == peer_id).then_some(RigidTransform {
+                        translation: Vector3::new(0.25, 0.0, 0.0),
+                        rotation: Quaternion::identity(),
+                    });
+                    Ok(PhysicalBodyInput::referenced(
+                        PhysicalBodyActuation::Grounded(GroundedBodyActuation::coast()),
+                        if body.id == peer_id {
+                            PhysicalReferenceInput::body(offset)
+                        } else {
+                            PhysicalReferenceInput::remote(None, start.rotation)
+                        },
+                        true,
+                    ))
+                },
+            )
+            .unwrap();
+        if tick.outcomes.iter().any(|o| {
+            matches!(o, DynamicEntityBodyOutcome::RecoveredPlacement(body) if *body == remote_id)
+        }) {
+            moved_away = true;
+            break;
+        }
+    }
+    assert!(moved_away, "parked remote must unpark once peer clears the spot");
+    assert_eq!(
+        dynamic_activity(&world.scene, remote_id),
+        DynamicBodyActivity::Active
     );
 }

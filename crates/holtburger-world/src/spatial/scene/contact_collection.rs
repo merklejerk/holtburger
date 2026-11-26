@@ -20,6 +20,7 @@ pub(super) struct SceneCollectionScratch {
     active_fixed: Vec<SpatialBodyId>,
     active_mobile: Vec<SpatialBodyId>,
     settled_mobile: Vec<SpatialBodyId>,
+    parked_bodies: Vec<(SpatialBodyId, bool)>,
     rejected_ids: Vec<SpatialBodyId>,
     solved_ids: Vec<SpatialBodyId>,
     refreshed_or_fixed: Vec<SpatialBodyId>,
@@ -47,6 +48,7 @@ impl SceneCollectionScratch {
         self.active_fixed.clear();
         self.active_mobile.clear();
         self.settled_mobile.clear();
+        self.parked_bodies.clear();
         self.rejected_ids.clear();
         self.solved_ids.clear();
         self.refreshed_or_fixed.clear();
@@ -91,20 +93,20 @@ impl CollectionActuator {
         } else {
             self.reconciliation
         };
+        let remote_grounded_eligible = matches!(body.id, SpatialBodyId::Entity(_))
+            && body.physical.as_ref().is_some_and(|physical| {
+                matches!(physical.definition, PhysicalBodyDefinition::Grounded { .. })
+                    && physical
+                        .dynamic
+                        .as_ref()
+                        .is_some_and(|dynamic| dynamic.collision.contact_response.yields())
+            });
         if let (Some(state), Some(destination)) = (reconciliation.as_mut(), body.correction_pose())
         {
-            let eligible = matches!(body.id, SpatialBodyId::Entity(_))
-                && body.physical.as_ref().is_some_and(|physical| {
-                    matches!(physical.definition, PhysicalBodyDefinition::Grounded { .. })
-                        && physical
-                            .dynamic
-                            .as_ref()
-                            .is_some_and(|dynamic| dynamic.collision.contact_response.yields())
-                });
             // A grounded response describes the body's physics, not its current support.
             // Unsupported travel can leave the last admitted grounded pose behind normally;
             // observing it as a stall can place a correctly falling remote back on its ledge.
-            let permitted = eligible
+            let permitted = remote_grounded_eligible
                 && body.contact.contact() == Some(true)
                 && match self.input.recovery_authority {
                     RecoveryAuthority::Disabled => false,
@@ -140,6 +142,23 @@ impl CollectionActuator {
                         .definition,
                 ),
             );
+            if let Some(BodyPoseAuthority::Observed(destination)) = body.pose_authority {
+                let stationary = update.displacement == Vector3::zero()
+                    && body.retained.velocity.length() <= super::super::bsp_query::CONTACT_EPSILON
+                    && body.nominal.velocity.length() <= super::super::bsp_query::CONTACT_EPSILON;
+                let permitted = remote_grounded_eligible
+                    && body.contact.contact() == Some(true)
+                    && stationary
+                    && self.input.recovery_authority == RecoveryAuthority::LatestSample;
+                if state.finish_observed_recovery_tick(
+                    body.pose,
+                    destination,
+                    delta_seconds,
+                    permitted,
+                ) {
+                    recovery = Some(destination);
+                }
+            }
         }
         body.reconciliation = reconciliation
             .filter(|state| !state.is_empty())
@@ -394,7 +413,7 @@ fn push_override_from_stored<'a>(
     let Some(dynamic) = physical.dynamic.as_ref() else {
         return Ok(());
     };
-    if dynamic.activity == DynamicBodyActivity::Suspended {
+    if !dynamic.activity.participates_in_collision() {
         return Ok(());
     }
     if !matches!(id, SpatialBodyId::Entity(_)) {
@@ -443,7 +462,7 @@ fn refresh_stationary_reports(
         let Some(recipient_dynamic) = recipient_physical.dynamic.as_ref() else {
             return Ok(false);
         };
-        if recipient_dynamic.activity == DynamicBodyActivity::Suspended
+        if !recipient_dynamic.activity.participates_in_collision()
             || !recipient_dynamic.collision.reporting.enabled
         {
             return Ok(false);
@@ -554,6 +573,14 @@ impl SpatialScene {
             let Some(dynamic) = physical.dynamic.as_ref() else {
                 continue;
             };
+            if dynamic.activity == DynamicBodyActivity::AuthoritativeParked {
+                let pose_dirty = stored.verified_placement != Some((body.pose, collision_revision));
+                scratch.parked_bodies.push((id, pose_dirty));
+                if pose_dirty {
+                    scratch.needs_refresh.push(id);
+                }
+                continue;
+            }
             if dynamic.activity == DynamicBodyActivity::Suspended
                 || stored.verified_placement != Some((body.pose, collision_revision))
             {
@@ -597,10 +624,19 @@ impl SpatialScene {
         let mut snap_previous_placements = HashMap::new();
         let mut collision_reports = Vec::new();
 
+        let parked_may_unpark = !scratch.parked_bodies.is_empty()
+            && (revision_changed
+                || recheck_support
+                || scratch
+                    .parked_bodies
+                    .iter()
+                    .any(|&(_, pose_dirty)| pose_dirty));
+
         if scratch.needs_refresh.is_empty()
             && scratch.active_fixed.is_empty()
             && scratch.active_mobile.is_empty()
             && scratch.settled_mobile.is_empty()
+            && !parked_may_unpark
         {
             self.last_collection_collision_revision = Some(collision_revision);
             self.peer_support_recheck_needed = false;
@@ -639,7 +675,7 @@ impl SpatialScene {
                     && let Some(physical) = body.physical.as_ref()
                     && let Some(dynamic) = physical.dynamic.as_ref()
                     && dynamic.demand.integration == LocalIntegrationDemand::Eligible
-                    && dynamic.activity != DynamicBodyActivity::Suspended
+                    && dynamic.activity.participates_in_collision()
                 {
                     let fixed = matches!(
                         physical.definition,
@@ -818,20 +854,31 @@ impl SpatialScene {
         self.peer_support_recheck_needed = false;
 
         if scratch.active_mobile.is_empty() {
-            scratch.solved_ids.sort_unstable();
-            refresh_stationary_reports(self, &scratch.solved_ids, now)?;
-            collision_reports.extend(self.collision_reports.expire(now)?);
-            profile.checkpoint("quiet_after_fixed");
-            profile.finish(format_args!(
-                "bodies=0 outcomes={} report_touches=0",
-                outcomes.len()
-            ));
-            return Ok(DynamicEntityCollectionTick {
+            let parked_bodies = std::mem::take(&mut scratch.parked_bodies);
+            let mut collection = DynamicEntityCollectionTick {
                 outcomes,
                 snap_previous_placements,
                 collision_reports,
                 coverage_rejections,
-            });
+            };
+            self.try_unpark_authoritative_bodies(
+                collision,
+                &parked_bodies,
+                revision_changed || recheck_support || fixed_moved,
+                now,
+                &mut collection,
+            )?;
+            scratch.solved_ids.sort_unstable();
+            refresh_stationary_reports(self, &scratch.solved_ids, now)?;
+            collection
+                .collision_reports
+                .extend(self.collision_reports.expire(now)?);
+            profile.checkpoint("quiet_after_fixed");
+            profile.finish(format_args!(
+                "bodies=0 outcomes={} report_touches=0",
+                collection.outcomes.len()
+            ));
+            return Ok(collection);
         }
 
         let anchor_pose = self
@@ -844,7 +891,7 @@ impl SpatialScene {
                         .physical
                         .as_ref()
                         .and_then(|p| p.dynamic.as_ref())
-                        .is_some_and(|d| d.activity != DynamicBodyActivity::Suspended)
+                        .is_some_and(|d| d.activity.participates_in_collision())
             })
             .or_else(|| self.body_store.body(scratch.active_mobile[0]))
             .context("active collection lost its anchor body")?
@@ -1316,7 +1363,16 @@ impl SpatialScene {
             coverage_rejections,
         };
         let recovery_requests = std::mem::take(&mut scratch.recovery_requests);
+        let parked_bodies = std::mem::take(&mut scratch.parked_bodies);
+        let any_peer_moved = self.peer_support_recheck_needed;
         self.recover_contact_placements(collision, recovery_requests, now, &mut collection)?;
+        self.try_unpark_authoritative_bodies(
+            collision,
+            &parked_bodies,
+            revision_changed || recheck_support || fixed_moved || any_peer_moved,
+            now,
+            &mut collection,
+        )?;
         scratch.solved_ids.sort_unstable();
         refresh_stationary_reports(self, &scratch.solved_ids, now)?;
         collection
@@ -1357,64 +1413,46 @@ impl SpatialScene {
                 .context("recovery body disappeared")?;
             let mut candidate = relocated_dynamic_body(source, destination, now)
                 .context("recovery requires a dynamic body")?;
-            let checked = (|| -> anyhow::Result<Option<(WorldPosition, SpatialMembership)>> {
-                let membership = resolve_dynamic_body_placement(
-                    collision,
-                    &candidate,
-                    destination.is_indoors().then_some(destination.landblock_id),
-                )?;
-                candidate
-                    .physical
-                    .as_mut()
-                    .and_then(|p| p.dynamic.as_mut())
-                    .context("recovery candidate lost dynamic placement")?
-                    .placement = membership;
-                super::super::mobile_contact::checked_recovery_destination(
-                    collision,
-                    &candidate,
-                    &recovery_peers,
-                )
-            })();
-            let (pose, membership) = match checked {
-                Ok(Some(pose)) => pose,
-                Ok(None) => continue,
-                Err(error)
-                    if matches!(
-                        error.downcast_ref::<CollisionQueryError>(),
-                        Some(
-                            CollisionQueryError::UnavailableOwner { .. }
-                                | CollisionQueryError::UnknownMotionCell { .. }
-                        )
-                    ) =>
-                {
+            let Some((membership, verdict)) =
+                evaluate_recovery_candidate(collision, &mut candidate, &recovery_peers)?
+            else {
+                continue;
+            };
+            let (pose, membership, park_authoritatively) = match verdict {
+                super::super::mobile_contact::RecoveryDestinationCheck::Clear {
+                    pose,
+                    membership,
+                } => (pose, membership, false),
+                super::super::mobile_contact::RecoveryDestinationCheck::BlockedByMobilePeer => {
+                    // Never park on top of a live blocking mobile peer (preserves body-blocking
+                    // and prevents players from disabling mob collision by standing on their spot).
                     continue;
                 }
-                Err(error) => return Err(error),
+                super::super::mobile_contact::RecoveryDestinationCheck::BlockedByStaticOrUnsupported => {
+                    // RETAIL DIVERGENCE: Retail behavior is to reject placement recovery when the
+                    // destination overlaps static/hard geometry (leaving stalled remote actors
+                    // stranded outside obstacles) or to drop floating authoritative poses under
+                    // gravity. For remote yielding characters whose destination is clear of
+                    // blocking mobile peers and inside resident topology, park at the exact server
+                    // pose with physics and collision paused until a later pose, collision
+                    // revision, or peer departure clears placement; blocking mobile peer overlaps
+                    // remain rejected so body-blocking and combat collision invariants stay intact.
+                    // Sized by the 2026-11-26 Hebian-to West Wind Tower live census (Scenarios
+                    // 1-6b) and the parked-wall, floating-hover, peer-blocking, and unpark tests.
+                    if !matches!(body_id, SpatialBodyId::Entity(_)) {
+                        continue;
+                    }
+                    (destination, membership, true)
+                }
             };
-            candidate.pose = pose;
-            let physical = candidate
-                .physical
-                .as_mut()
-                .context("validated recovery lost physics")?;
-            physical.reset_placement(membership.committed_cell());
-            physical
-                .dynamic
-                .as_mut()
-                .context("validated recovery lost dynamic placement")?
-                .placement = membership;
-            let relocated = self.publish_dynamic_relocation(candidate);
-            let peer = recovery_peers
-                .iter_mut()
-                .find(|peer| peer.id == body_id)
-                .context("recovered body lost its placement-validation snapshot")?;
-            *peer = self
-                .body_store
-                .body(body_id)
-                .context("recovered body disappeared before placement validation")?
-                .clone();
-            collection
-                .collision_reports
-                .extend(relocated.collision_reports);
+            self.commit_recovered_body(
+                candidate,
+                pose,
+                membership,
+                park_authoritatively,
+                &mut recovery_peers,
+                collection,
+            )?;
             // The old accepted path is no longer this tick's visible movement.
             let outcome = collection
                 .outcomes
@@ -1433,5 +1471,158 @@ impl SpatialScene {
             *outcome = DynamicEntityBodyOutcome::RecoveredPlacement(body_id);
         }
         Ok(())
+    }
+
+    /// Promotes `AuthoritativeParked` remote bodies back to full `Active` physical simulation
+    /// once their current authoritative pose clears static geometry, hard obstacles, peers, and
+    /// walkable support.
+    fn try_unpark_authoritative_bodies(
+        &mut self,
+        collision: &CollisionScene,
+        parked_bodies: &[(SpatialBodyId, bool)],
+        scene_changed: bool,
+        now: Instant,
+        collection: &mut DynamicEntityCollectionTick,
+    ) -> anyhow::Result<()> {
+        let candidates: Vec<SpatialBodyId> = parked_bodies
+            .iter()
+            .filter_map(|&(id, pose_dirty)| (pose_dirty || scene_changed).then_some(id))
+            .collect();
+        if candidates.is_empty() {
+            return Ok(());
+        }
+        let mut peers = self.body_store.iter_bodies().cloned().collect::<Vec<_>>();
+        peers.sort_by_key(|body| body.id);
+        for body_id in candidates {
+            let Some(source) = self.body_store.body(body_id) else {
+                continue;
+            };
+            let is_still_parked = source
+                .physical
+                .as_ref()
+                .and_then(|p| p.dynamic.as_ref())
+                .is_some_and(|d| d.activity == DynamicBodyActivity::AuthoritativeParked);
+            if !is_still_parked {
+                continue;
+            }
+            let previous_pose = source.pose;
+            let previous_membership = source.spatial_membership();
+            let mut candidate = relocated_dynamic_body(source, source.pose, now)
+                .context("unparked body requires dynamic physics")?;
+            let Some((
+                _,
+                super::super::mobile_contact::RecoveryDestinationCheck::Clear { pose, membership },
+            )) = evaluate_recovery_candidate(collision, &mut candidate, &peers)?
+            else {
+                continue;
+            };
+            self.commit_recovered_body(
+                candidate,
+                pose,
+                membership,
+                false,
+                &mut peers,
+                collection,
+            )?;
+            collection
+                .snap_previous_placements
+                .insert(body_id, (previous_pose, previous_membership));
+            collection
+                .outcomes
+                .push(DynamicEntityBodyOutcome::RecoveredPlacement(body_id));
+        }
+        Ok(())
+    }
+
+    fn commit_recovered_body(
+        &mut self,
+        mut candidate: SpatialBody,
+        pose: WorldPosition,
+        membership: SpatialMembership,
+        park_authoritatively: bool,
+        peers: &mut [SpatialBody],
+        collection: &mut DynamicEntityCollectionTick,
+    ) -> anyhow::Result<()> {
+        let body_id = candidate.id;
+        candidate.pose = pose;
+        let physical = candidate
+            .physical
+            .as_mut()
+            .context("validated recovery lost physics")?;
+        physical.reset_placement(membership.committed_cell());
+        let dynamic = physical
+            .dynamic
+            .as_mut()
+            .context("validated recovery lost dynamic placement")?;
+        dynamic.placement = membership;
+        if park_authoritatively {
+            dynamic.activity = DynamicBodyActivity::AuthoritativeParked;
+            candidate.contact = ContactState::Unknown;
+            candidate.sampling.mode = SpatialSampleMode::AuthoritativeOnly;
+        } else {
+            dynamic.activity = DynamicBodyActivity::Active;
+            candidate.sampling.mode = SpatialSampleMode::SimulatingVelocity;
+        }
+        let relocated = self.publish_dynamic_relocation(candidate);
+        let peer = peers
+            .iter_mut()
+            .find(|peer| peer.id == body_id)
+            .context("recovered body lost its placement-validation snapshot")?;
+        *peer = self
+            .body_store
+            .body(body_id)
+            .context("recovered body disappeared before placement validation")?
+            .clone();
+        collection
+            .collision_reports
+            .extend(relocated.collision_reports);
+        Ok(())
+    }
+}
+
+/// Resolves resident placement and evaluates exact clearance for a recovery/unpark candidate.
+/// Returns `Ok(None)` when the destination's collision topology is not currently resident.
+fn evaluate_recovery_candidate(
+    collision: &CollisionScene,
+    candidate: &mut SpatialBody,
+    peers: &[SpatialBody],
+) -> anyhow::Result<Option<(SpatialMembership, super::super::mobile_contact::RecoveryDestinationCheck)>>
+{
+    let checked = (|| -> anyhow::Result<(
+        SpatialMembership,
+        super::super::mobile_contact::RecoveryDestinationCheck,
+    )> {
+        let membership = resolve_dynamic_body_placement(
+            collision,
+            candidate,
+            candidate
+                .pose
+                .is_indoors()
+                .then_some(candidate.pose.landblock_id),
+        )?;
+        candidate
+            .physical
+            .as_mut()
+            .and_then(|p| p.dynamic.as_mut())
+            .context("recovery candidate lost dynamic placement")?
+            .placement = membership.clone();
+        let verdict =
+            super::super::mobile_contact::evaluate_recovery_destination(collision, candidate, peers)?;
+        Ok((membership, verdict))
+    })();
+    match checked {
+        Ok(result) => Ok(Some(result)),
+        Err(error)
+            if matches!(
+                error.downcast_ref::<CollisionQueryError>(),
+                Some(
+                    CollisionQueryError::UnavailableOwner { .. }
+                        | CollisionQueryError::UnknownMotionCell { .. }
+                )
+            ) =>
+        {
+            Ok(None)
+        }
+        Err(error) => Err(error),
     }
 }

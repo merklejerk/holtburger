@@ -592,7 +592,7 @@ pub(crate) fn dynamic_target_is_indexed(
     dynamic: &DynamicBodyRuntimeState,
 ) -> bool {
     !matches!(id, SpatialBodyId::Ephemeral(_))
-        && dynamic.activity != DynamicBodyActivity::Suspended
+        && dynamic.activity.participates_in_collision()
         && dynamic.demand.target == LocalTargetDemand::Retained
         && dynamic.collision.dynamic_collision.target != EntityCollisionParticipation::Suppressed
         && !dynamic.collision.dynamic_collision.missile
@@ -707,7 +707,7 @@ pub(crate) fn current_entity_peer_overlap<'a>(
         let Some(peer_dynamic) = peer_physical.dynamic.as_ref() else {
             continue;
         };
-        if peer_dynamic.activity == super::DynamicBodyActivity::Suspended
+        if !peer_dynamic.activity.participates_in_collision()
             || !object_dynamic
                 .placement
                 .intersects_reached(&peer_dynamic.placement)

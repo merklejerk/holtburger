@@ -128,7 +128,10 @@ pub struct OutdoorCoordsView {
 pub struct SelfView {
     pub guid: Guid,
     pub name: Option<String>,
+    /// Local simulated runtime pose (falls back to server-authoritative pose when absent).
     pub position: Option<WorldPosition>,
+    /// Last server-authoritative player position (`Entity::position`).
+    pub authoritative_position: Option<WorldPosition>,
     /// Outdoor AC map coordinates when outdoors; `null` indoors or when position is unavailable.
     pub outdoor_coords: Option<OutdoorCoordsView>,
     pub heading: Option<f32>,
@@ -192,7 +195,11 @@ pub struct EntitySummary {
     pub is_hostile: bool,
     pub is_dead: bool,
     pub is_vendor: bool,
+    /// Last server-authoritative entity position (`Entity::position`).
     pub position: WorldPosition,
+    /// Simulated/rendered spatial body pose (`SpatialScene`), or `null` when contained, equipped,
+    /// or without a registered spatial body.
+    pub body_position: Option<WorldPosition>,
     pub distance_to_self: Option<f32>,
     /// Target health fraction in `[0.0, 1.0]`; `null` on remote creatures until selected/targeted
     /// (retail AC only reports creature health on demand).

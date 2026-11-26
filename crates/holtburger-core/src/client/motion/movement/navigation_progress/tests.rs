@@ -559,3 +559,244 @@ fn sticky_local_simulation_follows_received_height_with_clearance_and_one_transl
     simulation::tick(now + dt * 3, dt, &mut world, &mut movement, Some(&snapshot)).unwrap();
     assert_eq!(world.local_player_runtime_pose(), Some(followed));
 }
+
+fn outdoor_scene_with_raised_room(
+    terrain_z: f32,
+    room_cell: u32,
+    room_origin: Vector3,
+    half_extents: Vector3,
+) -> CollisionScene {
+    use holtburger_content::{LandblockTerrain, TerrainCellDiagonals};
+
+    let owner = (room_cell & 0xffff_0000) | 0xffff;
+    let terrain = TerrainCollisionSurface::from_terrain(&LandblockTerrain {
+        grid_size: 9,
+        tile_size: 24.0,
+        height_indices: vec![0; 81],
+        heights: vec![terrain_z; 81],
+        terrain_samples: vec![0; 81],
+        cell_diagonals: TerrainCellDiagonals::for_landblock(owner),
+    })
+    .unwrap();
+    let room = CellVolume {
+        visibility: holtburger_content::CellVisibility {
+            visible_cell_selectors: Vec::new(),
+            seen_outside: false,
+        },
+        cell_selector: room_cell as u16,
+        placement: LandblockPlacement {
+            origin: room_origin,
+            orientation: Quaternion::identity(),
+        },
+        planes: vec![
+            Plane {
+                normal: Vector3::new(1.0, 0.0, 0.0),
+                d: half_extents.x,
+            },
+            Plane {
+                normal: Vector3::new(-1.0, 0.0, 0.0),
+                d: half_extents.x,
+            },
+            Plane {
+                normal: Vector3::new(0.0, 1.0, 0.0),
+                d: half_extents.y,
+            },
+            Plane {
+                normal: Vector3::new(0.0, -1.0, 0.0),
+                d: half_extents.y,
+            },
+            Plane {
+                normal: Vector3::new(0.0, 0.0, 1.0),
+                d: half_extents.z,
+            },
+            Plane {
+                normal: Vector3::new(0.0, 0.0, -1.0),
+                d: half_extents.z,
+            },
+        ],
+        portals: Vec::new(),
+    };
+    let mut collision = CollisionScene::new();
+    collision
+        .insert(LandblockCollisionAsset {
+            landblock_id: owner,
+            terrain,
+            static_geometry: LandblockColliders::new(Vec::new(), vec![room]),
+        })
+        .unwrap();
+    collision
+}
+
+#[test]
+fn overlapping_cell_boundary_prefers_target_hint_over_committed_cell() {
+    // FIRST spans x in [-1, 1], LAST spans x in [0, 2]; x = 0.5 overlaps both.
+    let scene = scene(&[(FIRST, 0.0), (LAST, 1.0)]);
+    let start = pose(FIRST, 0.0);
+    let target = pose(LAST, 1.5);
+    let step = RigidTransform {
+        translation: Vector3::new(0.5, 0.0, 0.0),
+        rotation: Quaternion::identity(),
+    };
+
+    let mut progress = NavigationProgress::default();
+    let directed = progress
+        .advance_authored(
+            &scene,
+            start,
+            step,
+            1.0,
+            Some(DirectedMotionTravel {
+                target,
+                moving_away: false,
+            }),
+        )
+        .unwrap()
+        .expect("directed step into overlap must resolve");
+    assert_eq!(directed.landblock_id, Guid(LAST));
+
+    progress.reset();
+    let manual = progress
+        .advance_authored(&scene, start, step, 1.0, None)
+        .unwrap()
+        .expect("manual step into overlap must retain committed cell");
+    assert_eq!(manual.landblock_id, Guid(FIRST));
+}
+
+#[test]
+fn outdoor_approach_to_elevated_indoor_room_enters_room_floor() {
+    let terrain_z = 32.0;
+    let room_cell = 0x1234_0103;
+    // Room footprint x in [60, 70], y in [60, 70], z in [34, 38] (raised 2m above terrain).
+    let scene = outdoor_scene_with_raised_room(
+        terrain_z,
+        room_cell,
+        Vector3::new(65.0, 65.0, 36.0),
+        Vector3::new(5.0, 5.0, 2.0),
+    );
+    let mut current = WorldPosition::from_outdoor_frame(
+        Guid(0x1234_ffff),
+        Vector3::new(54.0, 65.0, terrain_z),
+        Quaternion::identity(),
+    );
+    let target = WorldPosition {
+        landblock_id: Guid(room_cell),
+        coords: Vector3::new(65.0, 65.0, 34.0),
+        rotation: Quaternion::identity(),
+    };
+    let step = RigidTransform {
+        translation: Vector3::new(1.0, 0.0, 0.0),
+        rotation: Quaternion::identity(),
+    };
+    let arrival_distance = 1.5;
+
+    let mut progress = NavigationProgress::default();
+    let mut entered_room = false;
+    for _ in 0..20 {
+        if current.distance_to(&target) <= arrival_distance {
+            break;
+        }
+        current = progress
+            .advance_authored(
+                &scene,
+                current,
+                step,
+                1.0,
+                Some(DirectedMotionTravel {
+                    target,
+                    moving_away: false,
+                }),
+            )
+            .unwrap()
+            .expect("step toward building must resolve");
+        if current.coords.x < 60.0 {
+            assert!(
+                !current.is_indoors(),
+                "outside footprint must remain outdoor"
+            );
+        } else {
+            entered_room = true;
+            assert_eq!(
+                current.landblock_id,
+                Guid(room_cell),
+                "once XY enters room footprint, pose must enter target indoor cell"
+            );
+            assert!(
+                (current.coords.z - target.coords.z).abs() < 0.01,
+                "indoor pose must lift to room floor elevation, got z={}",
+                current.coords.z
+            );
+        }
+    }
+    assert!(entered_room, "approach must enter target indoor cell");
+    assert!(current.distance_to(&target) <= arrival_distance);
+    assert_eq!(current.landblock_id, Guid(room_cell));
+}
+
+#[test]
+fn elevated_outdoor_balcony_arrival_retains_elevation_on_idle_stop_tick() {
+    let terrain_z = 32.0;
+    let room_cell = 0x1234_0103;
+    let scene = outdoor_scene_with_raised_room(
+        terrain_z,
+        room_cell,
+        Vector3::new(150.0, 150.0, 36.0),
+        Vector3::new(5.0, 5.0, 2.0),
+    );
+    let step = RigidTransform {
+        translation: Vector3::new(1.0, 0.0, 0.0),
+        rotation: Quaternion::identity(),
+    };
+    let start_ground = WorldPosition::from_outdoor_frame(
+        Guid(0x1234_ffff),
+        Vector3::new(50.0, 50.0, terrain_z),
+        Quaternion::identity(),
+    );
+    let balcony_target = WorldPosition::from_outdoor_frame(
+        Guid(0x1234_ffff),
+        Vector3::new(55.0, 50.0, terrain_z + 5.0),
+        Quaternion::identity(),
+    );
+
+    let mut progress = NavigationProgress::default();
+    let mut current = start_ground;
+    for _ in 0..10 {
+        if current.distance_to(&balcony_target) <= 1.5 {
+            break;
+        }
+        current = progress
+            .advance_authored(
+                &scene,
+                current,
+                step,
+                1.0,
+                Some(DirectedMotionTravel {
+                    target: balcony_target,
+                    moving_away: false,
+                }),
+            )
+            .unwrap()
+            .unwrap();
+    }
+    assert!(
+        current.coords.z > terrain_z + 3.5,
+        "elevated outdoor balcony target must preserve 3D climb, got z={}",
+        current.coords.z
+    );
+
+    // After steering completes (`travel == None`), an idle/stopping tick with zero translation
+    // must keep the balcony elevation rather than dropping back to terrain height.
+    let idle_tick = RigidTransform {
+        translation: Vector3::zero(),
+        rotation: Quaternion::identity(),
+    };
+    let settled = progress
+        .advance_authored(&scene, current, idle_tick, 1.0, None)
+        .unwrap()
+        .unwrap();
+    assert!(
+        (settled.coords.z - current.coords.z).abs() < 0.001,
+        "stopping on an elevated balcony must retain elevation (before={}, after={})",
+        current.coords.z,
+        settled.coords.z
+    );
+}

@@ -216,7 +216,6 @@ fn resolve_navigation_placement(
     // inside the building foundation. Once XY enters the target cell's volume at target Z, step
     // cleanly onto the indoor cell elevation.
     let resolved = if let Some(target) = target_hint.filter(|t| is_indoor_cell(t.landblock_id))
-        && !resolved.is_some_and(|pose| pose.landblock_id == target.landblock_id)
         && resolved.is_none_or(|pose| !is_indoor_cell(pose.landblock_id))
         && let Some(indoor) = probe_indoor_target_entry(scene, next, target)?
     {

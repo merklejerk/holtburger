@@ -1,8 +1,8 @@
 //! Multi-producer control attribution, pause gate, and unicast read-only runtime access.
 
 use std::collections::BTreeSet;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Weak};
 
 use anyhow::{Result, anyhow};
 use holtburger_common::Guid;
@@ -279,7 +279,8 @@ pub(in crate::client) type ClientReadTask = Box<dyn FnOnce(&ClientReadContext<'_
 pub struct ClientRuntimeHandle {
     command_tx: mpsc::UnboundedSender<ClientCommandEnvelope>,
     read_tx: mpsc::UnboundedSender<ClientReadTask>,
-    view_tx: broadcast::Sender<ClientViewEvent>,
+    /// Weak reference so retaining a handle never keeps the broadcast channel open after `ClientRuntime` drops.
+    view_tx: Weak<broadcast::Sender<ClientViewEvent>>,
     automation_paused: Arc<AtomicBool>,
 }
 
@@ -287,7 +288,7 @@ impl ClientRuntimeHandle {
     pub(in crate::client) fn new(
         command_tx: mpsc::UnboundedSender<ClientCommandEnvelope>,
         read_tx: mpsc::UnboundedSender<ClientReadTask>,
-        view_tx: broadcast::Sender<ClientViewEvent>,
+        view_tx: Weak<broadcast::Sender<ClientViewEvent>>,
         automation_paused: Arc<AtomicBool>,
     ) -> Self {
         Self {
@@ -299,8 +300,13 @@ impl ClientRuntimeHandle {
     }
 
     /// Subscribes to the live `ClientViewEvent` broadcast stream.
+    ///
+    /// Returns an already-closed receiver if the owning `ClientRuntime` has already dropped.
     pub fn subscribe(&self) -> broadcast::Receiver<ClientViewEvent> {
-        self.view_tx.subscribe()
+        match self.view_tx.upgrade() {
+            Some(tx) => tx.subscribe(),
+            None => broadcast::channel(1).1,
+        }
     }
 
     /// Submits a human-originated command without waiting for an admission receipt.
@@ -684,5 +690,24 @@ mod tests {
             events.try_recv().is_err(),
             "unicast read must never broadcast ApplicationSnapshot"
         );
+    }
+
+    #[tokio::test]
+    async fn dropping_runtime_closes_event_stream_even_while_handle_is_retained() {
+        let mut client = build_test_client(ClientState::Connected);
+        let handle = client.create_handle();
+        let mut subscribed_before_drop = handle.subscribe();
+
+        drop(client);
+
+        assert!(matches!(
+            subscribed_before_drop.recv().await,
+            Err(broadcast::error::RecvError::Closed)
+        ));
+        let mut subscribed_after_drop = handle.subscribe();
+        assert!(matches!(
+            subscribed_after_drop.recv().await,
+            Err(broadcast::error::RecvError::Closed)
+        ));
     }
 }

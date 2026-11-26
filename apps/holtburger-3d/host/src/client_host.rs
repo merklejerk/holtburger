@@ -1351,4 +1351,45 @@ mod tests {
             }
         }
     }
+
+    #[tokio::test]
+    async fn run_client_task_publishes_terminal_exit_while_handle_is_still_retained() {
+        let mut client = holtburger_core::ClientRuntime::synthetic_in_world("test-account", None);
+        let handle = client.create_handle();
+        let events = handle.subscribe();
+        // Retain an extra handle clone (mirroring `ClientHostState::handle` and Live API).
+        let _retained_handle = handle.clone();
+        let (forwarded_tx, mut forwarded) = mpsc::unbounded_channel();
+        let sink = Arc::new(TestSink(move |event| {
+            forwarded_tx.send(event)?;
+            Ok(())
+        }));
+        handle
+            .send_user(holtburger_core::ClientCommand::Disconnect)
+            .expect("disconnect command should enqueue");
+
+        tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            run_client_task(
+                client,
+                events,
+                handle,
+                sink,
+                Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                Default::default(),
+            ),
+        )
+        .await
+        .expect("run_client_task must not deadlock while a ClientRuntimeHandle is retained")
+        .expect("run_client_task should finish cleanly");
+
+        let mut saw_exit = false;
+        while let Some(event) = forwarded.recv().await {
+            if let ClientHostEvent::ExitRequested(exit) = event {
+                assert!(matches!(exit.cause, ClientExitCause::ExplicitDisconnect));
+                saw_exit = true;
+            }
+        }
+        assert!(saw_exit, "terminal ExitRequested must be published");
+    }
 }

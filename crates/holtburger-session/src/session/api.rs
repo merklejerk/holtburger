@@ -1,4 +1,4 @@
-use super::types::{MockTransport, Session};
+use super::types::{FailingSendTransport, MockTransport, Session};
 use anyhow::Result;
 use socket2::SockRef;
 use std::collections::{BTreeMap, HashMap, VecDeque};
@@ -7,6 +7,10 @@ const UDP_RECV_BUFFER_SIZE_BYTES: usize = 2 * 1024 * 1024;
 
 impl Session {
     pub async fn new(server_addr: std::net::SocketAddr) -> Result<Self> {
+        anyhow::ensure!(
+            server_addr.is_ipv4(),
+            "Asheron's Call UDP transport requires an IPv4 server address, got {server_addr}"
+        );
         let socket = tokio::net::UdpSocket::bind("0.0.0.0:0").await?;
         if let Err(err) = SockRef::from(&socket).set_recv_buffer_size(UDP_RECV_BUFFER_SIZE_BYTES) {
             log::warn!(
@@ -36,6 +40,15 @@ impl Session {
         Self::with_transport(
             "127.0.0.1:9000".parse().unwrap(),
             Box::new(MockTransport),
+            1,
+        )
+    }
+
+    /// Creates an in-memory test session whose outgoing datagram sends always fail.
+    pub fn new_failing_send_test() -> Self {
+        Self::with_transport(
+            "127.0.0.1:9000".parse().unwrap(),
+            Box::new(FailingSendTransport),
             1,
         )
     }
@@ -76,5 +89,20 @@ impl Session {
             last_recv_time: std::time::Instant::now(),
             last_send_time: std::time::Instant::now(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn session_new_rejects_ipv6_server_address() {
+        let addr: std::net::SocketAddr = "[::1]:9000".parse().unwrap();
+        let err = match Session::new(addr).await {
+            Ok(_) => panic!("IPv6 address must be rejected before socket setup"),
+            Err(err) => err,
+        };
+        assert!(err.to_string().contains("IPv4"));
     }
 }

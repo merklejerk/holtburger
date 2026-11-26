@@ -464,10 +464,7 @@ mod tests {
         for item in [Guid(20), Guid(21)] {
             owned_item(&mut client.world, item);
         }
-        // The IPv4 production socket cannot send to this IPv6 destination.
-        client.session = holtburger_session::Session::new("[::1]:9000".parse().unwrap())
-            .await
-            .unwrap();
+        client.session = holtburger_session::Session::new_failing_send_test();
         let mut events = client.subscribe_client_view_events();
         client
             .submit_trade(TradeRequest::Add {

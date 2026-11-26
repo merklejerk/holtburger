@@ -1089,10 +1089,7 @@ mod tests {
         client.start_barber(&payload).unwrap();
         settle(&mut client).await;
         let id = client.barber.snapshot().interaction.unwrap().id;
-        // Existing transport tests use this IPv4-bound socket/IPv6-destination failure boundary.
-        client.session = holtburger_session::Session::new("[::1]:9000".parse().unwrap())
-            .await
-            .unwrap();
+        client.session = holtburger_session::Session::new_failing_send_test();
         let draft = BarberDraft {
             revision: 1,
             choices: original,

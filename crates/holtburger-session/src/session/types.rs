@@ -58,6 +58,20 @@ impl Transport for MockTransport {
     }
 }
 
+/// Deterministic test transport whose sends always fail without touching OS sockets.
+pub struct FailingSendTransport;
+
+#[async_trait]
+impl Transport for FailingSendTransport {
+    async fn send_to(&self, _buf: &[u8], _addr: SocketAddr) -> Result<usize> {
+        Err(anyhow!("simulated transport send failure"))
+    }
+
+    async fn recv_from(&self, _buf: &mut [u8]) -> Result<(usize, SocketAddr)> {
+        std::future::pending().await
+    }
+}
+
 #[derive(Debug)]
 pub struct PendingMessage {
     pub count: u16,

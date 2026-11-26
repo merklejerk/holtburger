@@ -345,10 +345,7 @@ mod tests {
             target: Guid(3),
             amount: 1,
         };
-        // The existing Session binds IPv4, so this IPv6 destination forces a real send failure.
-        client.session = holtburger_session::Session::new("[::1]:9000".parse().unwrap())
-            .await
-            .unwrap();
+        client.session = holtburger_session::Session::new_failing_send_test();
         let mut events = client.subscribe_client_view_events();
         assert!(client.submit_item_use(request.clone()).await.is_err());
         assert!(client.character.active_busy_operation.is_none());

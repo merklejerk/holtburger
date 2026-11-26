@@ -237,7 +237,7 @@ impl ClientRuntimeBuilder {
             anyhow!("ClientRuntimeBuilder requires a server endpoint before connect()")
         })?;
 
-        let target = tokio::net::lookup_host(format!("{}:{}", endpoint.host, endpoint.port))
+        let resolved = tokio::net::lookup_host(format!("{}:{}", endpoint.host, endpoint.port))
             .await
             .map_err(|error| crate::client::ConnectionFailure {
                 state: None,
@@ -245,15 +245,8 @@ impl ClientRuntimeBuilder {
                     operation: crate::client::ConnectionOperation::ResolveAddress,
                     diagnostic: error.to_string(),
                 },
-            })?
-            .next()
-            .ok_or_else(|| crate::client::ConnectionFailure {
-                state: None,
-                cause: crate::client::ConnectionFailureCause::Local {
-                    operation: crate::client::ConnectionOperation::ResolveAddress,
-                    diagnostic: format!("No addresses for {}:{}", endpoint.host, endpoint.port),
-                },
             })?;
+        let target = select_ipv4_endpoint(resolved, &endpoint.host, endpoint.port)?;
 
         let session =
             Session::new(target)
@@ -286,6 +279,7 @@ impl ClientRuntimeBuilder {
             anyhow!("ClientRuntimeBuilder requires world bootstrap before connect()")
         })?;
         let (client_view_event_tx, _) = broadcast::channel(4096);
+        let client_view_event_tx = std::sync::Arc::new(client_view_event_tx);
 
         let movement_policy = self
             .spatial_sources
@@ -338,9 +332,38 @@ impl ClientRuntimeBuilder {
     }
 }
 
+/// Asheron's Call servers use IPv4 UDP; prefer the first IPv4 address when DNS or `/etc/hosts`
+/// returns IPv6 first (such as `localhost` resolving to `::1` before `127.0.0.1`).
+fn select_ipv4_endpoint(
+    addresses: impl IntoIterator<Item = std::net::SocketAddr>,
+    host: &str,
+    port: u16,
+) -> std::result::Result<std::net::SocketAddr, crate::client::ConnectionFailure> {
+    let mut saw_any = false;
+    for addr in addresses {
+        saw_any = true;
+        if addr.is_ipv4() {
+            return Ok(addr);
+        }
+    }
+    let diagnostic = if saw_any {
+        format!("No IPv4 addresses for {host}:{port} (resolved only IPv6 addresses)")
+    } else {
+        format!("No addresses for {host}:{port}")
+    };
+    Err(crate::client::ConnectionFailure {
+        state: None,
+        cause: crate::client::ConnectionFailureCause::Local {
+            operation: crate::client::ConnectionOperation::ResolveAddress,
+            diagnostic,
+        },
+    })
+}
+
 #[cfg(any(test, feature = "test-support"))]
 pub(crate) fn build_test_client(initial_state: ClientState) -> ClientRuntime {
     let (client_view_event_tx, _) = broadcast::channel(4096);
+    let client_view_event_tx = std::sync::Arc::new(client_view_event_tx);
 
     ClientRuntime {
         runtime_profile: None,
@@ -399,7 +422,7 @@ impl ClientRuntime {
     }
 
     pub fn view_event_sender(&self) -> broadcast::Sender<crate::ClientViewEvent> {
-        self.client_view_event_tx.clone()
+        (*self.client_view_event_tx).clone()
     }
 
     /// Runs the command, read-closure, and 30 Hz physics tick loops until `shutdown` resolves.
@@ -719,5 +742,33 @@ mod tests {
             .expect_err("runtime builder should fail when a required asset is missing");
 
         assert!(error.to_string().contains("skill table"));
+    }
+
+    #[test]
+    fn select_ipv4_endpoint_skips_leading_ipv6_addresses() {
+        let ipv6: std::net::SocketAddr = "[::1]:9000".parse().unwrap();
+        let ipv4: std::net::SocketAddr = "127.0.0.1:9000".parse().unwrap();
+        let selected = select_ipv4_endpoint([ipv6, ipv4], "localhost", 9000)
+            .expect("should select the IPv4 address");
+        assert_eq!(selected, ipv4);
+    }
+
+    #[test]
+    fn select_ipv4_endpoint_rejects_ipv6_only_and_empty_results() {
+        let ipv6: std::net::SocketAddr = "[::1]:9000".parse().unwrap();
+        let ipv6_only = select_ipv4_endpoint([ipv6], "ipv6.example", 9000)
+            .expect_err("IPv6-only result should fail loudly");
+        assert!(matches!(
+            ipv6_only.cause,
+            crate::client::ConnectionFailureCause::Local {
+                operation: crate::client::ConnectionOperation::ResolveAddress,
+                ..
+            }
+        ));
+        assert!(ipv6_only.to_string().contains("No IPv4 addresses"));
+
+        let empty = select_ipv4_endpoint([], "empty.example", 9000)
+            .expect_err("empty result should fail loudly");
+        assert!(empty.to_string().contains("No addresses"));
     }
 }

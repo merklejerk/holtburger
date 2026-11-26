@@ -333,7 +333,8 @@ pub struct ClientRuntime {
     pub world: WorldState,
     /// Single owner of IdentifyObject queueing, cooldown pacing, and delivery filtering.
     appraisal: appraisal::AppraisalSystem,
-    client_view_event_tx: broadcast::Sender<ClientViewEvent>,
+    /// Sole strong owner of the view-event broadcast sender; dropping `ClientRuntime` closes all subscribers.
+    client_view_event_tx: std::sync::Arc<broadcast::Sender<ClientViewEvent>>,
     /// Monotonic origin shared by focused dynamic-entity snapshots and deltas.
     dynamic_entity_time_origin: Instant,
     command_rx: Option<mpsc::UnboundedReceiver<control::ClientCommandEnvelope>>,
@@ -1078,7 +1079,7 @@ impl ClientRuntime {
         control::ClientRuntimeHandle::new(
             command_tx,
             read_tx,
-            self.client_view_event_tx.clone(),
+            std::sync::Arc::downgrade(&self.client_view_event_tx),
             std::sync::Arc::clone(&self.automation_paused),
         )
     }

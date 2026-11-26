@@ -675,10 +675,7 @@ mod tests {
     #[tokio::test]
     async fn send_failures_release_request_tracking_without_restoring_access() {
         let mut client = fixture();
-        // IPv4-bound Session cannot send to this IPv6 loopback destination.
-        client.session = holtburger_session::Session::new("[::1]:9000".parse().unwrap())
-            .await
-            .unwrap();
+        client.session = holtburger_session::Session::new_failing_send_test();
         let intent = ItemUseIntent::Direct {
             source: ROOT,
             unrestricted: false,

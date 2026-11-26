@@ -982,10 +982,7 @@ mod tests {
     #[tokio::test]
     async fn failed_send_releases_busy_ownership_and_returns_a_failure_receipt() {
         let mut client = builder::build_test_client(ClientState::Connected);
-        // The production socket is IPv4; sending to IPv6 deterministically fails.
-        client.session = holtburger_session::Session::new("[::1]:9000".parse().unwrap())
-            .await
-            .unwrap();
+        client.session = holtburger_session::Session::new_failing_send_test();
         let mut events = client.subscribe_client_view_events();
         assert!(
             client

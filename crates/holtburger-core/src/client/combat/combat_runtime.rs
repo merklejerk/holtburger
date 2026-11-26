@@ -1046,9 +1046,7 @@ mod tests {
                 });
             }
             if mode == "failed" {
-                client.session = holtburger_session::Session::new("[::1]:9000".parse().unwrap())
-                    .await
-                    .unwrap();
+                client.session = holtburger_session::Session::new_failing_send_test();
             }
             let intent = if mode == "direct" {
                 ItemUseIntent::Direct {
@@ -1100,9 +1098,7 @@ mod tests {
                 });
             }
             if mode == "failed" {
-                client.session = holtburger_session::Session::new("[::1]:9000".parse().unwrap())
-                    .await
-                    .unwrap();
+                client.session = holtburger_session::Session::new_failing_send_test();
             }
             let aim = match mode {
                 "untargeted" => SpellCastAim::Untargeted,
@@ -1182,9 +1178,7 @@ mod tests {
                 "Drudge".into(),
                 WorldPosition::default(),
             ));
-        client.session = holtburger_session::Session::new("[::1]:9000".parse().unwrap())
-            .await
-            .unwrap();
+        client.session = holtburger_session::Session::new_failing_send_test();
         let now = Instant::now();
         assert!(
             client
@@ -2369,10 +2363,7 @@ mod tests {
     #[tokio::test]
     async fn failed_send_releases_busy_and_publishes_idle() {
         let mut client = client(0);
-        // Session binds IPv4; an IPv6 destination deterministically fails send_to.
-        client.session = holtburger_session::Session::new("[::1]:9000".parse().unwrap())
-            .await
-            .unwrap();
+        client.session = holtburger_session::Session::new_failing_send_test();
         let mut events = client.subscribe_client_view_events();
         assert!(
             client

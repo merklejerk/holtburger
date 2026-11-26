@@ -2696,10 +2696,7 @@ mod tests {
     async fn failed_creation_send_releases_the_pending_operation() {
         let mut client = builder::build_test_client(ClientState::CharacterSelection);
         client.character_selection.max_slots = 1;
-        // Session binds IPv4; IPv6 is a deterministic send failure, as in other transport tests.
-        client.session = holtburger_session::Session::new("[::1]:9000".parse().unwrap())
-            .await
-            .unwrap();
+        client.session = holtburger_session::Session::new_failing_send_test();
         assert!(
             client
                 .handle_command(ClientCommand::CreateCharacter(Box::new(

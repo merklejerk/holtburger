@@ -663,10 +663,7 @@ async fn interruption_between_steps_admits_the_action_without_replaying_it() {
 async fn a_real_send_failure_releases_inventory_ownership_without_retrying() {
     let mut client = build_test_client(ClientState::InWorld);
     client.world = world(&[20, 70], PLAYER);
-    // The session binds IPv4; an IPv6 destination exercises the existing transport failure seam.
-    client.session = holtburger_session::Session::new("[::1]:9000".parse().unwrap())
-        .await
-        .unwrap();
+    client.session = holtburger_session::Session::new_failing_send_test();
     let mut events = client.subscribe_client_view_events();
     assert!(client.start_auto_merge(PLAYER, POLICY).await.is_err());
     assert!(!client.inventory_operation_pending());

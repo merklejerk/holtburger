@@ -3927,7 +3927,10 @@ fn remote_non_contact_recovery_parks_tracks_and_unparks_cleanly_in_tick_batch() 
             break;
         }
     }
-    assert!(parked_snap_seen, "floating remote must park with a CorrectionSnap");
+    assert!(
+        parked_snap_seen,
+        "floating remote must park with a CorrectionSnap"
+    );
     let body = client.world.scene.body(remote_body_id).unwrap();
     assert_eq!(body.sampling.mode, SpatialSampleMode::AuthoritativeOnly);
     assert_eq!(body.contact, ContactState::Unknown);
@@ -3935,18 +3938,17 @@ fn remote_non_contact_recovery_parks_tracks_and_unparks_cleanly_in_tick_batch() 
 
     // Track another non-contact update while parked and verify subsequent tick batches stay valid.
     let floating_next = outdoor_pose(54.0, 48.0, grounded_pose.coords.z + 4.5);
-    let events =
-        client
-            .world
-            .handle_message(&GameMessage::UpdatePosition(Box::new(UpdatePositionData {
-                guid: remote_guid,
-                pos: PositionPack {
-                    pos: floating_next,
-                    position_sequence: 2,
-                    flags: UpdatePositionFlag::NONE,
-                    ..Default::default()
-                },
-            })));
+    let events = client
+        .world
+        .handle_message(&GameMessage::UpdatePosition(Box::new(UpdatePositionData {
+            guid: remote_guid,
+            pos: PositionPack {
+                pos: floating_next,
+                position_sequence: 2,
+                flags: UpdatePositionFlag::NONE,
+                ..Default::default()
+            },
+        })));
     assert!(events.iter().any(|event| matches!(
         event,
         WorldEvent::RuntimeBodyChanged { body_id } if *body_id == remote_body_id
@@ -4016,6 +4018,9 @@ fn remote_non_contact_recovery_parks_tracks_and_unparks_cleanly_in_tick_batch() 
         )
         .expect("unpark tick batch must succeed");
     let unparked = client.world.scene.body(remote_body_id).unwrap();
-    assert_eq!(unparked.sampling.mode, SpatialSampleMode::SimulatingVelocity);
+    assert_eq!(
+        unparked.sampling.mode,
+        SpatialSampleMode::SimulatingVelocity
+    );
     assert!(unparked.pose.distance_to(&clear_ground) < 0.01);
 }

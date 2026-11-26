@@ -6928,7 +6928,8 @@ fn vertical_recovery_distinguishes_wrong_floor_from_nominal_flight() {
         let mut recovered = false;
         for tick in 0..ticks {
             if matches!(case, Case::ResumedStranded)
-                && tick == (RECOVERY_WINDOW_SECONDS * 0.5 / MOBILE_CONTACT_TICK_SECONDS).ceil() as usize
+                && tick
+                    == (RECOVERY_WINDOW_SECONDS * 0.5 / MOBILE_CONTACT_TICK_SECONDS).ceil() as usize
             {
                 scene.apply_authoritative_body_effect(
                     id,
@@ -8343,7 +8344,8 @@ fn settled_non_contact_observation_recovers_across_wall_while_moving_does_not() 
 }
 
 #[test]
-fn authoritative_parked_tracks_floating_and_wall_poses_without_gravity_loop_and_unparks_when_clear() {
+fn authoritative_parked_tracks_floating_and_wall_poses_without_gravity_loop_and_unparks_when_clear()
+{
     use crate::spatial::pose_reconciliation::recovery::RECOVERY_WINDOW_SECONDS;
     use holtburger_protocol::messages::{
         GameMessage, PositionPack, UpdatePositionData, UpdatePositionFlag,
@@ -8407,9 +8409,11 @@ fn authoritative_parked_tracks_floating_and_wall_poses_without_gravity_loop_and_
                 },
             )
             .unwrap();
-        if result.outcomes.iter().any(|o| {
-            matches!(o, DynamicEntityBodyOutcome::RecoveredPlacement(body) if *body == id)
-        }) {
+        if result
+            .outcomes
+            .iter()
+            .any(|o| matches!(o, DynamicEntityBodyOutcome::RecoveredPlacement(body) if *body == id))
+        {
             assert!(
                 parked_tick.is_none(),
                 "floating parked body must not bounce-loop and recover repeatedly"
@@ -8445,7 +8449,15 @@ fn authoritative_parked_tracks_floating_and_wall_poses_without_gravity_loop_and_
         e,
         crate::WorldEvent::RuntimeBodyChanged { body_id } if *body_id == id
     )));
-    assert!(world.scene.body(id).unwrap().pose.distance_to(&floating_shifted) < CONTACT_EPSILON);
+    assert!(
+        world
+            .scene
+            .body(id)
+            .unwrap()
+            .pose
+            .distance_to(&floating_shifted)
+            < CONTACT_EPSILON
+    );
     assert_eq!(
         dynamic_activity(&world.scene, id),
         DynamicBodyActivity::AuthoritativeParked
@@ -8489,7 +8501,15 @@ fn authoritative_parked_tracks_floating_and_wall_poses_without_gravity_loop_and_
         world.scene.body(id).unwrap().sampling.mode,
         SpatialSampleMode::SimulatingVelocity
     );
-    assert!(world.scene.body(id).unwrap().pose.distance_to(&clear_ground) < CONTACT_EPSILON);
+    assert!(
+        world
+            .scene
+            .body(id)
+            .unwrap()
+            .pose
+            .distance_to(&clear_ground)
+            < CONTACT_EPSILON
+    );
 }
 
 #[test]
@@ -8664,7 +8684,10 @@ fn authoritative_parked_unparks_on_collision_revision_change_and_peer_departure(
             break;
         }
     }
-    assert!(moved_away, "parked remote must unpark once peer clears the spot");
+    assert!(
+        moved_away,
+        "parked remote must unpark once peer clears the spot"
+    );
     assert_eq!(
         dynamic_activity(&world.scene, remote_id),
         DynamicBodyActivity::Active

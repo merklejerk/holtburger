@@ -71,7 +71,9 @@ impl PoseReconciliationState {
             return;
         }
         self.observed_stall = Some(match previous {
-            Some(stall) if stall.anchor.distance_to(&observed) <= PHYSICAL_RETURN_START_THRESHOLD_M => {
+            Some(stall)
+                if stall.anchor.distance_to(&observed) <= PHYSICAL_RETURN_START_THRESHOLD_M =>
+            {
                 stall
             }
             _ => ObservedStall {

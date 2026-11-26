@@ -1516,14 +1516,7 @@ impl SpatialScene {
             else {
                 continue;
             };
-            self.commit_recovered_body(
-                candidate,
-                pose,
-                membership,
-                false,
-                &mut peers,
-                collection,
-            )?;
+            self.commit_recovered_body(candidate, pose, membership, false, &mut peers, collection)?;
             collection
                 .snap_previous_placements
                 .insert(body_id, (previous_pose, previous_membership));
@@ -1586,8 +1579,12 @@ fn evaluate_recovery_candidate(
     collision: &CollisionScene,
     candidate: &mut SpatialBody,
     peers: &[SpatialBody],
-) -> anyhow::Result<Option<(SpatialMembership, super::super::mobile_contact::RecoveryDestinationCheck)>>
-{
+) -> anyhow::Result<
+    Option<(
+        SpatialMembership,
+        super::super::mobile_contact::RecoveryDestinationCheck,
+    )>,
+> {
     let checked = (|| -> anyhow::Result<(
         SpatialMembership,
         super::super::mobile_contact::RecoveryDestinationCheck,

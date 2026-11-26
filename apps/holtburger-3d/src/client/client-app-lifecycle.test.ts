@@ -281,7 +281,10 @@ describe("app lifecycle coordination", () => {
 		app.owner.acceptScene({ kind: "ready" }, true);
 		expect(app.page().kind).toBe("selection");
 
-		app.owner.acceptAuthority({ kind: "entering-world", characterGuid: 102 }, null);
+		app.owner.acceptAuthority(
+			{ kind: "entering-world", characterGuid: 102 },
+			null,
+		);
 		expect(app.state().admission.mode).toBe("gameplay");
 		app.owner.acceptAuthority(
 			{ kind: "portal-space", worldGeneration: 2, cause: "initial-entry" },

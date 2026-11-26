@@ -60,8 +60,7 @@ use crate::types::{
     EquippedItemView, EventsPage, FellowshipCommandSpec, FellowshipMemberView, FellowshipView,
     FriendView, FriendsCommandSpec, InventoryOutcome, InventoryView, ItemUseCapabilityView,
     ItemUseTargetPreview, JumpToPreview, LIVE_API_VERSION, LifecycleOutcome, LifecyclePhaseView,
-    LockToolView,
-    MAX_DRIVE_PULSE_MS, MAX_RAYCAST_BATCH, MAX_WAIT_TIMEOUT_MS, OutdoorCoordsPreview,
+    LockToolView, MAX_DRIVE_PULSE_MS, MAX_RAYCAST_BATCH, MAX_WAIT_TIMEOUT_MS, OutdoorCoordsPreview,
     OutdoorCoordsView, RaycastHitView, RaycastPreview, RaycastSpec, RestPostureSpec,
     SalvagePreview, SelectionView, SelfView, SkillDefinitionView, SocialView,
     SpellCastReadinessView, SpellCastingRouteView, SpellDefinitionView, SpellFormulaPreview,
@@ -1245,7 +1244,8 @@ impl LiveApiEngine {
                 normal,
                 power,
             } => {
-                let jump_target = TargetedJumpTarget::new(target, normal).map_err(ApiError::invalid)?;
+                let jump_target =
+                    TargetedJumpTarget::new(target, normal).map_err(ApiError::invalid)?;
                 let jump_power = validate_optional_jump_power(power)?;
                 let snapshot = self
                     .inner
@@ -1536,7 +1536,6 @@ impl LiveApiEngine {
         waiter_kind: Option<SettlementMatcher>,
         wait: WaitPolicy,
     ) -> ApiResult<CommandResponse> {
-
         // Subscribe BEFORE enqueueing the command so fast synchronous completions cannot race.
         let mut live_rx = (wait.until == WaitUntil::Settled && waiter_kind.is_some())
             .then(|| self.inner.event_log.subscribe_live());

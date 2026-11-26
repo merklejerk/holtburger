@@ -266,13 +266,12 @@ impl ClientRuntime {
                 return Ok(());
             }
             let target_view = request.target.into_view();
-            self.movement.enqueue_stop_local_steering(
-                if origin == ControlSource::User {
+            self.movement
+                .enqueue_stop_local_steering(if origin == ControlSource::User {
                     LocalNavigationOutcome::InterruptedByUser
                 } else {
                     LocalNavigationOutcome::Superseded
-                },
-            );
+                });
             let correlation_id = self.mint_correlation_id();
             let current_position = self.local_player_pose();
             if let Some(superseded) = self.targeted_jump.enqueue(

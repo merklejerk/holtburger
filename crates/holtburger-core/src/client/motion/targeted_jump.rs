@@ -89,8 +89,8 @@ impl TargetedJumpTarget {
     /// Projects this already-validated target into the normalized collision anchor frame.
     pub(in crate::client) fn into_view(self) -> PreciseJumpTargetView {
         let anchor = owner_for_position(self.position.landblock_id);
-        let committed_cell =
-            ((self.position.landblock_id.0 & 0xffff) >= 0x0100).then_some(self.position.landblock_id);
+        let committed_cell = ((self.position.landblock_id.0 & 0xffff) >= 0x0100)
+            .then_some(self.position.landblock_id);
         PreciseJumpTargetView {
             anchor,
             point: self.position.coords,
@@ -222,7 +222,8 @@ pub(in crate::client) fn world_position_from_landing(
         };
     }
     let outdoor_frame = Guid((flight_anchor.0 & 0xffff_0000) | 1);
-    let pos = WorldPosition::from_outdoor_frame(outdoor_frame, contact_point, Quaternion::identity());
+    let pos =
+        WorldPosition::from_outdoor_frame(outdoor_frame, contact_point, Quaternion::identity());
     pos.normalize_outdoor_landblock_frame()
         .unwrap_or(pos)
         .normalize_outdoor_cell()
@@ -298,9 +299,9 @@ fn build_power_ladder(min_extent: f32) -> Vec<JumpExtent> {
         let Ok(extent) = JumpExtent::new(value) else {
             continue;
         };
-        let is_duplicate = ladder
-            .last()
-            .is_some_and(|prev: &JumpExtent| (extent.get() - prev.get()).abs() < AUTO_POWER_DEDUP_EPSILON);
+        let is_duplicate = ladder.last().is_some_and(|prev: &JumpExtent| {
+            (extent.get() - prev.get()).abs() < AUTO_POWER_DEDUP_EPSILON
+        });
         if !is_duplicate {
             ladder.push(extent);
         }
@@ -357,7 +358,8 @@ pub fn solve_targeted_jump(
         return unreachable(TargetedJumpUnreachableReason::BodyUnavailable);
     };
 
-    let desired = desired_landing_body_point(&snapshot.body, validated_target.view(), spheres.support);
+    let desired =
+        desired_landing_body_point(&snapshot.body, validated_target.view(), spheres.support);
     let Ok(displacement) = PreciseJumpWorldDisplacement::new(desired - snapshot.body.pose.coords)
     else {
         return unreachable(TargetedJumpUnreachableReason::InvalidTarget);
@@ -986,7 +988,10 @@ mod tests {
         let cancelled = AtomicBool::new(false);
         let solution = solve_targeted_jump(&snapshot, target, None, &cancelled).unwrap();
         assert!(!solution.reachable);
-        assert_eq!(solution.reason, Some(TargetedJumpUnreachableReason::Blocked));
+        assert_eq!(
+            solution.reason,
+            Some(TargetedJumpUnreachableReason::Blocked)
+        );
         assert!(solution.landed_position.is_some());
     }
 
@@ -1026,9 +1031,13 @@ mod tests {
 
         let mut airborne_snapshot = snapshot;
         airborne_snapshot.body.contact = ContactState::Airborne;
-        let sol =
-            solve_targeted_jump(&airborne_snapshot, outdoor_target(114.0, 96.0, 0.0), None, &cancelled)
-                .unwrap();
+        let sol = solve_targeted_jump(
+            &airborne_snapshot,
+            outdoor_target(114.0, 96.0, 0.0),
+            None,
+            &cancelled,
+        )
+        .unwrap();
         assert!(!sol.reachable);
         assert_eq!(sol.reason, Some(TargetedJumpUnreachableReason::Airborne));
         assert_eq!(sol.attempts, 0);
@@ -1083,7 +1092,11 @@ mod tests {
         assert!(tracker.is_in_flight());
         // Final airborne sample just before landing on target, followed by 0.6m post-impact slide.
         body.pose.coords = Vector3::new(114.2, 96.0, 0.1);
-        assert!(tracker.on_post_tick(Some(&body), now + Duration::from_millis(60)).is_none());
+        assert!(
+            tracker
+                .on_post_tick(Some(&body), now + Duration::from_millis(60))
+                .is_none()
+        );
 
         body.contact = ContactState::Grounded;
         body.pose.coords = Vector3::new(113.4, 96.0, 0.0);

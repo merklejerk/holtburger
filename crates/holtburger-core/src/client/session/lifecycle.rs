@@ -20,7 +20,9 @@ impl ClientRuntime {
     }
 
     /// Returns the local player's current physical body pose when present.
-    pub(in crate::client) fn local_player_pose(&self) -> Option<holtburger_common::position::WorldPosition> {
+    pub(in crate::client) fn local_player_pose(
+        &self,
+    ) -> Option<holtburger_common::position::WorldPosition> {
         self.world
             .scene
             .body(holtburger_world::SpatialBodyId::LocalPlayer(
@@ -48,11 +50,9 @@ impl ClientRuntime {
     ) {
         let position = self.local_player_pose();
         if let Some(finished) = self.targeted_jump.retire(outcome, position) {
-            let _ = self
-                .client_view_event_tx
-                .send(crate::client::types::ClientViewEvent::TargetedJumpFinished(
-                    finished,
-                ));
+            let _ = self.client_view_event_tx.send(
+                crate::client::types::ClientViewEvent::TargetedJumpFinished(finished),
+            );
         }
     }
 
@@ -63,11 +63,9 @@ impl ClientRuntime {
     ) {
         let position = self.local_player_pose();
         if let Some(finished) = self.targeted_jump.retire_automation(outcome, position) {
-            let _ = self
-                .client_view_event_tx
-                .send(crate::client::types::ClientViewEvent::TargetedJumpFinished(
-                    finished,
-                ));
+            let _ = self.client_view_event_tx.send(
+                crate::client::types::ClientViewEvent::TargetedJumpFinished(finished),
+            );
         }
     }
 

@@ -139,6 +139,7 @@
 	@layer components {
 		.item-grid-strip {
 			position: relative;
+			isolation: isolate;
 			box-sizing: border-box;
 			/* Share the grid cell basis; the owning panel adds its own divider. */
 			width: var(
@@ -151,6 +152,8 @@
 			padding-block: var(--ui-item-strip-block-inset);
 		}
 		.item-grid-strip-viewport {
+			/* Keep cell-level z-index (e.g. selected reticles) below the sibling scroll arrows. */
+			isolation: isolate;
 			height: 100%;
 			overflow-y: auto;
 			overflow-x: hidden;

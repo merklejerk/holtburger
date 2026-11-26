@@ -24,7 +24,7 @@ pub use server::{LiveApiServerConfig, LiveApiServerHandle, start_server};
 pub use types::{
     ApiCommand, ApiEvent, ApiEventEnvelope, ApiEventTopic, ApiInfo, ApiPreviewRequest,
     ApiPreviewResponse, ApiQuery, CommandRequest, CommandResponse, EntityDetail, EntityFilter,
-    EntityPropertiesView, EntitySummary, EquipmentView, EventsPage, InventoryView,
+    EntityPropertiesView, EntitySummary, EquipmentView, EventsPage, InventoryView, JumpToPreview,
     LIVE_API_VERSION, LifecyclePhaseView, MAX_DRIVE_PULSE_MS, MAX_WAIT_TIMEOUT_MS,
     MotionEventFrame, OutdoorCoordsView, SelfView, SkillDefinitionView, SocialView,
     SpellDefinitionView, WaitPolicy, WaitUntil, WaypointView, WsClientFrame, WsServerFrame,

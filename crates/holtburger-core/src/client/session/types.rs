@@ -1470,6 +1470,8 @@ pub enum ClientViewEvent {
     ConnectionUpdated(crate::client::connection::ConnectionSample),
     /// Terminal completion for a core-owned local steering goal.
     LocalNavigationFinished(crate::client::steering::LocalNavigationFinished),
+    /// Terminal completion for a camera-free targeted jump command.
+    TargetedJumpFinished(crate::client::targeted_jump::TargetedJumpFinished),
     /// Runtime automation pause state changed by the user.
     AutomationPausedChanged(bool),
 }
@@ -1611,6 +1613,8 @@ pub enum ClientCommand {
     StartLocalSteering(crate::client::steering::LocalSteeringRequest),
     /// Cancels any active core-owned local steering operation.
     StopLocalSteering,
+    /// Executes a camera-free targeted jump with explicit power and landing settlement.
+    JumpTo(crate::client::targeted_jump::TargetedJumpRequest),
     /// Pauses or resumes `ControlSource::Automation` commands; pausing cancels active automation.
     SetAutomationPaused(bool),
     /// Applies one ordered, non-coalescible character-motion lifecycle edge.

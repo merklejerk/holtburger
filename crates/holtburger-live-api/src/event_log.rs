@@ -789,6 +789,14 @@ pub fn ingest_client_view_event(log: &EventLog, event: &ClientViewEvent) {
                 },
             );
         }
+        ClientViewEvent::TargetedJumpFinished(finished) => {
+            log.push(
+                ApiEventTopic::Movement,
+                ApiEvent::JumpFinished {
+                    finished: *finished,
+                },
+            );
+        }
         ClientViewEvent::TeleportStarted { sequence } => {
             log.push(
                 ApiEventTopic::Movement,

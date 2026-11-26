@@ -199,6 +199,9 @@ impl ClientRuntime {
                     WorldEvent::SelfServerControlledMotion(data) => {
                         if self.world.player_is_dead() {
                             self.reset_combat_engagement();
+                            self.retire_targeted_jump(
+                                crate::client::targeted_jump::TargetedJumpOutcome::Cancelled,
+                            );
                         }
                         if holtburger_world::entity::EntityMotionDirective::from_movement_event(
                             data,

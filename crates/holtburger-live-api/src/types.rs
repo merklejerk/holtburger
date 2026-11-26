@@ -11,6 +11,9 @@ use holtburger_core::client::recall::RecallDestination;
 use holtburger_core::client::steering::{
     LocalNavigationFinished, LocalSteeringRequest, LocalSteeringStatus,
 };
+use holtburger_core::client::targeted_jump::{
+    TargetedJumpFinished, TargetedJumpStatus, TargetedJumpUnreachableReason,
+};
 use holtburger_core::client::trade::TradeRequest;
 use holtburger_core::client::types::{
     BusyOperationKind, ChatChannelDestination, ChatChannelKind, ChatSpeakerKind, ChatTellTarget,
@@ -142,6 +145,10 @@ pub struct SelfView {
     pub confirmation: Option<ConfirmationView>,
     pub spell_cast_target: Option<Guid>,
     pub navigation: Option<LocalSteeringStatus>,
+    /// Active queued or in-flight targeted jump, if any.
+    pub jump: Option<TargetedJumpStatus>,
+    /// Whether the local player's physical body is currently airborne.
+    pub airborne: bool,
     pub server_time: Option<f64>,
 }
 
@@ -875,6 +882,18 @@ pub enum ApiPreviewRequest {
         #[serde(default)]
         position: Option<WorldPosition>,
     },
+    /// Simulates a collision-backed targeted jump to `target` (auto-solving power when omitted).
+    #[serde(rename_all = "camelCase")]
+    JumpTo {
+        /// Target surface position (outdoor or indoor cell `WorldPosition`).
+        target: WorldPosition,
+        /// Optional walkable surface normal (e.g. from `raycast`); defaults to `(0, 0, 1)`.
+        #[serde(default)]
+        normal: Option<Vector3>,
+        /// Optional explicit jump power in `[0.001, 1.0]`; when omitted, auto-solves the lowest verified arc.
+        #[serde(default)]
+        power: Option<f32>,
+    },
 }
 
 /// Result of `ApiPreviewRequest::ItemUseTarget`.
@@ -980,6 +999,30 @@ pub enum SpellInspectionPreview {
     },
 }
 
+/// Result of `ApiPreviewRequest::JumpTo`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct JumpToPreview {
+    /// `true` iff a collision-verified arc lands on the requested target surface.
+    pub reachable: bool,
+    /// Selected or auto-solved jump power (`null` if pre-flight validation failed).
+    pub power: Option<f32>,
+    /// Predicted first-impact touchdown surface position (not the final post-slide resting
+    /// position; the character may coast slightly forward on touchdown under ground friction),
+    /// or the closest diagnostic landing when `reachable == false`.
+    pub landed_position: Option<WorldPosition>,
+    /// Maximum body Z altitude reached along the predicted trajectory (useful under low ceilings).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub apex_z: Option<f32>,
+    /// Predicted flight duration in milliseconds for the selected or best attempt.
+    pub flight_duration_ms: Option<u32>,
+    /// Structured reason when `reachable == false`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<TargetedJumpUnreachableReason>,
+    /// Number of collision rollouts performed (`0` on pre-flight rejection, `1` for explicit power, `1..=6` for auto-solve).
+    pub attempts: u8,
+}
+
 /// Typed union of responses returned by `POST /v1/preview` and WS `preview` requests.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(untagged)]
@@ -990,6 +1033,7 @@ pub enum ApiPreviewResponse {
     Raycast(RaycastPreview),
     SphereSweep(SphereSweepPreview),
     OutdoorCoords(OutdoorCoordsPreview),
+    JumpTo(JumpToPreview),
     /// Vendor buy/sell preview object.
     Dynamic(Value),
 }
@@ -998,8 +1042,8 @@ pub enum ApiPreviewResponse {
 ///
 /// Commands with async runtime/server settlement under `until = "settled"` are `select-character`,
 /// `logout`, `set-combat-mode`, `inventory`, `use-entity`, `use-item`, `request-appraisal`, `steer`
-/// (`move-to`/`approach`/`face-heading`/`face-entity`), `cast-spell`, and `vendor-trade`; other
-/// commands return `settled: false` immediately upon admission (`outcome: null`).
+/// (`move-to`/`approach`/`face-heading`/`face-entity`), `jump-to`, `cast-spell`, and `vendor-trade`;
+/// other commands return `settled: false` immediately upon admission (`outcome: null`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct WaitPolicy {
@@ -1193,6 +1237,23 @@ pub enum ApiCommand {
     /// Immediately turns the character to face `heading` (radians).
     #[serde(rename_all = "camelCase")]
     SnapFacing { heading: f32 },
+    /// Performs a retail-legal targeted jump to `target` (preserving current heading; indoor
+    /// `landblockId` may be any resident cell or normalized landblock). When `power` is omitted,
+    /// core auto-solves the lowest collision-verified arc and returns `accepted: false`,
+    /// `outcome: rejected-unreachable` if unreachable. Sending `jump-to` while airborne returns
+    /// `accepted: false`, `outcome: rejected-airborne` without interrupting an active jump. With
+    /// `wait.until = "settled"`, waits for grounded touchdown, launch rejection, or interruption.
+    #[serde(rename_all = "camelCase")]
+    JumpTo {
+        /// Target surface position (outdoor or indoor cell `WorldPosition`).
+        target: WorldPosition,
+        /// Optional walkable surface normal (e.g. from `raycast`); defaults to `(0, 0, 1)`.
+        #[serde(default)]
+        normal: Option<Vector3>,
+        /// Optional explicit jump power in `[0.001, 1.0]`; auto-solved when omitted.
+        #[serde(default)]
+        power: Option<f32>,
+    },
 
     // --- Frontend Hooks (`ui.*` / `h3d.hud`) ---
     /// Selects entity `guid` in the frontend UI, or clears selection when `null`.
@@ -1310,6 +1371,7 @@ pub enum CommandOutcome {
     Busy(BusyOperationOutcome),
     Appraisal(AppraisalOutcome),
     Navigation(LocalNavigationFinished),
+    Jump(TargetedJumpFinished),
     Lifecycle(LifecycleOutcome),
     CombatMode(CombatModeOutcome),
     Inventory(InventoryOutcome),
@@ -1643,6 +1705,10 @@ pub enum ApiEvent {
     #[serde(rename_all = "camelCase")]
     NavigationFinished {
         finished: LocalNavigationFinished,
+    },
+    #[serde(rename_all = "camelCase")]
+    JumpFinished {
+        finished: TargetedJumpFinished,
     },
     #[serde(rename_all = "camelCase")]
     TeleportStarted {

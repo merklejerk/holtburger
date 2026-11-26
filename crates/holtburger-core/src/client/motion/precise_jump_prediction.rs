@@ -38,30 +38,34 @@ pub struct PreciseJumpTarget {
 }
 impl PreciseJumpTarget {
     pub fn new(anchor: Guid, hit: CollisionSurfaceRayHit) -> Result<Self, PreciseJumpTargetError> {
-        if anchor.0 & 0xffff != 0xffff {
+        if !hit.distance().is_finite() || hit.distance() < 0.0 {
+            return Err(PreciseJumpTargetError::InvalidHit);
+        }
+        Self::from_view(PreciseJumpTargetView {
+            anchor,
+            point: hit.point(),
+            normal: hit.normal(),
+            committed_cell: hit.placement().committed_cell(),
+        })
+    }
+
+    /// Validates an explicit surface view without requiring a camera-ray hit.
+    pub(in crate::client) fn from_view(
+        view: PreciseJumpTargetView,
+    ) -> Result<Self, PreciseJumpTargetError> {
+        if view.anchor.0 & 0xffff != 0xffff {
             return Err(PreciseJumpTargetError::InvalidAnchor);
         }
-        let point = hit.point();
-        let normal = hit.normal();
-        let length = normal.length_squared();
-        if !point.x.is_finite()
-            || !point.y.is_finite()
-            || !point.z.is_finite()
-            || !hit.distance().is_finite()
-            || hit.distance() < 0.0
+        let length = view.normal.length_squared();
+        if !view.point.x.is_finite()
+            || !view.point.y.is_finite()
+            || !view.point.z.is_finite()
             || !length.is_finite()
             || (length - 1.0).abs() > TARGET_NORMAL_TOLERANCE
         {
             return Err(PreciseJumpTargetError::InvalidHit);
         }
-        Ok(Self {
-            view: PreciseJumpTargetView {
-                anchor,
-                point,
-                normal,
-                committed_cell: hit.placement().committed_cell(),
-            },
-        })
+        Ok(Self { view })
     }
     pub const fn anchor(&self) -> Guid {
         self.view.anchor
@@ -537,10 +541,14 @@ fn support_contact(
         physical.response.cell(),
     ))
 }
-fn owner_for_position(position: Guid) -> Guid {
+pub(in crate::client) fn owner_for_position(position: Guid) -> Guid {
     Guid((position.0 & 0xffff_0000) | 0xffff)
 }
-fn point_between_anchors(point: Vector3, source: Guid, target: Guid) -> Vector3 {
+pub(in crate::client) fn point_between_anchors(
+    point: Vector3,
+    source: Guid,
+    target: Guid,
+) -> Vector3 {
     Vector3::new(
         point.x
             + ((((source.0 >> 24) & 0xff) as i32 - ((target.0 >> 24) & 0xff) as i32) as f32
@@ -593,7 +601,18 @@ pub(in crate::client) mod tests {
     }
 
     pub(in crate::client) fn flat_prediction_fixture() -> PredictionFixture {
-        let collision = collision_scene(0.0, Vec::new());
+        fixture_with_polygons(Vec::new())
+    }
+
+    pub(in crate::client) fn fixture_with_polygons(
+        polygons: Vec<(Vec<Vector3>, Vector3)>,
+    ) -> PredictionFixture {
+        let colliders = polygons
+            .into_iter()
+            .enumerate()
+            .map(|(index, (vertices, normal))| polygon_collider(vertices, normal, index))
+            .collect();
+        let collision = collision_scene(0.0, colliders);
         let now = Instant::now();
         let (scene, body_id) = body_scene(&collision, Vector3::new(120.0, 96.0, 0.005), now);
         let target = downward_target(&collision, Vector3::new(114.0, 96.0, 0.0));

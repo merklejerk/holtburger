@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::time::Duration;
 
 use holtburger_common::Guid;
@@ -20,7 +20,8 @@ use holtburger_core::client::types::ClientAttackProfile;
 use holtburger_core::client::vendor_transaction::VendorTradeRequest;
 use holtburger_core::{
     BusyOperationKind, ClientCommand, ClientLifecycleState, ClientRuntimeHandle, CommandAdmission,
-    CommandRejection,
+    CommandRejection, ControlSource, JumpExtent, TargetedJumpFinished, TargetedJumpOutcome,
+    TargetedJumpRequest, TargetedJumpTarget, solve_targeted_jump,
 };
 use holtburger_protocol::messages::combat::{AttackHeight, CombatMode};
 use holtburger_world::crafting::salvage::{SalvageEvaluation, find_salvage_tool};
@@ -58,7 +59,8 @@ use crate::types::{
     EntityFactsView, EntityFilter, EntityPropertiesView, EntitySummary, EquipmentView,
     EquippedItemView, EventsPage, FellowshipCommandSpec, FellowshipMemberView, FellowshipView,
     FriendView, FriendsCommandSpec, InventoryOutcome, InventoryView, ItemUseCapabilityView,
-    ItemUseTargetPreview, LIVE_API_VERSION, LifecycleOutcome, LifecyclePhaseView, LockToolView,
+    ItemUseTargetPreview, JumpToPreview, LIVE_API_VERSION, LifecycleOutcome, LifecyclePhaseView,
+    LockToolView,
     MAX_DRIVE_PULSE_MS, MAX_RAYCAST_BATCH, MAX_WAIT_TIMEOUT_MS, OutdoorCoordsPreview,
     OutdoorCoordsView, RaycastHitView, RaycastPreview, RaycastSpec, RestPostureSpec,
     SalvagePreview, SelectionView, SelfView, SkillDefinitionView, SocialView,
@@ -390,6 +392,8 @@ impl LiveApiEngine {
                     confirmation: ctx.confirmation().map(project_confirmation),
                     spell_cast_target: ctx.spell_cast_target(),
                     navigation: ctx.navigation(),
+                    jump: ctx.active_targeted_jump(),
+                    airborne: ctx.player_is_airborne(),
                     server_time: ctx.server_time(),
                 }
             })
@@ -1227,6 +1231,35 @@ impl LiveApiEngine {
                     .await
                     .map_err(|e| ApiError::runtime(e.to_string()))?
             }
+            ApiPreviewRequest::JumpTo {
+                target,
+                normal,
+                power,
+            } => {
+                let jump_target = TargetedJumpTarget::new(target, normal).map_err(ApiError::invalid)?;
+                let jump_power = validate_optional_jump_power(power)?;
+                let snapshot = self
+                    .inner
+                    .handle
+                    .read(|ctx| -> ApiResult<holtburger_core::TargetedJumpSnapshot> {
+                        if ctx.collision_scene().is_none() {
+                            return Err(ApiError::unsupported("world.spatial"));
+                        }
+                        ctx.targeted_jump_snapshot().map_err(map_rejection)
+                    })
+                    .await
+                    .map_err(|e| ApiError::runtime(e.to_string()))??;
+                let solution = run_targeted_jump_solver(snapshot, jump_target, jump_power).await?;
+                Ok(ApiPreviewResponse::JumpTo(JumpToPreview {
+                    reachable: solution.reachable,
+                    power: solution.power.map(JumpExtent::get),
+                    landed_position: solution.landed_position,
+                    apex_z: solution.apex_z,
+                    flight_duration_ms: solution.flight_duration_ms,
+                    reason: solution.reason,
+                    attempts: solution.attempts,
+                }))
+            }
         }
     }
 
@@ -1352,8 +1385,123 @@ impl LiveApiEngine {
                 hud.play_cue(request).await?;
                 Ok(immediate_accepted(self.inner.event_log.latest_seq()))
             }
+            ApiCommand::JumpTo {
+                target,
+                normal,
+                power,
+            } => self.execute_jump_to(target, normal, power, wait).await,
             other => self.execute_core_command(other, wait).await,
         }
+    }
+
+    fn rejected_jump_response(
+        &self,
+        outcome: TargetedJumpOutcome,
+        position: Option<holtburger_common::position::WorldPosition>,
+        predicted_landing: Option<holtburger_common::position::WorldPosition>,
+        unreachable_reason: Option<holtburger_core::TargetedJumpUnreachableReason>,
+    ) -> CommandResponse {
+        CommandResponse {
+            accepted: false,
+            correlation_id: None,
+            settled: true,
+            timed_out: false,
+            outcome: Some(CommandOutcome::Jump(TargetedJumpFinished {
+                correlation_id: None,
+                origin: ControlSource::Automation,
+                outcome,
+                power: None,
+                position,
+                predicted_landing,
+                matched_target: false,
+                unreachable_reason,
+            })),
+            latest_event_seq: self.inner.event_log.latest_seq(),
+        }
+    }
+
+    async fn execute_jump_to(
+        &self,
+        target: holtburger_common::position::WorldPosition,
+        normal: Option<holtburger_common::Vector3>,
+        power: Option<f32>,
+        wait: WaitPolicy,
+    ) -> ApiResult<CommandResponse> {
+        enum JumpPrep {
+            Airborne(Option<holtburger_common::position::WorldPosition>),
+            Explicit(JumpExtent),
+            AutoSolve(Box<holtburger_core::TargetedJumpSnapshot>),
+        }
+
+        let jump_target = TargetedJumpTarget::new(target, normal).map_err(ApiError::invalid)?;
+        let explicit_power = validate_optional_jump_power(power)?;
+
+        // Single runtime read: enforce pause/lifecycle/airborne preconditions and, when power is
+        // omitted, capture the immutable collision snapshot without a second round-trip.
+        let prep = self
+            .inner
+            .handle
+            .read(move |ctx| -> ApiResult<JumpPrep> {
+                if ctx.automation_paused() {
+                    return Err(map_rejection(CommandRejection::AutomationPaused));
+                }
+                if !matches!(ctx.lifecycle(), ClientLifecycleState::InWorld) {
+                    return Err(map_rejection(CommandRejection::NotInWorld));
+                }
+                if ctx.player_is_airborne() || ctx.active_targeted_jump().is_some() {
+                    return Ok(JumpPrep::Airborne(local_player_pose(ctx.world())));
+                }
+                match explicit_power {
+                    Some(p) => Ok(JumpPrep::Explicit(p)),
+                    None => {
+                        if ctx.collision_scene().is_none() {
+                            return Err(ApiError::unsupported("world.spatial"));
+                        }
+                        Ok(JumpPrep::AutoSolve(Box::new(
+                            ctx.targeted_jump_snapshot().map_err(map_rejection)?,
+                        )))
+                    }
+                }
+            })
+            .await
+            .map_err(|e| ApiError::runtime(e.to_string()))??;
+
+        let (resolved_power, expected_world_generation) = match prep {
+            JumpPrep::Airborne(position) => {
+                return Ok(self.rejected_jump_response(
+                    TargetedJumpOutcome::RejectedAirborne,
+                    position,
+                    None,
+                    None,
+                ));
+            }
+            JumpPrep::Explicit(p) => (p, None),
+            JumpPrep::AutoSolve(snapshot) => {
+                let world_generation = snapshot.world_generation;
+                let start_pose = snapshot.body.pose;
+                let solution = run_targeted_jump_solver(*snapshot, jump_target, None).await?;
+                if !solution.reachable {
+                    return Ok(self.rejected_jump_response(
+                        TargetedJumpOutcome::RejectedUnreachable,
+                        Some(start_pose),
+                        solution.landed_position,
+                        solution.reason,
+                    ));
+                }
+                let solved = solution.power.ok_or_else(|| {
+                    ApiError::runtime("reachable targeted jump solution missing power")
+                })?;
+                (solved, Some(world_generation))
+            }
+        };
+
+        let core_cmd = ClientCommand::JumpTo(TargetedJumpRequest {
+            target: jump_target,
+            power: resolved_power,
+            expected_world_generation,
+        });
+        self.submit_and_wait_core_command(core_cmd, Some(SettlementMatcher::Jump), wait)
+            .await
     }
 
     async fn execute_core_command(
@@ -1369,6 +1517,16 @@ impl LiveApiEngine {
 
         let waiter_kind = settlement_matcher(&command);
         let core_cmd = self.translate_command(command).await?;
+        self.submit_and_wait_core_command(core_cmd, waiter_kind, wait)
+            .await
+    }
+
+    async fn submit_and_wait_core_command(
+        &self,
+        core_cmd: ClientCommand,
+        waiter_kind: Option<SettlementMatcher>,
+        wait: WaitPolicy,
+    ) -> ApiResult<CommandResponse> {
 
         // Subscribe BEFORE enqueueing the command so fast synchronous completions cannot race.
         let mut live_rx = (wait.until == WaitUntil::Settled && waiter_kind.is_some())
@@ -1825,14 +1983,15 @@ impl LiveApiEngine {
                 }
                 ClientCommand::DriveSelf(PlayerDriveIntent::SnapFacing { heading })
             }
-            ApiCommand::SetSelection { .. }
+            ApiCommand::JumpTo { .. }
+            | ApiCommand::SetSelection { .. }
             | ApiCommand::UiPrint { .. }
             | ApiCommand::HudToast { .. }
             | ApiCommand::HudUpsertMarkers { .. }
             | ApiCommand::HudClearMarkers { .. }
             | ApiCommand::HudSetWaypoint { .. }
             | ApiCommand::HudPlayCue { .. } => {
-                unreachable!("UI/HUD hook commands handled before translate_command")
+                unreachable!("direct/UI/HUD commands handled before translate_command")
             }
         })
     }
@@ -1843,6 +2002,7 @@ enum SettlementMatcher {
     ItemUse,
     Appraisal { guid: Guid, facts_only: bool },
     Navigation,
+    Jump,
     VendorTrade,
     CombatMode { expected: &'static str },
     Inventory { item: Guid },
@@ -1957,6 +2117,11 @@ fn match_settlement(
             if correlation_id == Some(finished.correlation_id) =>
         {
             Some(CommandOutcome::Navigation(*finished))
+        }
+        (SettlementMatcher::Jump, ApiEvent::JumpFinished { finished })
+            if correlation_id.is_some() && finished.correlation_id == correlation_id =>
+        {
+            Some(CommandOutcome::Jump(*finished))
         }
         (SettlementMatcher::VendorTrade, ApiEvent::VendorTradeFinished { sequence, result })
             if correlation_id == Some(u64::from(*sequence)) =>
@@ -2074,6 +2239,29 @@ fn local_player_pose(
     world
         .local_player_runtime_pose()
         .or_else(|| world.player_entity().map(|e| e.position))
+}
+
+async fn run_targeted_jump_solver(
+    snapshot: holtburger_core::TargetedJumpSnapshot,
+    target: TargetedJumpTarget,
+    power: Option<JumpExtent>,
+) -> ApiResult<holtburger_core::TargetedJumpSolution> {
+    tokio::task::spawn_blocking(move || {
+        let cancelled = AtomicBool::new(false);
+        solve_targeted_jump(&snapshot, target, power, &cancelled)
+    })
+    .await
+    .map_err(|e| ApiError::runtime(format!("targeted jump solver panicked: {e}")))?
+    .map_err(|e| ApiError::runtime(format!("targeted jump solver failed: {e}")))
+}
+
+fn validate_optional_jump_power(power: Option<f32>) -> ApiResult<Option<JumpExtent>> {
+    match power {
+        Some(value) => JumpExtent::new(value).map(Some).map_err(|_| {
+            ApiError::invalid("jump-to `power` must be finite and within [0.001, 1.0]")
+        }),
+        None => Ok(None),
+    }
 }
 
 fn spatial_anchor_and_cell(landblock_id: Guid) -> (Guid, Option<Guid>) {

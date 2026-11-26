@@ -150,6 +150,9 @@ impl ClientRuntime {
                 .store(paused, std::sync::atomic::Ordering::Release);
             if paused {
                 self.movement.enqueue_cancel_automation();
+                self.retire_automation_targeted_jump(
+                    crate::client::targeted_jump::TargetedJumpOutcome::Cancelled,
+                );
                 if let Err(error) = self.cancel_automation_combat().await {
                     reply(
                         ack,
@@ -195,6 +198,11 @@ impl ClientRuntime {
                 );
                 return Ok(());
             }
+            if origin == ControlSource::User {
+                self.retire_automation_targeted_jump(
+                    crate::client::targeted_jump::TargetedJumpOutcome::InterruptedByUser,
+                );
+            }
             let correlation_id = self.mint_correlation_id();
             self.movement
                 .enqueue_start_local_steering(correlation_id, origin, request);
@@ -214,10 +222,75 @@ impl ClientRuntime {
                 LocalNavigationOutcome::Cancelled
             };
             self.movement.enqueue_stop_local_steering(outcome);
+            self.retire_targeted_jump(if origin == ControlSource::User {
+                crate::client::targeted_jump::TargetedJumpOutcome::InterruptedByUser
+            } else {
+                crate::client::targeted_jump::TargetedJumpOutcome::Cancelled
+            });
             reply(
                 ack,
                 CommandAdmission::Accepted {
                     correlation_id: None,
+                },
+            );
+            return Ok(());
+        }
+
+        if let ClientCommand::JumpTo(request) = cmd {
+            if self.portal.activation.is_some() || !matches!(self.conn.state, ClientState::InWorld)
+            {
+                reply(
+                    ack,
+                    CommandAdmission::Rejected(CommandRejection::NotInWorld),
+                );
+                return Ok(());
+            }
+            if let Some(expected_gen) = request.expected_world_generation
+                && expected_gen != self.conn.world_generation
+            {
+                reply(
+                    ack,
+                    CommandAdmission::Rejected(CommandRejection::Validation {
+                        message: "world generation changed before jump could launch".into(),
+                    }),
+                );
+                return Ok(());
+            }
+            if self.targeted_jump.is_in_flight() || self.player_is_airborne() {
+                reply(
+                    ack,
+                    CommandAdmission::Rejected(CommandRejection::Validation {
+                        message: "cannot start a jump while already airborne".into(),
+                    }),
+                );
+                return Ok(());
+            }
+            let target_view = request.target.into_view();
+            self.movement.enqueue_stop_local_steering(
+                if origin == ControlSource::User {
+                    LocalNavigationOutcome::InterruptedByUser
+                } else {
+                    LocalNavigationOutcome::Superseded
+                },
+            );
+            let correlation_id = self.mint_correlation_id();
+            let current_position = self.local_player_pose();
+            if let Some(superseded) = self.targeted_jump.enqueue(
+                correlation_id,
+                origin,
+                request.power,
+                target_view,
+                request.target.position(),
+                current_position,
+            ) {
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::TargetedJumpFinished(superseded));
+            }
+            reply(
+                ack,
+                CommandAdmission::Accepted {
+                    correlation_id: Some(correlation_id),
                 },
             );
             return Ok(());
@@ -477,10 +550,16 @@ impl ClientRuntime {
             | ClientCommand::UninviteFromParty { .. } => self.handle_party_command(cmd).await,
 
             ClientCommand::DriveSelf(_) | ClientCommand::ControlCharacter(_) => {
+                if origin == ControlSource::User {
+                    self.retire_automation_targeted_jump(
+                        crate::client::targeted_jump::TargetedJumpOutcome::InterruptedByUser,
+                    );
+                }
                 self.handle_movement_command(origin, cmd).await
             }
             ClientCommand::StartLocalSteering(_)
             | ClientCommand::StopLocalSteering
+            | ClientCommand::JumpTo(_)
             | ClientCommand::SetAutomationPaused(_) => {
                 unreachable!("handled in handle_command_envelope")
             }

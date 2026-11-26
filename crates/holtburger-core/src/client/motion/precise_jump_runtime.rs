@@ -234,6 +234,19 @@ pub(in crate::client) struct PreparedPreciseJumpCommit {
 }
 
 impl PreparedPreciseJumpCommit {
+    /// Constructs a camera-free commit for `ClientCommand::JumpTo`.
+    pub(in crate::client) fn from_targeted(
+        sequence: PreciseJumpActionSequence,
+        extent: JumpExtent,
+        target: PreciseJumpTargetView,
+    ) -> Self {
+        Self {
+            sequence,
+            extent,
+            target,
+        }
+    }
+
     pub(in crate::client) fn sequence(&self) -> PreciseJumpActionSequence {
         self.sequence
     }

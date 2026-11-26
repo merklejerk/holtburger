@@ -10,7 +10,7 @@ use thiserror::Error;
 /// Retail's minimum resolved jump height.
 const RETAIL_MINIMUM_JUMP_HEIGHT: f32 = 0.35;
 /// Twice retail gravity magnitude, used to convert jump height to launch speed.
-const RETAIL_DOUBLE_GRAVITY: f32 = 19.6;
+pub(in crate::client) const RETAIL_DOUBLE_GRAVITY: f32 = 19.6;
 
 /// Selects the retail charge duration from an already resolved motion style.
 pub const fn retail_jump_charge_profile(motion_style: u32) -> JumpChargeProfile {

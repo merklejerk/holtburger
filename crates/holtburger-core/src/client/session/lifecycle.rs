@@ -19,6 +19,58 @@ impl ClientRuntime {
         }
     }
 
+    /// Returns the local player's current physical body pose when present.
+    pub(in crate::client) fn local_player_pose(&self) -> Option<holtburger_common::position::WorldPosition> {
+        self.world
+            .scene
+            .body(holtburger_world::SpatialBodyId::LocalPlayer(
+                self.world.player.guid,
+            ))
+            .map(|body| body.pose)
+    }
+
+    /// Whether the local player's physical body is currently airborne.
+    pub(in crate::client) fn player_is_airborne(&self) -> bool {
+        let player_guid = self.world.player.guid;
+        if player_guid.is_null() {
+            return false;
+        }
+        self.world
+            .scene
+            .body(holtburger_world::SpatialBodyId::LocalPlayer(player_guid))
+            .is_some_and(|body| body.contact == holtburger_world::ContactState::Airborne)
+    }
+
+    /// Retires any queued or in-flight targeted jump and emits its terminal event.
+    pub(in crate::client) fn retire_targeted_jump(
+        &mut self,
+        outcome: crate::client::targeted_jump::TargetedJumpOutcome,
+    ) {
+        let position = self.local_player_pose();
+        if let Some(finished) = self.targeted_jump.retire(outcome, position) {
+            let _ = self
+                .client_view_event_tx
+                .send(crate::client::types::ClientViewEvent::TargetedJumpFinished(
+                    finished,
+                ));
+        }
+    }
+
+    /// Retires any queued or in-flight targeted jump owned by `ControlSource::Automation`.
+    pub(in crate::client) fn retire_automation_targeted_jump(
+        &mut self,
+        outcome: crate::client::targeted_jump::TargetedJumpOutcome,
+    ) {
+        let position = self.local_player_pose();
+        if let Some(finished) = self.targeted_jump.retire_automation(outcome, position) {
+            let _ = self
+                .client_view_event_tx
+                .send(crate::client::types::ClientViewEvent::TargetedJumpFinished(
+                    finished,
+                ));
+        }
+    }
+
     /// Retire transient portal-epoch state across world activation and character retirement.
     pub(in crate::client) fn retire_portal_epoch(&mut self, reason: &str) {
         self.retire_portal_epoch_with_nav_outcome(
@@ -39,6 +91,13 @@ impl ClientRuntime {
         self.portal = crate::client::PortalResyncState::default();
         self.movement.retire_movement_epoch(nav_outcome);
         self.flush_navigation_completions();
+        let jump_outcome = match nav_outcome {
+            crate::client::steering::LocalNavigationOutcome::Teleported => {
+                crate::client::targeted_jump::TargetedJumpOutcome::Teleported
+            }
+            _ => crate::client::targeted_jump::TargetedJumpOutcome::Cancelled,
+        };
+        self.retire_targeted_jump(jump_outcome);
         self.reset_camera();
         if let Some(coordinator) = self.collision_coordinator.as_mut() {
             coordinator.invalidate();
@@ -160,6 +219,7 @@ impl ClientRuntime {
         self.movement
             .retire_movement_epoch(crate::client::steering::LocalNavigationOutcome::Cancelled);
         self.flush_navigation_completions();
+        self.retire_targeted_jump(crate::client::targeted_jump::TargetedJumpOutcome::Cancelled);
         self.reset_camera();
         self.portal.activation = None;
         self.set_state(ClientState::LoggingOut);

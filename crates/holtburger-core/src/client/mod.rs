@@ -76,6 +76,7 @@ pub use motion::precise_jump_prediction;
 use motion::precise_jump_runtime;
 use motion::rest_posture;
 pub use motion::steering;
+pub use motion::targeted_jump;
 use session::builder;
 use session::commands;
 pub use session::connection;
@@ -361,6 +362,8 @@ pub struct ClientRuntime {
     camera: ClientCameraService,
     /// Replaceable speculative aim work and ordered precise-jump commit state.
     precise_jump: precise_jump_runtime::PreciseJumpRuntime,
+    /// Camera-free targeted jump queue and in-flight landing settlement tracker.
+    targeted_jump: targeted_jump::TargetedJumpTracker,
     character_selection: CharacterSelectionState,
     turbine_chat: TurbineChatState,
     pub(in crate::client) conn: ConnectionSessionState,

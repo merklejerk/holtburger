@@ -323,6 +323,7 @@ impl ClientRuntimeBuilder {
             requires_external_world_reveal: self.requires_external_world_reveal,
             camera: crate::client::camera_service::ClientCameraService::new()?,
             precise_jump: crate::client::precise_jump_runtime::PreciseJumpRuntime::new(),
+            targeted_jump: Default::default(),
             character_selection: CharacterSelectionState::new(self.account_name),
             turbine_chat: TurbineChatState::default(),
             conn: ConnectionSessionState::with_state(ClientState::Connected),
@@ -393,6 +394,7 @@ pub(crate) fn build_test_client(initial_state: ClientState) -> ClientRuntime {
         camera: crate::client::camera_service::ClientCameraService::new()
             .expect("test camera profile"),
         precise_jump: crate::client::precise_jump_runtime::PreciseJumpRuntime::new(),
+        targeted_jump: Default::default(),
         character_selection: CharacterSelectionState::new("test".to_string()),
         turbine_chat: TurbineChatState::default(),
         conn: ConnectionSessionState::with_state(initial_state),

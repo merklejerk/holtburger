@@ -1463,3 +1463,174 @@ async fn tui_without_hud_hook_rejects_waypoint_and_cue_with_unsupported_capabili
 
     drop(server);
 }
+
+#[tokio::test]
+async fn jump_to_preview_command_settlement_and_self_airborne() {
+    let fixture = spawn_synthetic_client();
+    let server = start_server(
+        fixture.handle.clone(),
+        LiveApiServerConfig {
+            client_kind: "h3d",
+            port: 0,
+            catalogs: None,
+            ui: None,
+            hud: None,
+            discovery_dir: None,
+            write_discovery: false,
+        },
+    )
+    .await
+    .unwrap();
+
+    let http = reqwest::Client::new();
+    let base = server.base_url();
+
+    // 1. OpenAPI advertises JumpToPreview, jump-to, and SelfView.airborne.
+    let openapi: Value = http
+        .get(format!("{base}/v1/openapi.json"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let schemas = &openapi["components"]["schemas"];
+    assert!(schemas["JumpToPreview"].is_object());
+    assert!(schemas["JumpToPreview"]["properties"]["apexZ"].is_object());
+    assert!(schemas["SelfView"]["properties"]["airborne"].is_object());
+    assert!(schemas["SelfView"]["properties"]["jump"].is_object());
+
+    // 2. GET /v1/self exposes `airborne: false` and `jump: null`.
+    let self_view: Value = http
+        .get(format!("{base}/v1/self"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(self_view["airborne"], false);
+    assert!(self_view["jump"].is_null());
+
+    // 3. POST /v1/preview jump-to validates bad inputs before hitting collision scene.
+    let bad_power = http
+        .post(format!("{base}/v1/preview"))
+        .json(&serde_json::json!({
+            "kind": "jump-to",
+            "target": {
+                "landblockId": 0xda55_0001u32,
+                "coords": { "x": 10.0, "y": 20.0, "z": 0.0 },
+                "rotation": { "w": 1.0, "x": 0.0, "y": 0.0, "z": 0.0 }
+            },
+            "power": 1.5
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(bad_power.status(), StatusCode::BAD_REQUEST);
+
+    let bad_landblock = http
+        .post(format!("{base}/v1/preview"))
+        .json(&serde_json::json!({
+            "kind": "jump-to",
+            "target": {
+                "landblockId": 0u32,
+                "coords": { "x": 10.0, "y": 20.0, "z": 0.0 },
+                "rotation": { "w": 1.0, "x": 0.0, "y": 0.0, "z": 0.0 }
+            }
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(bad_landblock.status(), StatusCode::BAD_REQUEST);
+
+    // Without a resident collision scene, preview returns 501 unsupported_capability (world.spatial).
+    let no_collision = http
+        .post(format!("{base}/v1/preview"))
+        .json(&serde_json::json!({
+            "kind": "jump-to",
+            "target": {
+                "landblockId": 0xda55_0001u32,
+                "coords": { "x": 10.0, "y": 20.0, "z": 0.0 },
+                "rotation": { "w": 1.0, "x": 0.0, "y": 0.0, "z": 0.0 }
+            }
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(no_collision.status(), StatusCode::NOT_IMPLEMENTED);
+
+    // 4. POST /v1/command jump-to with explicit power and wait.until = "settled"
+    // runs through the real ClientRuntime physics tick, which rejects cleanly because the
+    // synthetic fixture has no physical player body, and settles via TargetedJumpFinished.
+    let target_pos = holtburger_common::position::WorldPosition::from_outdoor_frame(
+        holtburger_common::Guid(0xda55_0001),
+        holtburger_common::Vector3::new(114.0, 96.0, 0.0),
+        holtburger_common::Quaternion::identity(),
+    );
+
+    let cmd_res = http
+        .post(format!("{base}/v1/command"))
+        .json(&serde_json::json!({
+            "command": {
+                "kind": "jump-to",
+                "target": target_pos,
+                "power": 0.8
+            },
+            "wait": { "until": "settled", "timeoutMs": 2000 }
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(cmd_res.status(), StatusCode::OK);
+    let body: Value = cmd_res.json().await.unwrap();
+    assert_eq!(body["accepted"], true);
+    assert_eq!(body["settled"], true);
+    assert_eq!(body["timedOut"], false);
+    assert_eq!(body["outcome"]["outcome"], "rejected-launch");
+    assert_eq!(body["outcome"]["matchedTarget"], false);
+
+    // 5. Verify `jump-finished` was recorded on the `movement` topic.
+    let events: Value = http
+        .get(format!("{base}/v1/events?topics=movement"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let jump_events: Vec<&Value> = events["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|e| e["event"]["kind"] == "jump-finished")
+        .collect();
+    assert_eq!(jump_events.len(), 1);
+    assert_eq!(
+        jump_events[0]["event"]["finished"]["outcome"],
+        "rejected-launch"
+    );
+
+    // 6. Auto-solve jump-to (power omitted) while automation is paused returns 409 automation_paused.
+    fixture
+        .handle
+        .send_user(holtburger_core::ClientCommand::SetAutomationPaused(true))
+        .unwrap();
+    let _ = fixture.handle.read(|_| ()).await;
+    let paused_res = http
+        .post(format!("{base}/v1/command"))
+        .json(&serde_json::json!({
+            "command": {
+                "kind": "jump-to",
+                "target": target_pos
+            }
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(paused_res.status(), StatusCode::CONFLICT);
+    let paused_body: Value = paused_res.json().await.unwrap();
+    assert_eq!(paused_body["code"], "automation_paused");
+
+    drop(server);
+}

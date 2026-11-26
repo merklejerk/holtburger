@@ -79,6 +79,11 @@ pub use client::steering::{
     LocalNavigationFinished, LocalNavigationOutcome, LocalSteeringGoal, LocalSteeringRequest,
     LocalSteeringStatus, MAX_STEERING_TARGET_DISTANCE_M,
 };
+pub use client::targeted_jump::{
+    TARGETED_JUMP_MAXIMUM_TICKS, TargetedJumpFinished, TargetedJumpOutcome, TargetedJumpRequest,
+    TargetedJumpSnapshot, TargetedJumpSolution, TargetedJumpStatus, TargetedJumpTarget,
+    TargetedJumpUnreachableReason, solve_targeted_jump,
+};
 pub use client::types::{
     ActionResultReason, ActionResultSource, ActiveCharacterConfirmation, BusyOperationKind,
     BusyOperationResult, ClientApplicationSnapshot, ClientAttackProfile,

@@ -231,6 +231,9 @@ impl ClientRuntime {
             }
             WorldEvent::ForcedReposition { guid, .. } if *guid == self.world.player.guid => {
                 self.movement.clear_server_controlled_motion();
+                self.retire_targeted_jump(
+                    crate::client::targeted_jump::TargetedJumpOutcome::Teleported,
+                );
                 self.reset_camera();
                 if let Some(coordinator) = self.collision_coordinator.as_mut() {
                     coordinator.invalidate();
@@ -507,7 +510,7 @@ impl ClientRuntime {
         profile.checkpoint(PhysicsTickPhase::DynamicEntityDiff);
 
         if active_world {
-            let prepared_precise_jump = match self
+            let interactive_precise_jump = match self
                 .precise_jump
                 .prepare_queued_commit(self.conn.world_generation, self.camera.identity())
             {
@@ -520,6 +523,20 @@ impl ClientRuntime {
                 }
                 None => None,
             };
+            let (prepared_precise_jump, is_targeted_jump) =
+                if let Some(interactive) = interactive_precise_jump {
+                    let current_pos = self.local_player_pose();
+                    if let Some(preempted) = self.targeted_jump.preempt_queued(current_pos) {
+                        let _ = self
+                            .client_view_event_tx
+                            .send(ClientViewEvent::TargetedJumpFinished(preempted));
+                    }
+                    (Some(interactive), false)
+                } else if let Some(targeted) = self.targeted_jump.prepare_queued_commit() {
+                    (Some(targeted), true)
+                } else {
+                    (None, false)
+                };
             let simulation_tick = crate::client::simulation::tick_with_precise_jump(
                 now,
                 dt_duration,
@@ -597,10 +614,31 @@ impl ClientRuntime {
                     .client_view_event_tx
                     .send(ClientViewEvent::CharacterMotionFeedback(feedback));
             }
-            if let Some(feedback) = simulation_tick.precise_jump_feedback {
-                let _ = self
-                    .client_view_event_tx
-                    .send(ClientViewEvent::PreciseJumpTransactionFeedback(feedback));
+            let player_body = self
+                .world
+                .scene
+                .body(SpatialBodyId::LocalPlayer(self.world.player.guid));
+            if is_targeted_jump {
+                if let Some(finished) = self.targeted_jump.on_launch_result(
+                    simulation_tick.precise_jump_feedback,
+                    player_body,
+                    now,
+                ) {
+                    let _ = self
+                        .client_view_event_tx
+                        .send(ClientViewEvent::TargetedJumpFinished(finished));
+                }
+            } else {
+                if let Some(feedback) = simulation_tick.precise_jump_feedback {
+                    let _ = self
+                        .client_view_event_tx
+                        .send(ClientViewEvent::PreciseJumpTransactionFeedback(feedback));
+                }
+                if let Some(finished) = self.targeted_jump.on_post_tick(player_body, now) {
+                    let _ = self
+                        .client_view_event_tx
+                        .send(ClientViewEvent::TargetedJumpFinished(finished));
+                }
             }
         }
 

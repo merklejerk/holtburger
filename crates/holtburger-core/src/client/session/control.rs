@@ -221,6 +221,61 @@ impl<'a> ClientReadContext<'a> {
         self.runtime.movement.local_steering_status()
     }
 
+    /// Whether the local player's physical body is currently airborne.
+    pub fn player_is_airborne(&self) -> bool {
+        self.runtime.player_is_airborne()
+    }
+
+    /// Active queued or in-flight targeted jump status, if any.
+    pub fn active_targeted_jump(&self) -> Option<crate::client::targeted_jump::TargetedJumpStatus> {
+        self.runtime.targeted_jump.status()
+    }
+
+    /// Captures an immutable collision + player-body snapshot for off-tick targeted-jump solving.
+    pub fn targeted_jump_snapshot(
+        &self,
+    ) -> std::result::Result<crate::client::targeted_jump::TargetedJumpSnapshot, CommandRejection>
+    {
+        let Some(collision_scene) = self.collision_scene() else {
+            return Err(CommandRejection::Failed {
+                message: "world collision scene is unavailable".into(),
+            });
+        };
+        let world = &self.runtime.world;
+        let player_guid = world.player.guid;
+        if player_guid.is_null() {
+            return Err(CommandRejection::NotInWorld);
+        }
+        let Some(body) = world
+            .scene
+            .body(holtburger_world::SpatialBodyId::LocalPlayer(player_guid))
+            .cloned()
+        else {
+            return Err(CommandRejection::Failed {
+                message: "local player physical body is unavailable".into(),
+            });
+        };
+        let Ok(capabilities) = world.resolve_self_jump_capabilities() else {
+            return Err(CommandRejection::Failed {
+                message: "local player jump capabilities are unavailable".into(),
+            });
+        };
+        let entity_collision =
+            world
+                .scene
+                .entity_collision_snapshot()
+                .map_err(|error| CommandRejection::Failed {
+                    message: format!("failed to capture entity collision snapshot: {error}"),
+                })?;
+        Ok(crate::client::targeted_jump::TargetedJumpSnapshot {
+            world_generation: self.world_generation(),
+            body,
+            capabilities,
+            collision_scene,
+            entity_collision,
+        })
+    }
+
     pub fn automation_paused(&self) -> bool {
         self.runtime.is_automation_paused()
     }

@@ -2,19 +2,16 @@ Holtburger beta includes the 3D client and the terminal client (CLI).
 
 ## In this beta
 
-- **3D client, Live API:** Bots and external tools can now place entity callouts that follow moving targets in the world.
-- **3D client, Live API:** Waypoints set by the Live API are synced with the in-game waypoint.
-- **3D client, Live API:** Tools can play short attention chimes. They follow your audio settings and mute state, and they are rate-limited.
-- **3D client, HUD:** Live API toasts, markers and the HUD badge now give clearer feedback.
-- **3D client, chat:** Entity mentions in chat display more consistently.
-- **Terminal client, Live API:** Logging out is more reliable while the Live API is active.
+- **3D client and terminal client:** Connecting to servers that resolve to both IPv6 and IPv4, such as `localhost`, now uses the IPv4 address instead of failing to connect.
+- **3D client and terminal client:** Logging out or disconnecting no longer hangs while tools like the Live API are still attached.
 
 ## Known issues
 
+- Servers that resolve only to IPv6 addresses cannot be connected to, because the game connection supports IPv4 only. Use an IPv4 address or hostname.
 - Windows and macOS may warn when opening the app because it is not signed by a verified publisher. The installation guides below explain how to open it.
 - Borderless window sizing is best effort and may not match the requested size exactly.
 - The runtime console keeps only the most recent messages, and its history is cleared when the client restarts.
 
 ## Updating
 
-Quit Holtburger before installing an update. Beta and nightly builds share the same installation, so installing either replaces the other. No action is required for this release. The Live API stays off unless you enable it.
+Quit Holtburger before installing an update. Beta and nightly builds share the same installation, so installing either replaces the other. No action is required for this release.

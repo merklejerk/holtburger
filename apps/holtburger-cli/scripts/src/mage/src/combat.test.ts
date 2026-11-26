@@ -143,14 +143,16 @@ function makeSpell(overrides: Partial<MageSpellRecord>): MageSpellRecord {
 }
 
 function sampleSelf(vitals: Pick<SelfView, "stamina" | "mana">): SelfView {
+	const position = {
+		landblockId: 1 as Guid,
+		coords: { x: 0, y: 0, z: 0 },
+		rotation: { w: 1, x: 0, y: 0, z: 0 },
+	};
 	const self: SelfView = {
 		guid: 1 as Guid,
 		name: "Self",
-		position: {
-			landblockId: 1 as Guid,
-			coords: { x: 0, y: 0, z: 0 },
-			rotation: { w: 1, x: 0, y: 0, z: 0 },
-		},
+		position,
+		authoritativePosition: position,
 		outdoorCoords: null,
 		heading: 0,
 		health: 100,
@@ -189,6 +191,11 @@ function samplePartyMember(
 }
 
 function sampleEntity(): EntitySummary {
+	const position = {
+		landblockId: 1 as Guid,
+		coords: { x: 0, y: 0, z: 0 },
+		rotation: { w: 1, x: 0, y: 0, z: 0 },
+	};
 	return {
 		guid: 999 as Guid,
 		name: "Entity",
@@ -197,11 +204,8 @@ function sampleEntity(): EntitySummary {
 		isHostile: false,
 		isDead: false,
 		isVendor: false,
-		position: {
-			landblockId: 1 as Guid,
-			coords: { x: 0, y: 0, z: 0 },
-			rotation: { w: 1, x: 0, y: 0, z: 0 },
-		},
+		position,
+		bodyPosition: position,
 		distanceToSelf: 0,
 		healthFraction: 1,
 		stackCount: null,

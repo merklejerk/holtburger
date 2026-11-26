@@ -694,6 +694,7 @@ function beginActiveSpellcast(
 }
 
 function sampleDetail(overrides: Partial<EntitySummary>): EntityDetail {
+	const position = makePosition(0, 0, 0);
 	return {
 		summary: {
 			guid: 1 as Guid,
@@ -703,7 +704,8 @@ function sampleDetail(overrides: Partial<EntitySummary>): EntityDetail {
 			isHostile: false,
 			isDead: false,
 			isVendor: false,
-			position: makePosition(0, 0, 0),
+			position,
+			bodyPosition: position,
 			distanceToSelf: 0,
 			healthFraction: 1,
 			stackCount: null,
@@ -720,10 +722,12 @@ function sampleDetail(overrides: Partial<EntitySummary>): EntityDetail {
 }
 
 function sampleSelfEntity(): SelfView {
+	const position = makePosition(0, 0, 0);
 	return {
 		guid: 1 as Guid,
 		name: "Self",
-		position: makePosition(0, 0, 0),
+		position,
+		authoritativePosition: position,
 		outdoorCoords: null,
 		heading: 0,
 		health: 100,

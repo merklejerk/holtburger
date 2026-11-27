@@ -19,7 +19,7 @@ members = [
 default-members = ["apps/holtburger-cli"]
 
 [workspace.package]
-version = "0.18.1"
+version = "0.18.2"
 edition = "2024"
 authors = ["holtburger contributors"]
 license = "AGPL-3.0"

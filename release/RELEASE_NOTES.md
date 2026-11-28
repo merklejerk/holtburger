@@ -2,11 +2,8 @@ Holtburger beta includes the 3D client and the terminal client (CLI).
 
 ## In this beta
 
-- **3D client:** Window size and borderless mode now keep the game viewport at the size you chose, including after leaving fullscreen or changing the window border.
-- **3D client:** Characters and NPCs appear and stream in more smoothly, with fewer stutters.
-- **3D client and terminal client:** Other players and creatures move more accurately, and sometimes-stuck remote characters now recover.
-- **3D client:** Item grid scroll arrows no longer sit under item icons.
-- **3D client and terminal client:** Live API tools can preview and run jumps to a target position, and entity data now includes each entity's simulated body position.
+- **3D client (Linux/Wayland):** The window no longer grows by a pixel on each focus change, so window size stays stable across sessions.
+- **3D client:** Resizing the window or changing its size preset now keeps it inside the monitor's usable area.
 
 ## Known issues
 

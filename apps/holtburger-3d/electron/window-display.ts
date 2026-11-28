@@ -11,12 +11,66 @@ import type { ClientWindowSettings } from "../src/app/desktop/window-settings-co
 /** Bound viewport convergence steps when a compositor clamps or oscillates. */
 const MAX_VIEWPORT_RESIZE_ATTEMPTS = 4;
 
+/** Screen-space rectangle in DIPs, matching Electron's Rectangle shape without importing Electron. */
+export interface WindowBounds {
+	readonly x: number;
+	readonly y: number;
+	readonly width: number;
+	readonly height: number;
+}
+
+/** Platform-specific placement policy for keeping resized windows inside the monitor work area. */
+export type WindowPlacementPolicy =
+	| { readonly kind: "wayland-replace" }
+	| {
+			readonly kind: "reposition";
+			readonly workAreaFor: (bounds: WindowBounds) => WindowBounds;
+	  };
+
+function clampAxis(
+	position: number,
+	size: number,
+	areaStart: number,
+	areaSize: number,
+): number {
+	if (size >= areaSize) return areaStart;
+	return Math.min(Math.max(position, areaStart), areaStart + areaSize - size);
+}
+
+/** Shift outer bounds minimally so the window fits inside the display work area. */
+export function clampWindowToWorkArea(
+	bounds: WindowBounds,
+	workArea: WindowBounds,
+): { readonly x: number; readonly y: number } {
+	return {
+		x: clampAxis(bounds.x, bounds.width, workArea.x, workArea.width),
+		y: clampAxis(bounds.y, bounds.height, workArea.y, workArea.height),
+	};
+}
+
+/** Preserve the previous window midpoint after resizing, then clamp into the display work area. */
+export function centerWindowInWorkArea(
+	before: WindowBounds,
+	after: WindowBounds,
+	workArea: WindowBounds,
+): { readonly x: number; readonly y: number } {
+	const centered = {
+		x: Math.round(before.x + (before.width - after.width) / 2),
+		y: Math.round(before.y + (before.height - after.height) / 2),
+		width: after.width,
+		height: after.height,
+	};
+	return clampWindowToWorkArea(centered, workArea);
+}
+
 /** Native operations needed by the app-local display owner, also usable by focused probes. */
 type DisplayWindow = Pick<
 	BaseWindow,
 	| "getBounds"
 	| "getContentSize"
 	| "setContentSize"
+	| "setPosition"
+	| "isVisible"
 	| "isFullScreen"
 	| "isMaximized"
 	| "setFullScreen"
@@ -37,6 +91,11 @@ interface DisplaySurface {
 	getViewportSize(): Promise<WindowContentSize>;
 	isBorderless(): boolean;
 	setBorderless(enabled: boolean): void;
+	replaceSurface(options: {
+		readonly borderless: boolean;
+		readonly contentSize: WindowContentSize;
+		readonly minimumSize: WindowContentSize;
+	}): void;
 	on(event: string, listener: () => void): unknown;
 	removeListener(event: string, listener: () => void): unknown;
 }
@@ -232,6 +291,7 @@ export class WindowDisplay {
 	}
 	readonly #publish: (snapshot: WindowDisplaySnapshot) => void;
 	readonly #report: (error: unknown) => void;
+	readonly #workAreaFor: ((bounds: WindowBounds) => WindowBounds) | undefined;
 	#windowed: WindowedGeometry;
 	#freeResize: boolean;
 	/** Last measured page viewport, shared by controls and confirmation text. */
@@ -250,6 +310,7 @@ export class WindowDisplay {
 		saved: ClientWindowSettings,
 		publish: (snapshot: WindowDisplaySnapshot) => void,
 		report: (error: unknown) => void,
+		workAreaFor?: (bounds: WindowBounds) => WindowBounds,
 	) {
 		this.#surface = surface;
 		const [width, height] = surface.native.getContentSize();
@@ -259,6 +320,7 @@ export class WindowDisplay {
 			maximized: saved.maximized,
 		};
 		this.#report = report;
+		this.#workAreaFor = workAreaFor;
 		this.#freeResize = saved.freeResize;
 		this.#publish = publish;
 		for (const event of this.#events) surface.on(event, this.refresh);
@@ -534,10 +596,17 @@ export class WindowDisplay {
 		)
 			throw new Error("Window size is not a supported preset.");
 		await withUnlockedResize(this.#surface, this.#freeResize, async () => {
+			const before = window.getBounds();
 			this.#windowed = await restoreWindowedGeometry(this.#surface, {
 				contentSize: request.size,
 				maximized: false,
 			});
+			if (this.#workAreaFor !== undefined && !window.isMaximized()) {
+				const after = window.getBounds();
+				const clamped = clampWindowToWorkArea(after, this.#workAreaFor(before));
+				if (clamped.x !== after.x || clamped.y !== after.y)
+					window.setPosition(clamped.x, clamped.y);
+			}
 		});
 	}
 	/** Drain requests before another document restores its own native geometry. */
@@ -582,9 +651,27 @@ export async function restoreWindowGeometry(
 	surface: DisplaySurface,
 	value: ClientWindowSettings,
 	role: "picker" | "client",
+	placement?: WindowPlacementPolicy,
 ): Promise<ClientWindowSettings> {
 	await changeNativeFullscreen(surface.native, false);
-	surface.setBorderless(role === "client" && value.borderless);
+	const targetBorderless = role === "client" && value.borderless;
+	const minimumSize =
+		role === "picker"
+			? APP_WINDOW_TUNING.launcher.minimumSize
+			: APP_WINDOW_TUNING.game.minimumContentSize;
+	const beforeBounds = surface.native.getBounds();
+	if (placement?.kind === "wayland-replace" && surface.native.isVisible()) {
+		surface.replaceSurface({
+			borderless: targetBorderless,
+			contentSize: value.contentSize,
+			minimumSize,
+		});
+		// Let the newly mapped Wayland surface settle its initial configure burst before
+		// measuring decoration insets or page viewport dimensions.
+		await nativeTransition(surface.native, null, () => {});
+	} else {
+		surface.setBorderless(targetBorderless);
+	}
 	const freeResize = role === "picker" || value.freeResize;
 	const accepted = await withUnlockedResize(surface, freeResize, async () => {
 		const window = surface.native;
@@ -598,6 +685,20 @@ export async function restoreWindowGeometry(
 			contentSize: value.contentSize,
 			maximized: value.maximized && freeResize,
 		});
+		if (
+			placement?.kind === "reposition" &&
+			!restored.maximized &&
+			!(role === "client" && value.fullscreen)
+		) {
+			const afterBounds = window.getBounds();
+			const target = centerWindowInWorkArea(
+				beforeBounds,
+				afterBounds,
+				placement.workAreaFor(beforeBounds),
+			);
+			if (target.x !== afterBounds.x || target.y !== afterBounds.y)
+				window.setPosition(target.x, target.y);
+		}
 		if (role === "client")
 			await changeNativeFullscreen(window, value.fullscreen);
 		return restored;

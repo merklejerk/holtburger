@@ -12,6 +12,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
 	AppSettingsStore,
 	applyAppGraphicsSettings,
+	applyPlatformStartupSwitches,
 	appSettingsRequireRestart,
 	graphicsBackendOptions,
 } from "./app-settings";
@@ -37,6 +38,7 @@ function commandLine(initial: readonly [string, string][]) {
 	return {
 		switches,
 		hasSwitch: (name: string) => switches.has(name),
+		getSwitchValue: (name: string) => switches.get(name) ?? "",
 		appendSwitch: (name: string, value = "") => {
 			switches.set(name, value);
 		},
@@ -249,5 +251,46 @@ describe("app settings persistence", () => {
 			"broken settings",
 		);
 		expect(store.diagnostic).toBeNull();
+	});
+});
+
+describe("platform startup switches", () => {
+	it("disables WaylandFractionalScaleV1 on Linux while preserving existing disable-features", () => {
+		const fresh = commandLine([]);
+		applyPlatformStartupSwitches("linux", fresh);
+		expect(fresh.switches.get("disable-features")).toBe(
+			"WaylandFractionalScaleV1",
+		);
+
+		const merged = commandLine([["disable-features", "FooFeature,BarFeature"]]);
+		applyPlatformStartupSwitches("linux", merged);
+		expect(merged.switches.get("disable-features")).toBe(
+			"FooFeature,BarFeature,WaylandFractionalScaleV1",
+		);
+
+		// Calling again does not duplicate the feature token.
+		applyPlatformStartupSwitches("linux", merged);
+		expect(merged.switches.get("disable-features")).toBe(
+			"FooFeature,BarFeature,WaylandFractionalScaleV1",
+		);
+	});
+
+	it("respects an explicit enable-features override for WaylandFractionalScaleV1 on Linux", () => {
+		const enabled = commandLine([
+			["enable-features", "OtherFeature,WaylandFractionalScaleV1:param/1"],
+		]);
+		applyPlatformStartupSwitches("linux", enabled);
+		expect(enabled.switches.has("disable-features")).toBe(false);
+	});
+
+	it("requests high-performance GPU on Windows and leaves macOS untouched", () => {
+		const win = commandLine([]);
+		applyPlatformStartupSwitches("win32", win);
+		expect(win.switches.has("force-high-performance-gpu")).toBe(true);
+		expect(win.switches.has("disable-features")).toBe(false);
+
+		const mac = commandLine([]);
+		applyPlatformStartupSwitches("darwin", mac);
+		expect(mac.switches.size).toBe(0);
 	});
 });

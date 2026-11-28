@@ -73,28 +73,74 @@ export class ApplicationWindow extends EventEmitter {
 	/** Callers own fullscreen, maximization, geometry restoration, and resize policy. */
 	setBorderless(enabled: boolean): void {
 		if (enabled === this.#borderless) return;
+		const [width, height] = this.#native.getContentSize();
+		this.#replaceNative({
+			borderless: enabled,
+			contentSize: { width, height },
+			preservePosition: true,
+		});
+	}
+
+	/**
+	 * Swap the native frame at a new content size without carrying over the prior position.
+	 * On Wayland, compositors ignore client-side moves on mapped windows, so mapping a fresh
+	 * toplevel at the target size lets the compositor place it inside the monitor work area.
+	 */
+	replaceSurface(options: {
+		readonly borderless: boolean;
+		readonly contentSize: WindowContentSize;
+		readonly minimumSize: WindowContentSize;
+	}): void {
+		this.#replaceNative({
+			borderless: options.borderless,
+			contentSize: options.contentSize,
+			minimumSize: options.minimumSize,
+			preservePosition: false,
+		});
+	}
+
+	#replaceNative(options: {
+		readonly borderless: boolean;
+		readonly contentSize: WindowContentSize;
+		readonly minimumSize?: WindowContentSize;
+		readonly preservePosition: boolean;
+	}): void {
 		if (this.#native.isFullScreen())
 			throw new Error("Leave fullscreen before changing window borders.");
 		const previous = this.#native;
+		const { width, height } = options.contentSize;
 		// Preserve the viewport directly. Normal and current outer bounds can disagree;
 		// subtracting them feeds that discrepancy into each successive replacement.
-		const [width, height] = previous.getContentSize();
-		const { x, y } = previous.getBounds();
+		const position = options.preservePosition
+			? (() => {
+					const { x, y } = previous.getBounds();
+					return { x, y };
+				})()
+			: {};
+		const minimum =
+			options.minimumSize === undefined
+				? {}
+				: {
+						minWidth: options.minimumSize.width,
+						minHeight: options.minimumSize.height,
+					};
 		const replacement = new BaseWindow({
 			...this.#options,
-			frame: !enabled,
-			x,
-			y,
+			...minimum,
+			frame: !options.borderless,
+			...position,
 			width,
 			height,
 			useContentSize: true,
 			show: false,
 		});
+		// Reapply while hidden so Electron/Wayland does not negotiate down to minWidth.
+		replacement.setContentSize(width, height);
 		const visible = previous.isVisible();
 		for (const detach of this.#detach.splice(0)) detach();
 		previous.contentView.removeChildView(this.#view);
 		this.#native = replacement;
-		this.#borderless = enabled;
+		this.#borderless = options.borderless;
 		this.#attach();
 		// Create the replacement before destroying its predecessor so this is never app shutdown.
 		previous.destroy();

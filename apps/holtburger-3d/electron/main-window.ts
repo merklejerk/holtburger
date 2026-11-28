@@ -48,6 +48,15 @@ export interface CreateWindowContext {
 	) => void;
 }
 
+export function isWaylandSession(): boolean {
+	const ozonePlatform = app.commandLine.getSwitchValue("ozone-platform");
+	return (
+		process.platform === "linux" &&
+		ozonePlatform !== "x11" &&
+		(ozonePlatform === "wayland" || process.env.XDG_SESSION_TYPE === "wayland")
+	);
+}
+
 export function createWindow(
 	entry: {
 		title: string;
@@ -57,11 +66,7 @@ export function createWindow(
 	context: CreateWindowContext,
 ): ApplicationWindow {
 	const developmentOrigin = electronDevOrigin(entry.mode);
-	const ozonePlatform = app.commandLine.getSwitchValue("ozone-platform");
-	const restoreWaylandPointer =
-		process.platform === "linux" &&
-		ozonePlatform !== "x11" &&
-		(ozonePlatform === "wayland" || process.env.XDG_SESSION_TYPE === "wayland");
+	const restoreWaylandPointer = isWaylandSession();
 	const window = new ApplicationWindow({
 		title: entry.title,
 		icon: context.applicationIconPath,

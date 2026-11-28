@@ -1,4 +1,4 @@
-import { app, clipboard, ipcMain } from "electron";
+import { app, clipboard, ipcMain, screen } from "electron";
 import { join, resolve } from "node:path";
 import { z } from "zod";
 import {
@@ -76,6 +76,7 @@ import {
 	chooseContentFolder,
 	chooseWeenieCatalogFile,
 	initialGeometry,
+	isWaylandSession,
 	reportTransitionFailure,
 	reportWindowSettingsFailure,
 	stopWindowGeometry,
@@ -85,6 +86,8 @@ import { ServerDirectoryCatalog } from "./server-directory.js";
 import {
 	WindowDisplay,
 	restoreWindowGeometry as restoreGeometry,
+	type WindowBounds,
+	type WindowPlacementPolicy,
 } from "./window-display.js";
 import { observeWindowGeometry } from "./window-geometry.js";
 
@@ -336,6 +339,12 @@ export async function installClientSession(
 			? entry.contentPath
 			: null;
 
+	const workAreaFor = (bounds: WindowBounds): WindowBounds =>
+		screen.getDisplayMatching(bounds).workArea;
+	const windowPlacement: WindowPlacementPolicy = isWaylandSession()
+		? { kind: "wayland-replace" }
+		: { kind: "reposition", workAreaFor };
+
 	const showPicker = async (
 		diagnostic: string | null,
 		view: LauncherViewMode = "client",
@@ -350,6 +359,7 @@ export async function installClientSession(
 			window,
 			launcher.window,
 			"picker",
+			windowPlacement,
 		);
 		let launcherContentSize = restoredLauncher.contentSize;
 		geometrySlot.stopGeometry = observeWindowGeometry(
@@ -487,6 +497,7 @@ export async function installClientSession(
 					window,
 					savedWindow,
 					"client",
+					windowPlacement,
 				);
 				const controls = new WindowDisplay(
 					window,
@@ -496,6 +507,7 @@ export async function installClientSession(
 							window.webContents.send("window:display-state", snapshot);
 					},
 					(error) => reportWindowSettingsFailure(window, error),
+					windowPlacement.kind === "reposition" ? workAreaFor : undefined,
 				);
 				geometrySlot.windowDisplay = controls;
 				geometrySlot.stopGeometry = observeWindowGeometry(

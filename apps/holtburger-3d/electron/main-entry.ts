@@ -8,6 +8,7 @@ import {
 	extractEntryArguments,
 	extractElectronLaunchArguments,
 } from "../scripts/entry-paths.mjs";
+import { applyPlatformStartupSwitches } from "./app-settings.js";
 import {
 	electronApplicationArguments,
 	isClientOnlyArgument,
@@ -120,11 +121,7 @@ export function entryArguments(): {
 		if (!app.commandLine.hasSwitch(name))
 			app.commandLine.appendSwitch(name, value);
 	}
-	if (process.platform === "win32") {
-		// Request the faster adapter on hybrid laptops; OS and driver selection may prevail.
-		if (!app.commandLine.hasSwitch("force-high-performance-gpu"))
-			app.commandLine.appendSwitch("force-high-performance-gpu");
-	}
+	applyPlatformStartupSwitches(process.platform, app.commandLine);
 	return {
 		path: buildEntryPath(entry.path, launch.args),
 		title: entry.title + (release ? " (release host)" : ""),

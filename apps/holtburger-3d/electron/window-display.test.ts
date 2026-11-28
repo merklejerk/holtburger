@@ -2,7 +2,9 @@ import { EventEmitter } from "node:events";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	WindowDisplay,
+	centerWindowInWorkArea,
 	changeNativeFullscreen,
+	clampWindowToWorkArea,
 	restoreWindowGeometry,
 } from "./window-display";
 import { APP_WINDOW_TUNING } from "../src/app/desktop/app-tuning";
@@ -41,12 +43,38 @@ class NativeWindow extends EventEmitter {
 	}
 	bounds = { x: 0, y: 0, width: 1440, height: 930 };
 	normalBounds = this.bounds;
+	visible = true;
 	fullscreen = false;
 	maximized = false;
 	resizable = true;
 	maximizable = true;
+	replaceSurface = vi.fn(
+		(options: {
+			readonly borderless: boolean;
+			readonly contentSize: { readonly width: number; readonly height: number };
+			readonly minimumSize: { readonly width: number; readonly height: number };
+		}) => {
+			this.borderless = options.borderless;
+			this.bounds = {
+				x: 0,
+				y: 0,
+				width: options.contentSize.width,
+				height:
+					options.contentSize.height +
+					(options.borderless ? 0 : NATIVE_DECORATION_HEIGHT),
+			};
+			this.normalBounds = this.bounds;
+		},
+	);
 	getBounds() {
 		return this.bounds;
+	}
+	setPosition(x: number, y: number) {
+		this.bounds = { ...this.bounds, x, y };
+		this.normalBounds = this.bounds;
+	}
+	isVisible() {
+		return this.visible;
 	}
 	getContentSize(): [number, number] {
 		return [
@@ -841,6 +869,112 @@ describe("display confirmation", () => {
 		await owner.change({ kind: "fullscreen", enabled: false });
 		await owner.change({ kind: "size", size: owner.snapshot().contentSize });
 		expect(owner.snapshot().confirmation).toBeNull();
+		await owner.close();
+	});
+});
+
+describe("window placement", () => {
+	it("centers and clamps a larger game window inside the monitor work area on role transition", async () => {
+		const workArea = { x: 0, y: 28, width: 1920, height: 1172 };
+		// Centered launcher -> centered larger client window.
+		expect(
+			centerWindowInWorkArea(
+				{ x: 510, y: 275, width: 900, height: 680 },
+				{ x: 510, y: 275, width: 1600, height: 930 },
+				workArea,
+			),
+		).toEqual({ x: 160, y: 150 });
+		// Bottom-right launcher -> clamped so right and bottom edges stay inside workArea.
+		const window = new NativeWindow();
+		window.bounds = { x: 1000, y: 500, width: 900, height: 680 };
+		window.normalBounds = window.bounds;
+		const saved = clientWindowSettingsSchema.parse({
+			contentSize: { width: 1600, height: 900 },
+			maximized: false,
+		});
+		await restoreWindowGeometry(window, saved, "client", {
+			kind: "reposition",
+			workAreaFor: () => workArea,
+		});
+		expect(window.getBounds()).toEqual({
+			x: 320,
+			y: 270,
+			width: 1600,
+			height: 930,
+		});
+		// Oversized window pins top-left to workArea origin so the title bar stays reachable.
+		expect(
+			clampWindowToWorkArea(
+				{ x: 400, y: 300, width: 2560, height: 1440 },
+				workArea,
+			),
+		).toEqual({ x: 0, y: 28 });
+	});
+
+	it("replaces a visible Wayland surface on role transition and skips replacement while hidden", async () => {
+		const saved = clientWindowSettingsSchema.parse({
+			contentSize: { width: 1600, height: 900 },
+			maximized: false,
+			borderless: true,
+		});
+		const visibleWindow = new NativeWindow();
+		visibleWindow.visible = true;
+		await restoreWindowGeometry(visibleWindow, saved, "client", {
+			kind: "wayland-replace",
+		});
+		expect(visibleWindow.replaceSurface).toHaveBeenCalledWith({
+			borderless: true,
+			contentSize: { width: 1600, height: 900 },
+			minimumSize: APP_WINDOW_TUNING.game.minimumContentSize,
+		});
+
+		const pickerSaved = clientWindowSettingsSchema.parse({
+			contentSize: APP_WINDOW_TUNING.launcher.initialContentSize,
+			maximized: false,
+		});
+		await restoreWindowGeometry(visibleWindow, pickerSaved, "picker", {
+			kind: "wayland-replace",
+		});
+		expect(visibleWindow.replaceSurface).toHaveBeenLastCalledWith({
+			borderless: false,
+			contentSize: APP_WINDOW_TUNING.launcher.initialContentSize,
+			minimumSize: APP_WINDOW_TUNING.launcher.minimumSize,
+		});
+
+		const hiddenWindow = new NativeWindow();
+		hiddenWindow.visible = false;
+		await restoreWindowGeometry(hiddenWindow, saved, "client", {
+			kind: "wayland-replace",
+		});
+		expect(hiddenWindow.replaceSurface).not.toHaveBeenCalled();
+	});
+
+	it("clamps an in-game preset resize into the work area when the larger size would clip", async () => {
+		const workArea = { x: 0, y: 0, width: 1920, height: 1080 };
+		const window = new NativeWindow();
+		window.bounds = { x: 600, y: 200, width: 1280, height: 830 };
+		window.normalBounds = window.bounds;
+		const saved = clientWindowSettingsSchema.parse({
+			contentSize: { width: 1280, height: 800 },
+			maximized: false,
+		});
+		const owner = new WindowDisplay(
+			window,
+			saved,
+			vi.fn(),
+			vi.fn(),
+			() => workArea,
+		);
+		await changeAndKeep(owner, {
+			kind: "size",
+			size: { width: 1600, height: 900 },
+		});
+		expect(window.getBounds()).toEqual({
+			x: 320,
+			y: 150,
+			width: 1600,
+			height: 930,
+		});
 		await owner.close();
 	});
 });

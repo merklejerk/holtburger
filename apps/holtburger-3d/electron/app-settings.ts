@@ -63,16 +63,60 @@ export function graphicsBackendOptions(
 }
 
 /** Small Electron command-line surface also used to test preference/CLI precedence. */
-interface GraphicsCommandLine {
+interface StartupCommandLine {
 	hasSwitch(name: string): boolean;
+	getSwitchValue(name: string): string;
 	appendSwitch(name: string, value?: string): void;
 	removeSwitch(name: string): void;
+}
+
+const WAYLAND_FRACTIONAL_SCALE_FEATURE = "WaylandFractionalScaleV1";
+
+function hasFeatureFlag(value: string, feature: string): boolean {
+	return value
+		.split(",")
+		.some((entry) => entry.trim().split(/[:<]/, 1)[0] === feature);
+}
+
+/**
+ * Apply platform-specific Chromium startup switches after CLI launch flags are registered.
+ * On Linux Wayland with a non-1.0 desktop text scale, Chromium's WaylandFractionalScaleV1
+ * ui_scale round-trip grows the window and viewport by +1px on every focus/blur configure
+ * event, compounding into persisted window geometry across sessions.
+ */
+export function applyPlatformStartupSwitches(
+	platform: NodeJS.Platform,
+	commandLine: StartupCommandLine,
+): void {
+	if (platform === "win32") {
+		// Request the faster adapter on hybrid laptops; OS and driver selection may prevail.
+		if (!commandLine.hasSwitch("force-high-performance-gpu"))
+			commandLine.appendSwitch("force-high-performance-gpu");
+		return;
+	}
+	if (platform !== "linux") return;
+	if (
+		hasFeatureFlag(
+			commandLine.getSwitchValue("enable-features"),
+			WAYLAND_FRACTIONAL_SCALE_FEATURE,
+		)
+	)
+		return;
+	const existing = commandLine.getSwitchValue("disable-features");
+	if (hasFeatureFlag(existing, WAYLAND_FRACTIONAL_SCALE_FEATURE)) return;
+	const next =
+		existing.trim().length === 0
+			? WAYLAND_FRACTIONAL_SCALE_FEATURE
+			: `${existing},${WAYLAND_FRACTIONAL_SCALE_FEATURE}`;
+	if (commandLine.hasSwitch("disable-features"))
+		commandLine.removeSwitch("disable-features");
+	commandLine.appendSwitch("disable-features", next);
 }
 
 /** Configure synchronously before ready; explicit diagnostic launch arguments win. */
 export function applyAppGraphicsSettings(
 	settings: AppSettings,
-	commandLine: GraphicsCommandLine,
+	commandLine: StartupCommandLine,
 ): readonly string[] {
 	const names = [
 		"use-angle",

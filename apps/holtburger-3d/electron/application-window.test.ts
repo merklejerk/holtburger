@@ -10,17 +10,42 @@ vi.mock("electron", () => ({
 			removeChildView: vi.fn(),
 		};
 		readonly size: [number, number];
+		readonly x: number | undefined;
+		readonly y: number | undefined;
+		readonly minWidth: number | undefined;
+		readonly minHeight: number | undefined;
 		visible: boolean;
-		constructor(options: { width: number; height: number; show?: boolean }) {
+		constructor(options: {
+			width: number;
+			height: number;
+			x?: number;
+			y?: number;
+			minWidth?: number;
+			minHeight?: number;
+			show?: boolean;
+		}) {
 			super();
 			this.size = [options.width, options.height];
+			this.x = options.x;
+			this.y = options.y;
+			this.minWidth = options.minWidth;
+			this.minHeight = options.minHeight;
 			this.visible = options.show !== false;
 		}
 		getContentSize() {
 			return this.size;
 		}
+		setContentSize(width: number, height: number) {
+			this.size[0] = width;
+			this.size[1] = height;
+		}
 		getBounds() {
-			return { x: 0, y: 0, width: this.size[0], height: this.size[1] };
+			return {
+				x: this.x ?? 0,
+				y: this.y ?? 0,
+				width: this.size[0],
+				height: this.size[1],
+			};
 		}
 		isFullScreen() {
 			return false;
@@ -75,6 +100,34 @@ describe("application window ownership", () => {
 		expect(resized).toHaveBeenCalledOnce();
 		window.native.destroy();
 		expect(contents.close).toHaveBeenCalledOnce();
+	});
+
+	it("replaces the native surface at a new size and minimum without carrying over prior coordinates", () => {
+		const window = createWindow();
+		const previous = window.native;
+		const target = APP_WINDOW_TUNING.launcher.initialContentSize;
+		const minimum = APP_WINDOW_TUNING.launcher.minimumSize;
+		window.replaceSurface({
+			borderless: false,
+			contentSize: target,
+			minimumSize: minimum,
+		});
+		expect(window.native).not.toBe(previous);
+		expect(window.native.getContentSize()).toEqual([
+			target.width,
+			target.height,
+		]);
+		const replaced = window.native as unknown as {
+			x?: number;
+			y?: number;
+			minWidth?: number;
+			minHeight?: number;
+		};
+		expect(replaced.x).toBeUndefined();
+		expect(replaced.y).toBeUndefined();
+		expect(replaced.minWidth).toBe(minimum.width);
+		expect(replaced.minHeight).toBe(minimum.height);
+		window.native.destroy();
 	});
 
 	it("clears the viewport deadline after a successful page measurement", async () => {
